@@ -1,0 +1,7 @@
+node_modules/
+build/
+*.node
+.npm
+.node_gyp
+*.log
+.DS_Store
