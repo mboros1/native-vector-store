@@ -4,6 +4,9 @@
 #include <filesystem>
 #include <cmath>
 #include <cctype>
+#include <vector>
+#include <mutex>
+#include <omp.h>
 
 class VectorStoreWrapper : public Napi::ObjectWrap<VectorStoreWrapper> {
     std::unique_ptr<VectorStore> store_;
@@ -41,7 +44,8 @@ public:
             }
         }
         
-        // Process files sequentially for safety
+        // Process files in parallel using OpenMP
+        #pragma omp parallel for schedule(dynamic)
         for (size_t i = 0; i < json_files.size(); ++i) {
             // Load file using error code approach
             simdjson::padded_string json;
@@ -59,7 +63,7 @@ public:
             
             bool is_array = (json_start && *json_start == '[');
             
-            // Parse with fresh parser each time to avoid issues
+            // Each thread needs its own parser (parsers are not thread-safe)
             simdjson::ondemand::parser doc_parser;
             simdjson::ondemand::document doc;
             error = doc_parser.iterate(json).get(doc);
