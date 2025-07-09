@@ -12,6 +12,8 @@ build:
 test: build
 	npm test
 	node test/loader_test.js
+	node test/create_benchmark_data.js
+	node test/benchmark_parallel.js
 	cd src && make && ./test_vector_store ../test
 
 # Clean build artifacts
