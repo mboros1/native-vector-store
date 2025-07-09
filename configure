@@ -1,21 +1,24 @@
 #!/bin/bash
 # Configure script for native-vector-store
+# This script prepares the build environment
+
+set -e
 
 echo "Configuring native-vector-store..."
 
 # Check for required tools
 check_command() {
     if ! command -v $1 &> /dev/null; then
-        echo "Error: $1 is required but not found in PATH"
+        echo "Error: $1 is required but not found"
         exit 1
     fi
 }
 
-# Check basic requirements
+echo "Checking for required tools..."
 check_command node
 check_command npm
 check_command make
-check_command g++ || check_command clang++
+check_command g++
 
 # Check Node.js version
 NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
@@ -24,68 +27,24 @@ if [ "$NODE_VERSION" -lt 14 ]; then
     exit 1
 fi
 
-# Check for C++ compiler
-if command -v g++ &> /dev/null; then
-    CXX=g++
-elif command -v clang++ &> /dev/null; then
-    CXX=clang++
-else
-    echo "Error: No C++ compiler found (g++ or clang++)"
-    exit 1
-fi
+echo "✓ Node.js $(node -v)"
+echo "✓ npm $(npm -v)"
 
-echo "Found C++ compiler: $CXX"
-
-# Check for OpenMP support
-echo "Checking for OpenMP support..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
-    if ! brew list libomp &> /dev/null; then
-        echo "Warning: libomp not found. Install with: brew install libomp"
-    else
-        echo "OpenMP support found (libomp)"
-    fi
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Linux
-    if ! ldconfig -p | grep -q gomp; then
-        echo "Warning: OpenMP not found. Install with: sudo apt-get install libomp-dev"
-    else
-        echo "OpenMP support found (libgomp)"
-    fi
-fi
-
-# Check for simdjson
-echo "Checking for simdjson..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    if ! brew list simdjson &> /dev/null; then
-        echo "Warning: simdjson not found. Install with: brew install simdjson"
-    else
-        echo "simdjson found"
-    fi
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    if ! ldconfig -p | grep -q simdjson; then
-        echo "Warning: simdjson not found. Install with: sudo apt-get install libsimdjson-dev"
-    else
-        echo "simdjson found"
-    fi
-fi
+# Install npm dependencies
+echo "Installing npm dependencies..."
+npm install
 
 # Create build directory if it doesn't exist
 mkdir -p build
 
 # Generate config status
-cat > build/config.status << EOF
+cat > config.status << 'EOF'
 #!/bin/bash
 # Configuration status for native-vector-store
-CXX=$CXX
-NODE_VERSION=$NODE_VERSION
-OSTYPE=$OSTYPE
+echo "native-vector-store is configured and ready to build"
+echo "Run 'make' to build the project"
 EOF
+chmod +x config.status
 
-chmod +x build/config.status
-
-echo ""
 echo "Configuration complete!"
 echo "Run 'make' to build the project"
-echo "Run 'make test' to run tests"
-echo "Run 'make help' for more options"
