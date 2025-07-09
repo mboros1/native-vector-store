@@ -2,6 +2,8 @@
 #include "vector_store.h"
 #include <dirent.h>
 #include <filesystem>
+#include <cmath>
+#include <cctype>
 
 class VectorStoreWrapper : public Napi::ObjectWrap<VectorStoreWrapper> {
     std::unique_ptr<VectorStore> store_;
@@ -30,7 +32,6 @@ public:
     void LoadDir(const Napi::CallbackInfo& info) {
         std::string path = info[0].As<Napi::String>();
         
-        simdjson::ondemand::parser parser;
         std::vector<std::filesystem::path> json_files;
         
         // Collect all JSON files
@@ -41,34 +42,58 @@ public:
         }
         
         // Process files sequentially for safety
-        simdjson::ondemand::parser file_parser;
         for (size_t i = 0; i < json_files.size(); ++i) {
-            try {
-                auto json = simdjson::padded_string::load(json_files[i].string()).value_unsafe();
-                auto json_doc = file_parser.iterate(json).value_unsafe();
-                
-                // Check first character to determine if it's an array
-                const char* json_start = json.data();
-                while (json_start && *json_start && std::isspace(*json_start)) {
-                    json_start++;
+            // Load file - using error code approach for -fno-exceptions
+            auto json_load = simdjson::padded_string::load(json_files[i].string());
+            if (json_load.error() != simdjson::SUCCESS) {
+                fprintf(stderr, "Error loading %s\n", json_files[i].c_str());
+                continue;
+            }
+            
+            simdjson::padded_string json = std::move(json_load).value_unsafe();
+            
+            // Check first character to determine if it's an array
+            const char* json_start = json.data();
+            while (json_start && *json_start && std::isspace(*json_start)) {
+                json_start++;
+            }
+            
+            bool is_array = (json_start && *json_start == '[');
+            
+            // Parse with fresh parser each time to avoid issues
+            simdjson::ondemand::parser doc_parser;
+            auto doc_result = doc_parser.iterate(json);
+            
+            if (doc_result.error() != simdjson::SUCCESS) {
+                fprintf(stderr, "Error parsing %s\n", json_files[i].c_str());
+                continue;
+            }
+            
+            simdjson::ondemand::document doc = std::move(doc_result).value_unsafe();
+            
+            if (is_array) {
+                // Process as array
+                auto array_result = doc.get_array();
+                if (array_result.error() != simdjson::SUCCESS) {
+                    fprintf(stderr, "Error getting array from %s\n", json_files[i].c_str());
+                    continue;
                 }
                 
-                if (json_start && *json_start == '[') {
-                    // It's an array
-                    auto doc_array = json_doc.get_array().value_unsafe();
-                    
-                    for (auto doc_element : doc_array) {
-                        auto doc = doc_element.get_object().value_unsafe();
-                        store_->add_document(doc);
+                simdjson::ondemand::array arr = std::move(array_result).value_unsafe();
+                for (auto doc_element : arr) {
+                    auto obj_result = doc_element.get_object();
+                    if (obj_result.error() == simdjson::SUCCESS) {
+                        simdjson::ondemand::object obj = std::move(obj_result).value_unsafe();
+                        store_->add_document(obj);
                     }
-                } else {
-                    // Single document
-                    store_->add_document(json_doc);
                 }
-            } catch (const std::exception& e) {
-                // Log error but continue processing
-                fprintf(stderr, "Error loading %s: %s\n", 
-                        json_files[i].c_str(), e.what());
+            } else {
+                // Process as single document object
+                auto obj_result = doc.get_object();
+                if (obj_result.error() == simdjson::SUCCESS) {
+                    simdjson::ondemand::object obj = std::move(obj_result).value_unsafe();
+                    store_->add_document(obj);
+                }
             }
         }
         
@@ -131,14 +156,7 @@ public:
             result.Set("id", std::string(entry.doc.id));
             result.Set("text", std::string(entry.doc.text));
             
-            // Parse metadata JSON
-            simdjson::ondemand::parser parser;
-            simdjson::padded_string padded(std::string(entry.doc.metadata_json));
-            auto metadata_doc = parser.iterate(padded).value_unsafe();
-            
-            Napi::Object metadata = Napi::Object::New(env);
-            // Would need to recursively convert JSON to JS object
-            // For now, return as string
+            // For now, return metadata as JSON string
             result.Set("metadata_json", std::string(entry.doc.metadata_json));
             
             output[i] = result;

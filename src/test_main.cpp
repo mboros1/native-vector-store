@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <vector>
 #include <simdjson.h>
+#include <cctype>
 
 void test_single_document() {
     std::cout << "=== Testing Single Document ===" << std::endl;

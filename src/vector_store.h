@@ -2,6 +2,7 @@
 #include <atomic>
 #include <memory>
 #include <cstring>
+#include <cmath>
 #include <vector>
 #include <string_view>
 #include <simdjson.h>
@@ -75,8 +76,13 @@ public:
         entries_.reserve(1'000'000);  // Pre-size to avoid realloc
     }
     
-    template<typename JsonDoc>
-    void add_document(JsonDoc& json_doc) {
+    // Overload for document type (used in test_main.cpp)
+    void add_document(simdjson::ondemand::document& json_doc) {
+        auto obj = json_doc.get_object().value_unsafe();
+        add_document(obj);
+    }
+    
+    void add_document(simdjson::ondemand::object& json_doc) {
         // Parse once
         auto id = json_doc["id"].get_string().value_unsafe();
         auto text = json_doc["text"].get_string().value_unsafe();
