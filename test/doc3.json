@@ -1,0 +1,11 @@
+[
+  {
+    "id": "doc3",
+    "text": "This is the third test document about natural language processing and embeddings.",
+    "metadata": {
+      "embedding": [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.1, 0.2],
+      "category": "NLP",
+      "timestamp": "2024-01-03T00:00:00Z"
+    }
+  }
+]

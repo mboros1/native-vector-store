@@ -1,0 +1,50 @@
+#!/bin/bash
+# Configure script for native-vector-store
+# This script prepares the build environment
+
+set -e
+
+echo "Configuring native-vector-store..."
+
+# Check for required tools
+check_command() {
+    if ! command -v $1 &> /dev/null; then
+        echo "Error: $1 is required but not found"
+        exit 1
+    fi
+}
+
+echo "Checking for required tools..."
+check_command node
+check_command npm
+check_command make
+check_command g++
+
+# Check Node.js version
+NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
+if [ "$NODE_VERSION" -lt 14 ]; then
+    echo "Error: Node.js version 14 or higher is required"
+    exit 1
+fi
+
+echo "✓ Node.js $(node -v)"
+echo "✓ npm $(npm -v)"
+
+# Install npm dependencies
+echo "Installing npm dependencies..."
+npm install
+
+# Create build directory if it doesn't exist
+mkdir -p build
+
+# Generate config status
+cat > config.status << 'EOF'
+#!/bin/bash
+# Configuration status for native-vector-store
+echo "native-vector-store is configured and ready to build"
+echo "Run 'make' to build the project"
+EOF
+chmod +x config.status
+
+echo "Configuration complete!"
+echo "Run 'make' to build the project"

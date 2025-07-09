@@ -1,0 +1,11 @@
+[
+  {
+    "id": "doc1",
+    "text": "This is the first test document about artificial intelligence and machine learning.",
+    "metadata": {
+      "embedding": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+      "category": "AI/ML",
+      "timestamp": "2024-01-01T00:00:00Z"
+    }
+  }
+]

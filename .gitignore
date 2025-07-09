@@ -1,0 +1,25 @@
+node_modules/
+build/
+*.node
+.npm
+.node_gyp
+*.log
+.DS_Store
+test/benchmark_data/
+
+# C++ build artifacts
+*.o
+src/test_vector_store
+src/test_main
+*.a
+*.so
+*.dylib
+*.dSYM/
+**/*.dSYM/
+
+out/
+out_embedded/
+
+# Environment variables
+.env
+.env.local
