@@ -45,6 +45,9 @@ $(TARGET): $(OBJECTS)
 clean:
 	rm -f $(OBJECTS) $(TARGET)
 
+# Force rebuild (useful for CI)
+rebuild: clean all
+
 run: $(TARGET)
 	./$(TARGET)
 

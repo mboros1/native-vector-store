@@ -6,3 +6,10 @@ build/
 *.log
 .DS_Store
 test/benchmark_data/
+
+# C++ build artifacts
+*.o
+src/test_vector_store
+*.a
+*.so
+*.dylib

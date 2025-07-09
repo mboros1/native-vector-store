@@ -14,7 +14,7 @@ test: build
 	node test/loader_test.js
 	node test/create_benchmark_data.js
 	node test/benchmark_parallel.js
-	cd src && make && ./test_vector_store ../test
+	cd src && make rebuild && ./test_vector_store ../test
 
 # Clean build artifacts
 clean:
