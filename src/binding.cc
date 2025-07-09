@@ -40,23 +40,35 @@ public:
             }
         }
         
-        // Process files in parallel
-        #pragma omp parallel
-        {
-            simdjson::ondemand::parser local_parser;
-            #pragma omp for schedule(dynamic)
-            for (size_t i = 0; i < json_files.size(); ++i) {
-                try {
-                    auto json = simdjson::padded_string::load(json_files[i].string()).value_unsafe();
-                    auto doc = local_parser.iterate(json).value_unsafe();
-                    
-                    #pragma omp critical
-                    store_->add_document(doc);
-                } catch (const std::exception& e) {
-                    // Log error but continue processing
-                    fprintf(stderr, "Error loading %s: %s\n", 
-                            json_files[i].c_str(), e.what());
+        // Process files sequentially for safety
+        simdjson::ondemand::parser file_parser;
+        for (size_t i = 0; i < json_files.size(); ++i) {
+            try {
+                auto json = simdjson::padded_string::load(json_files[i].string()).value_unsafe();
+                auto json_doc = file_parser.iterate(json).value_unsafe();
+                
+                // Check first character to determine if it's an array
+                const char* json_start = json.data();
+                while (json_start && *json_start && std::isspace(*json_start)) {
+                    json_start++;
                 }
+                
+                if (json_start && *json_start == '[') {
+                    // It's an array
+                    auto doc_array = json_doc.get_array().value_unsafe();
+                    
+                    for (auto doc_element : doc_array) {
+                        auto doc = doc_element.get_object().value_unsafe();
+                        store_->add_document(doc);
+                    }
+                } else {
+                    // Single document
+                    store_->add_document(json_doc);
+                }
+            } catch (const std::exception& e) {
+                // Log error but continue processing
+                fprintf(stderr, "Error loading %s: %s\n", 
+                        json_files[i].c_str(), e.what());
             }
         }
         

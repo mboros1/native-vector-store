@@ -75,7 +75,8 @@ public:
         entries_.reserve(1'000'000);  // Pre-size to avoid realloc
     }
     
-    void add_document(simdjson::ondemand::document& json_doc) {
+    template<typename JsonDoc>
+    void add_document(JsonDoc& json_doc) {
         // Parse once
         auto id = json_doc["id"].get_string().value_unsafe();
         auto text = json_doc["text"].get_string().value_unsafe();

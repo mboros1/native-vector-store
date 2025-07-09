@@ -34,21 +34,27 @@ async function processFile(file) {
   
   const docs = await readJson(file);
   
-  // Handle both single document and array of documents
+  // Always ensure we work with arrays (this is the expected format)
   const docArray = Array.isArray(docs) ? docs : [docs];
   
   let processed = 0;
+  let skipped = 0;
+  let added = 0;
   
   for (const doc of docArray) {
     const text = extractText(doc);
     if (!text || text.trim().length === 0) {
       console.log(`  Skipping document ${processed + 1} - no text content`);
+      skipped++;
+      processed++;
       continue;
     }
     
     // Check if already has embedding
     if (doc.metadata?.embedding) {
       console.log(`  Document ${processed + 1} already has embedding, skipping`);
+      skipped++;
+      processed++;
       continue;
     }
     
@@ -59,14 +65,16 @@ async function processFile(file) {
       }
       
       // Add embedding to metadata
-      doc.metadata.embedding = await embed(text);
+      const embedding = await embed(text);
+      doc.metadata.embedding = embedding;
       
       // Add document ID if it doesn't exist
       if (!doc.id) {
         doc.id = `${path.basename(file, '.json')}_${processed}`;
       }
       
-      console.log(`  Added embedding to document ${processed + 1} (${doc.id})`);
+      console.log(`  Added embedding to document ${processed + 1} (${doc.id}) - ${embedding.length} dimensions`);
+      added++;
       
       // Rate limiting to avoid hitting API limits
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -78,9 +86,9 @@ async function processFile(file) {
     processed++;
   }
   
-  // Save the updated documents
+  // Always save as array
   await writeJson(file, docArray);
-  console.log(`✅ Updated ${path.basename(file)} (${processed} documents processed)`);
+  console.log(`✅ Updated ${path.basename(file)} - ${processed} total, ${added} embeddings added, ${skipped} skipped`);
 }
 
 async function main() {
