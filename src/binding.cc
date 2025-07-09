@@ -85,7 +85,14 @@ public:
                     simdjson::ondemand::object obj;
                     error = doc_element.get_object().get(obj);
                     if (!error) {
-                        store_->add_document(obj);
+                        auto add_error = store_->add_document(obj);
+                        if (add_error) {
+                            fprintf(stderr, "Error adding document from %s: %s\n", 
+                                   json_files[i].c_str(), simdjson::error_message(add_error));
+                        }
+                    } else {
+                        fprintf(stderr, "Error getting object from array in %s: %s\n", 
+                               json_files[i].c_str(), simdjson::error_message(error));
                     }
                 }
             } else {
@@ -93,7 +100,14 @@ public:
                 simdjson::ondemand::object obj;
                 error = doc.get_object().get(obj);
                 if (!error) {
-                    store_->add_document(obj);
+                    auto add_error = store_->add_document(obj);
+                    if (add_error) {
+                        fprintf(stderr, "Error adding single document from %s: %s\n", 
+                               json_files[i].c_str(), simdjson::error_message(add_error));
+                    }
+                } else {
+                    fprintf(stderr, "Error getting object from %s: %s\n", 
+                           json_files[i].c_str(), simdjson::error_message(error));
                 }
             }
         }
@@ -124,8 +138,22 @@ public:
         // Parse and add
         simdjson::ondemand::parser parser;
         simdjson::padded_string padded(json_str);
-        auto json_doc = parser.iterate(padded).value_unsafe();
-        store_->add_document(json_doc);
+        simdjson::ondemand::document json_doc;
+        auto parse_error = parser.iterate(padded).get(json_doc);
+        if (parse_error) {
+            Napi::Error::New(info.Env(), 
+                std::string("JSON parse error: ") + simdjson::error_message(parse_error))
+                .ThrowAsJavaScriptException();
+            return;
+        }
+        
+        auto add_error = store_->add_document(json_doc);
+        if (add_error) {
+            Napi::Error::New(info.Env(), 
+                std::string("Document add error: ") + simdjson::error_message(add_error))
+                .ThrowAsJavaScriptException();
+            return;
+        }
     }
     
     Napi::Value Search(const Napi::CallbackInfo& info) {
@@ -142,8 +170,10 @@ public:
         if (normalize_query) {
             float sum = 0.0f;
             for (float v : query) sum += v * v;
-            float inv_norm = 1.0f / std::sqrt(sum);
-            for (float& v : query) v *= inv_norm;
+            if (sum > 1e-10f) {
+                float inv_norm = 1.0f / std::sqrt(sum);
+                for (float& v : query) v *= inv_norm;
+            }
         }
         
         auto results = store_->search(query.data(), k);

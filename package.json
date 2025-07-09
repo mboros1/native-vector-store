@@ -23,6 +23,7 @@
     "mcp"
   ],
   "dependencies": {
+    "dotenv": "^17.2.0",
     "node-addon-api": "^7.0.0",
     "openai": "^5.8.3"
   },

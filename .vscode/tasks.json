@@ -1,0 +1,60 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build C++ test",
+            "type": "shell",
+            "command": "clang++",
+            "args": [
+                "-std=c++17",
+                "-g",
+                "-O0",
+                "-fno-omit-frame-pointer",
+                "-DDEBUG",
+                "-glldb",
+                "-gdwarf-4",
+                "-Xpreprocessor",
+                "-fopenmp",
+                "-I/opt/homebrew/include",
+                "-I/opt/homebrew/opt/libomp/include",
+                "-L/opt/homebrew/lib",
+                "-L/opt/homebrew/opt/libomp/lib",
+                "-lsimdjson",
+                "-lomp",
+                "${workspaceFolder}/src/test_main.cpp",
+                "-o",
+                "${workspaceFolder}/src/test_main"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}/src"
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Build Node.js addon",
+            "type": "shell",
+            "command": "npm",
+            "args": ["run", "build"],
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Test Node.js addon",
+            "type": "shell",
+            "command": "npm",
+            "args": ["test"],
+            "group": "test",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "dependsOn": "Build Node.js addon"
+        }
+    ]
+}

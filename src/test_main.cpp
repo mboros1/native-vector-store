@@ -24,10 +24,19 @@ void test_single_document() {
     try {
         simdjson::ondemand::parser parser;
         simdjson::padded_string padded(json_str);
-        auto doc = parser.iterate(padded).value_unsafe();
+        simdjson::ondemand::document doc;
+        auto parse_error = parser.iterate(padded).get(doc);
+        if (parse_error) {
+            std::cerr << "JSON parse error: " << simdjson::error_message(parse_error) << std::endl;
+            return;
+        }
         
         std::cout << "Adding document..." << std::endl;
-        store.add_document(doc);
+        auto add_error = store.add_document(doc);
+        if (add_error) {
+            std::cerr << "Document add error: " << simdjson::error_message(add_error) << std::endl;
+            return;
+        }
         std::cout << "Document added successfully. Store size: " << store.size() << std::endl;
         
         // Test search
@@ -87,21 +96,48 @@ void test_load_directory(const std::string& path) {
                 if (json_start && *json_start == '[') {
                     // It's an array
                     std::cout << "  Detected array of documents" << std::endl;
-                    auto doc_array = json_doc.get_array().value_unsafe();
+                    simdjson::ondemand::array doc_array;
+                    auto array_error = json_doc.get_array().get(doc_array);
+                    if (array_error) {
+                        std::cerr << "  Error getting array: " << simdjson::error_message(array_error) << std::endl;
+                        continue;
+                    }
                     
                     size_t doc_count = 0;
+                    size_t error_count = 0;
                     for (auto doc_element : doc_array) {
-                        auto doc = doc_element.get_object().value_unsafe();
-                        store.add_document(doc);
-                        doc_count++;
+                        simdjson::ondemand::object doc_obj;
+                        auto obj_error = doc_element.get_object().get(doc_obj);
+                        if (obj_error) {
+                            std::cerr << "  Error getting object from array element: " << simdjson::error_message(obj_error) << std::endl;
+                            error_count++;
+                            continue;
+                        }
+                        
+                        auto add_error = store.add_document(doc_obj);
+                        if (add_error) {
+                            std::cerr << "  Error adding document: " << simdjson::error_message(add_error) << std::endl;
+                            error_count++;
+                        } else {
+                            doc_count++;
+                        }
                     }
-                    std::cout << "  Added " << doc_count << " documents. Current store size: " << store.size() << std::endl;
+                    std::cout << "  Added " << doc_count << " documents";
+                    if (error_count > 0) {
+                        std::cout << " (with " << error_count << " errors)";
+                    }
+                    std::cout << ". Current store size: " << store.size() << std::endl;
                 } else {
                     // Single document
                     std::cout << "  Detected single document" << std::endl;
                     std::cout << "  Adding to store..." << std::endl;
-                    store.add_document(json_doc);
-                    std::cout << "  Document added. Current store size: " << store.size() << std::endl;
+                    auto add_error = store.add_document(json_doc);
+                    if (add_error) {
+                        std::cerr << "  Error adding document: " << simdjson::error_message(add_error) << std::endl;
+                    } else {
+                        std::cout << "  Document added successfully";
+                    }
+                    std::cout << ". Current store size: " << store.size() << std::endl;
                 }
                 
             } catch (const std::exception& e) {

@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug C++ test",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/test_main",
+            "args": ["${workspaceFolder}/out_embedded"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/src",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "lldb",
+            "preLaunchTask": "Build C++ test"
+        },
+        {
+            "name": "Debug Node.js test",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/test/test_similarity_search.js",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build Node.js addon"
+        }
+    ]
+}

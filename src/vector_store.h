@@ -77,40 +77,68 @@ public:
     }
     
     // Overload for document type (used in test_main.cpp)
-    void add_document(simdjson::ondemand::document& json_doc) {
+    simdjson::error_code add_document(simdjson::ondemand::document& json_doc) {
         simdjson::ondemand::object obj;
         auto error = json_doc.get_object().get(obj);
-        if (!error) {
-            add_document(obj);
+        if (error) {
+            return error;
         }
+        return add_document(obj);
     }
     
-    void add_document(simdjson::ondemand::object& json_doc) {
+    simdjson::error_code add_document(simdjson::ondemand::object& json_doc) {
         // Parse with error handling
         std::string_view id, text;
         auto error = json_doc["id"].get_string().get(id);
-        if (error) return;
+        if (error) return error;
         
         error = json_doc["text"].get_string().get(text);
-        if (error) return;
-        
-        simdjson::ondemand::value metadata;
-        error = json_doc["metadata"].get(metadata);
-        if (error) return;
-        
-        simdjson::ondemand::array emb_array;
-        error = metadata["embedding"].get_array().get(emb_array);
-        if (error) return;
+        if (error) return error;
         
         // Calculate sizes
         size_t emb_size = dim_ * sizeof(float);
         size_t id_size = id.size() + 1;
         size_t text_size = text.size() + 1;
         
-        // Get raw JSON for metadata
+        // Allocate temporary buffer for embedding
+        std::vector<float> temp_embedding;
+        temp_embedding.reserve(dim_);
+        
+        // Process metadata and embedding first
+        simdjson::ondemand::object metadata;
+        error = json_doc["metadata"].get_object().get(metadata);
+        if (error) return error;
+        
+        simdjson::ondemand::array emb_array;
+        error = metadata["embedding"].get_array().get(emb_array);
+        if (error) return error;
+        
+        // Consume the array before touching anything else  
+        size_t i = 0;
+        for (auto value_result : emb_array) {
+            simdjson::ondemand::value v;
+            error = value_result.get(v);
+            if (error) return error;
+            double val;
+            error = v.get_double().get(val);
+            if (error) return error;
+            
+            if (i >= dim_) {
+                return simdjson::CAPACITY; // Too many embedding values
+            }
+            temp_embedding.push_back(float(val));
+            i++;
+        }
+        
+        // Verify we got the expected number of embedding values
+        if (i != dim_) {
+            return simdjson::INCORRECT_TYPE; // Wrong embedding dimension
+        }
+        
+        // Now it is safe to take the raw metadata JSON
         std::string_view raw_json;
-        error = json_doc.raw_json().get(raw_json);
-        if (error) return;
+        error = metadata.raw_json().get(raw_json);
+        if (error) return error;
         size_t meta_size = raw_json.size() + 1;
         
         // Single arena allocation
@@ -122,15 +150,8 @@ public:
         char* text_ptr = id_ptr + id_size;
         char* meta_ptr = text_ptr + text_size;
         
-        // Copy embedding for fast access
-        size_t i = 0;
-        for (auto v : emb_array) {
-            double val;
-            error = v.get_double().get(val);
-            if (!error) {
-                emb_ptr[i++] = float(val);
-            }
-        }
+        // Copy embedding from temporary buffer
+        std::memcpy(emb_ptr, temp_embedding.data(), emb_size);
         
         // Copy strings (adding null terminator)
         std::memcpy(id_ptr, id.data(), id.size());
@@ -152,6 +173,8 @@ public:
             },
             .embedding = emb_ptr
         };
+        
+        return simdjson::SUCCESS;
     }
     
     void normalize_all() {
