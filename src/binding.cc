@@ -43,14 +43,13 @@ public:
         
         // Process files sequentially for safety
         for (size_t i = 0; i < json_files.size(); ++i) {
-            // Load file - using error code approach for -fno-exceptions
-            auto json_load = simdjson::padded_string::load(json_files[i].string());
-            if (json_load.error() != simdjson::SUCCESS) {
-                fprintf(stderr, "Error loading %s\n", json_files[i].c_str());
+            // Load file using error code approach
+            simdjson::padded_string json;
+            auto error = simdjson::padded_string::load(json_files[i].string()).get(json);
+            if (error) {
+                fprintf(stderr, "Error loading %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
                 continue;
             }
-            
-            simdjson::padded_string json = std::move(json_load).value_unsafe();
             
             // Check first character to determine if it's an array
             const char* json_start = json.data();
@@ -62,36 +61,34 @@ public:
             
             // Parse with fresh parser each time to avoid issues
             simdjson::ondemand::parser doc_parser;
-            auto doc_result = doc_parser.iterate(json);
-            
-            if (doc_result.error() != simdjson::SUCCESS) {
-                fprintf(stderr, "Error parsing %s\n", json_files[i].c_str());
+            simdjson::ondemand::document doc;
+            error = doc_parser.iterate(json).get(doc);
+            if (error) {
+                fprintf(stderr, "Error parsing %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
                 continue;
             }
             
-            simdjson::ondemand::document doc = std::move(doc_result).value_unsafe();
-            
             if (is_array) {
                 // Process as array
-                auto array_result = doc.get_array();
-                if (array_result.error() != simdjson::SUCCESS) {
-                    fprintf(stderr, "Error getting array from %s\n", json_files[i].c_str());
+                simdjson::ondemand::array arr;
+                error = doc.get_array().get(arr);
+                if (error) {
+                    fprintf(stderr, "Error getting array from %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
                     continue;
                 }
                 
-                simdjson::ondemand::array arr = std::move(array_result).value_unsafe();
                 for (auto doc_element : arr) {
-                    auto obj_result = doc_element.get_object();
-                    if (obj_result.error() == simdjson::SUCCESS) {
-                        simdjson::ondemand::object obj = std::move(obj_result).value_unsafe();
+                    simdjson::ondemand::object obj;
+                    error = doc_element.get_object().get(obj);
+                    if (!error) {
                         store_->add_document(obj);
                     }
                 }
             } else {
                 // Process as single document object
-                auto obj_result = doc.get_object();
-                if (obj_result.error() == simdjson::SUCCESS) {
-                    simdjson::ondemand::object obj = std::move(obj_result).value_unsafe();
+                simdjson::ondemand::object obj;
+                error = doc.get_object().get(obj);
+                if (!error) {
                     store_->add_document(obj);
                 }
             }

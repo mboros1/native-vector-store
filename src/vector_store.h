@@ -78,16 +78,29 @@ public:
     
     // Overload for document type (used in test_main.cpp)
     void add_document(simdjson::ondemand::document& json_doc) {
-        auto obj = json_doc.get_object().value_unsafe();
-        add_document(obj);
+        simdjson::ondemand::object obj;
+        auto error = json_doc.get_object().get(obj);
+        if (!error) {
+            add_document(obj);
+        }
     }
     
     void add_document(simdjson::ondemand::object& json_doc) {
-        // Parse once
-        auto id = json_doc["id"].get_string().value_unsafe();
-        auto text = json_doc["text"].get_string().value_unsafe();
-        auto metadata = json_doc["metadata"];
-        auto emb_array = metadata["embedding"].get_array();
+        // Parse with error handling
+        std::string_view id, text;
+        auto error = json_doc["id"].get_string().get(id);
+        if (error) return;
+        
+        error = json_doc["text"].get_string().get(text);
+        if (error) return;
+        
+        simdjson::ondemand::value metadata;
+        error = json_doc["metadata"].get(metadata);
+        if (error) return;
+        
+        simdjson::ondemand::array emb_array;
+        error = metadata["embedding"].get_array().get(emb_array);
+        if (error) return;
         
         // Calculate sizes
         size_t emb_size = dim_ * sizeof(float);
@@ -95,7 +108,9 @@ public:
         size_t text_size = text.size() + 1;
         
         // Get raw JSON for metadata
-        std::string_view raw_json = json_doc.raw_json().value_unsafe();
+        std::string_view raw_json;
+        error = json_doc.raw_json().get(raw_json);
+        if (error) return;
         size_t meta_size = raw_json.size() + 1;
         
         // Single arena allocation
@@ -110,13 +125,22 @@ public:
         // Copy embedding for fast access
         size_t i = 0;
         for (auto v : emb_array) {
-            emb_ptr[i++] = float(v.get_double().value_unsafe());
+            double val;
+            error = v.get_double().get(val);
+            if (!error) {
+                emb_ptr[i++] = float(val);
+            }
         }
         
-        // Copy strings
-        std::memcpy(id_ptr, id.data(), id.size() + 1);
-        std::memcpy(text_ptr, text.data(), text.size() + 1);
-        std::memcpy(meta_ptr, raw_json.data(), raw_json.size() + 1);
+        // Copy strings (adding null terminator)
+        std::memcpy(id_ptr, id.data(), id.size());
+        id_ptr[id.size()] = '\0';
+        
+        std::memcpy(text_ptr, text.data(), text.size());
+        text_ptr[text.size()] = '\0';
+        
+        std::memcpy(meta_ptr, raw_json.data(), raw_json.size());
+        meta_ptr[raw_json.size()] = '\0';
         
         // Store entry with both document and embedding pointer
         size_t idx = count_.fetch_add(1);
