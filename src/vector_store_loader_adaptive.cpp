@@ -1,4 +1,5 @@
 #include "vector_store_loader.h"
+#include "mmap_file.h"
 #include "atomic_queue.h"
 #include <filesystem>
 #include <fstream>
@@ -6,79 +7,119 @@
 #include <vector>
 #include <atomic>
 #include <cctype>
+#include <memory>
 
-void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& path) {
+// Adaptive loader that chooses the best method per file
+void VectorStoreLoader::loadDirectoryAdaptive(VectorStore* store, const std::string& path) {
     // Cannot load if already finalized
     if (store->is_finalized()) {
         return;
     }
     
-    // Collect all JSON files
-    std::vector<std::filesystem::path> json_files;
+    // File size threshold (5MB - files larger than this use standard loading)
+    constexpr size_t SIZE_THRESHOLD = 5 * 1024 * 1024;
+    
+    // Collect and categorize files
+    struct FileInfo {
+        std::filesystem::path path;
+        size_t size;
+        bool use_mmap;
+    };
+    
+    std::vector<FileInfo> file_infos;
+    
     for (const auto& entry : std::filesystem::directory_iterator(path)) {
         if (entry.path().extension() == ".json") {
-            json_files.push_back(entry.path());
+            std::error_code ec;
+            auto size = std::filesystem::file_size(entry.path(), ec);
+            if (!ec) {
+                file_infos.push_back({
+                    entry.path(),
+                    size,
+                    size < SIZE_THRESHOLD  // Use mmap for smaller files
+                });
+            }
         }
     }
     
-    if (json_files.empty()) {
+    if (file_infos.empty()) {
         store->finalize();
         return;
     }
     
-    // Producer-consumer queue for file data
-    struct FileData {
+    // Producer-consumer queue for mixed file data
+    struct MixedFileData {
         std::string filename;
-        std::string content;
+        std::unique_ptr<MMapFile> mmap;  // For mmap files
+        std::string content;             // For standard loaded files
+        bool is_mmap;
     };
     
-    // Queue with bounded capacity (max ~100MB of buffered data)
-    atomic_queue::AtomicQueue<FileData*, 1024> queue;
+    // Queue with bounded capacity
+    atomic_queue::AtomicQueue<MixedFileData*, 1024> queue;
     
     // Atomic flags for coordination
     std::atomic<bool> producer_done{false};
     std::atomic<size_t> files_processed{0};
+    std::atomic<size_t> mmap_count{0};
+    std::atomic<size_t> standard_count{0};
     
-    // Producer thread - sequential file reading with optimizations
+    // Producer thread - loads files using appropriate method
     std::thread producer([&]() {
-        // Reusable buffer to avoid repeated allocations
+        // Reusable buffer for standard loading
         std::vector<char> buffer;
-        buffer.reserve(100 * 1024 * 1024); // Reserve 100MB capacity
+        buffer.reserve(10 * 1024 * 1024); // Reserve 10MB
         
-        for (const auto& filepath : json_files) {
-            // Get file size without opening (one syscall)
-            std::error_code ec;
-            auto size = std::filesystem::file_size(filepath, ec);
-            if (ec) {
-                fprintf(stderr, "Error getting size of %s: %s\n", 
-                        filepath.c_str(), ec.message().c_str());
-                continue;
-            }
-            
-            // Open file for reading
-            std::ifstream file(filepath, std::ios::binary);
-            if (!file) {
-                fprintf(stderr, "Error opening %s\n", filepath.c_str());
-                continue;
-            }
-            
-            // Resize buffer to exact size needed
-            buffer.resize(size);
-            
-            // Read directly into buffer
-            if (!file.read(buffer.data(), size)) {
-                fprintf(stderr, "Error reading %s\n", filepath.c_str());
-                continue;
-            }
-            
-            // Create file data with string move-constructed from buffer
-            auto* data = new FileData{
-                filepath.string(), 
-                std::string(buffer.begin(), buffer.end())
+        for (const auto& file_info : file_infos) {
+            auto* data = new MixedFileData{
+                file_info.path.string(),
+                nullptr,
+                "",
+                file_info.use_mmap
             };
+            
+            if (file_info.use_mmap) {
+                // Memory map smaller files
+                auto mmap = std::make_unique<MMapFile>();
+                
+                if (!mmap->open(file_info.path.string())) {
+                    fprintf(stderr, "Error mapping file %s\n", file_info.path.c_str());
+                    delete data;
+                    continue;
+                }
+                
+                data->mmap = std::move(mmap);
+                mmap_count++;
+                
+            } else {
+                // Standard load for larger files
+                buffer.resize(file_info.size);
+                
+                std::ifstream file(file_info.path, std::ios::binary);
+                if (!file) {
+                    fprintf(stderr, "Error opening %s\n", file_info.path.c_str());
+                    delete data;
+                    continue;
+                }
+                
+                if (!file.read(buffer.data(), file_info.size)) {
+                    fprintf(stderr, "Error reading %s\n", file_info.path.c_str());
+                    delete data;
+                    continue;
+                }
+                
+                data->content = std::string(buffer.begin(), buffer.end());
+                standard_count++;
+            }
+            
             queue.push(data);
         }
+        
         producer_done = true;
+        
+        // Log loading stats
+        fprintf(stderr, "Adaptive loader: %zu files via mmap, %zu files via standard\n",
+                mmap_count.load(), standard_count.load());
     });
     
     // Consumer threads - parallel JSON parsing
@@ -89,13 +130,15 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
         consumers.emplace_back([&]() {
             // Each thread needs its own parser
             simdjson::ondemand::parser doc_parser;
-            FileData* data = nullptr;
+            MixedFileData* data = nullptr;
             
             while (true) {
                 // Try to get work from queue
                 if (queue.try_pop(data)) {
-                    // Process the file
-                    simdjson::padded_string json(data->content);
+                    // Get JSON content based on loading method
+                    simdjson::padded_string json = data->is_mmap
+                        ? simdjson::padded_string(data->mmap->data(), data->mmap->size())
+                        : simdjson::padded_string(data->content);
                     
                     // Check if it's an array or object
                     const char* json_start = json.data();
@@ -107,7 +150,8 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                     simdjson::ondemand::document doc;
                     auto error = doc_parser.iterate(json).get(doc);
                     if (error) {
-                        fprintf(stderr, "Error parsing %s: %s\n", data->filename.c_str(), simdjson::error_message(error));
+                        fprintf(stderr, "Error parsing %s: %s\n", 
+                                data->filename.c_str(), simdjson::error_message(error));
                         delete data;
                         continue;
                     }
@@ -117,7 +161,8 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                         simdjson::ondemand::array arr;
                         error = doc.get_array().get(arr);
                         if (error) {
-                            fprintf(stderr, "Error getting array from %s: %s\n", data->filename.c_str(), simdjson::error_message(error));
+                            fprintf(stderr, "Error getting array from %s: %s\n", 
+                                    data->filename.c_str(), simdjson::error_message(error));
                             delete data;
                             continue;
                         }

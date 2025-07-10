@@ -1,13 +1,15 @@
 #include "vector_store_loader.h"
+#include "mmap_file.h"
 #include "atomic_queue.h"
 #include <filesystem>
-#include <fstream>
 #include <thread>
 #include <vector>
 #include <atomic>
 #include <cctype>
+#include <memory>
 
-void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& path) {
+// Memory-mapped version of loadDirectory for better performance
+void VectorStoreLoader::loadDirectoryMMap(VectorStore* store, const std::string& path) {
     // Cannot load if already finalized
     if (store->is_finalized()) {
         return;
@@ -26,55 +28,33 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
         return;
     }
     
-    // Producer-consumer queue for file data
-    struct FileData {
+    // Producer-consumer queue for memory-mapped files
+    struct MMapFileData {
         std::string filename;
-        std::string content;
+        std::unique_ptr<MMapFile> mmap;
     };
     
-    // Queue with bounded capacity (max ~100MB of buffered data)
-    atomic_queue::AtomicQueue<FileData*, 1024> queue;
+    // Queue with bounded capacity
+    atomic_queue::AtomicQueue<MMapFileData*, 1024> queue;
     
     // Atomic flags for coordination
     std::atomic<bool> producer_done{false};
     std::atomic<size_t> files_processed{0};
     
-    // Producer thread - sequential file reading with optimizations
+    // Producer thread - memory maps files
     std::thread producer([&]() {
-        // Reusable buffer to avoid repeated allocations
-        std::vector<char> buffer;
-        buffer.reserve(100 * 1024 * 1024); // Reserve 100MB capacity
-        
         for (const auto& filepath : json_files) {
-            // Get file size without opening (one syscall)
-            std::error_code ec;
-            auto size = std::filesystem::file_size(filepath, ec);
-            if (ec) {
-                fprintf(stderr, "Error getting size of %s: %s\n", 
-                        filepath.c_str(), ec.message().c_str());
+            auto mmap = std::make_unique<MMapFile>();
+            
+            if (!mmap->open(filepath.string())) {
+                fprintf(stderr, "Error mapping file %s\n", filepath.c_str());
                 continue;
             }
             
-            // Open file for reading
-            std::ifstream file(filepath, std::ios::binary);
-            if (!file) {
-                fprintf(stderr, "Error opening %s\n", filepath.c_str());
-                continue;
-            }
-            
-            // Resize buffer to exact size needed
-            buffer.resize(size);
-            
-            // Read directly into buffer
-            if (!file.read(buffer.data(), size)) {
-                fprintf(stderr, "Error reading %s\n", filepath.c_str());
-                continue;
-            }
-            
-            // Create file data with string move-constructed from buffer
-            auto* data = new FileData{
-                filepath.string(), 
-                std::string(buffer.begin(), buffer.end())
+            // Create file data and push to queue
+            auto* data = new MMapFileData{
+                filepath.string(),
+                std::move(mmap)
             };
             queue.push(data);
         }
@@ -89,16 +69,17 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
         consumers.emplace_back([&]() {
             // Each thread needs its own parser
             simdjson::ondemand::parser doc_parser;
-            FileData* data = nullptr;
+            MMapFileData* data = nullptr;
             
             while (true) {
                 // Try to get work from queue
                 if (queue.try_pop(data)) {
-                    // Process the file
-                    simdjson::padded_string json(data->content);
+                    // Process the memory-mapped file
+                    // For mmap, we need to copy to ensure padding
+                    simdjson::padded_string json(data->mmap->data(), data->mmap->size());
                     
                     // Check if it's an array or object
-                    const char* json_start = json.data();
+                    const char* json_start = data->mmap->data();
                     while (json_start && *json_start && std::isspace(*json_start)) {
                         json_start++;
                     }
@@ -107,7 +88,8 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                     simdjson::ondemand::document doc;
                     auto error = doc_parser.iterate(json).get(doc);
                     if (error) {
-                        fprintf(stderr, "Error parsing %s: %s\n", data->filename.c_str(), simdjson::error_message(error));
+                        fprintf(stderr, "Error parsing %s: %s\n", 
+                                data->filename.c_str(), simdjson::error_message(error));
                         delete data;
                         continue;
                     }
@@ -117,7 +99,8 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                         simdjson::ondemand::array arr;
                         error = doc.get_array().get(arr);
                         if (error) {
-                            fprintf(stderr, "Error getting array from %s: %s\n", data->filename.c_str(), simdjson::error_message(error));
+                            fprintf(stderr, "Error getting array from %s: %s\n", 
+                                    data->filename.c_str(), simdjson::error_message(error));
                             delete data;
                             continue;
                         }

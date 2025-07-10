@@ -1,0 +1,84 @@
+🔥 Vector Store Loader Benchmark
+
+
+
+🗂️  Testing with: Orchestrator docs (465 files, ~45MB total)
+   Path: /Users/martinboros/git/test/orchestrator/project_workspace/worker_vector_store/native-vector-store/out_embedded
+
+📊 Benchmarking Standard loader (with optimizations)
+   Run 10: 10.89ms (465 docs loaded)
+   Run 20: 11.78ms (465 docs loaded)
+   📈 Results (20 runs):
+      Min: 10.53ms
+      Max: 45.38ms
+      Avg: 13.43ms
+      Median: 11.58ms
+      Std Dev: 7.44ms
+
+--- With cold cache ---
+
+📊 Benchmarking Standard loader (cold cache)
+   Run 10: 49.99ms (465 docs loaded)
+   Run 20: 53.05ms (465 docs loaded)
+   📈 Results (20 runs):
+      Min: 49.99ms
+      Max: 58.31ms
+      Avg: 52.99ms
+      Median: 52.27ms
+      Std Dev: 2.42ms
+
+📊 Benchmarking Memory-mapped loader (cold cache)
+   Run 10: 37.49ms (465 docs loaded)
+   Run 20: 18.58ms (465 docs loaded)
+   📈 Results (20 runs):
+      Min: 12.76ms
+      Max: 37.49ms
+      Avg: 16.71ms
+      Median: 14.67ms
+      Std Dev: 5.42ms
+
+📊 Benchmarking Adaptive loader (cold cache)
+   Run 10: 17.32ms (465 docs loaded)
+   Run 20: 24.31ms (465 docs loaded)
+   📈 Results (20 runs):
+      Min: 13.39ms
+      Max: 31.39ms
+      Avg: 17.66ms
+      Median: 15.28ms
+      Std Dev: 5.31ms
+
+📊 Summary:
+   Standard loader (with optimizations): 13.43ms avg
+   Standard loader (cold cache): 52.99ms avg
+   Memory-mapped loader (cold cache): 16.71ms avg
+   Adaptive loader (cold cache): 17.66ms avg
+   → Memory-mapped loader (cold cache) is 3.17x faster
+   → Adaptive loader (cold cache) is 3.00x faster
+
+
+🗂️  Testing with: C++ standard (2 files, ~340MB total)
+   Path: /Users/martinboros/git/test/orchestrator/project_workspace/worker_vector_store/native-vector-store/cpp_std_embedded
+
+📊 Benchmarking Standard loader (with optimizations)
+   Run 10: 721.56ms (6557 docs loaded)
+   Run 20: 726.00ms (6557 docs loaded)
+   📈 Results (20 runs):
+      Min: 668.55ms
+      Max: 726.00ms
+      Avg: 704.47ms
+      Median: 706.85ms
+      Std Dev: 13.46ms
+
+--- With cold cache ---
+
+📊 Benchmarking Standard loader (cold cache)
+   Run 10: 730.55ms (6557 docs loaded)
+   Run 20: 851.18ms (6557 docs loaded)
+   📈 Results (20 runs):
+      Min: 671.99ms
+      Max: 851.18ms
+      Avg: 732.19ms
+      Median: 729.89ms
+      Std Dev: 35.32ms
+
+📊 Benchmarking Memory-mapped loader (cold cache)

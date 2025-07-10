@@ -20,6 +20,9 @@ src/test_main
 
 out/
 out_embedded/
+cpp_std_embedded/
+cpp_std_embeddings/
+cpp_std_partitioned/
 
 # Environment variables
 .env

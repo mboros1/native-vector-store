@@ -11,6 +11,8 @@ public:
     static Napi::Object Init(Napi::Env env, Napi::Object exports) {
         Napi::Function func = DefineClass(env, "VectorStore", {
             InstanceMethod("loadDir", &VectorStoreWrapper::LoadDir),
+            InstanceMethod("loadDirMMap", &VectorStoreWrapper::LoadDirMMap),
+            InstanceMethod("loadDirAdaptive", &VectorStoreWrapper::LoadDirAdaptive),
             InstanceMethod("addDocument", &VectorStoreWrapper::AddDocument),
             InstanceMethod("search", &VectorStoreWrapper::Search),
             InstanceMethod("normalize", &VectorStoreWrapper::Normalize),
@@ -31,7 +33,18 @@ public:
     
     void LoadDir(const Napi::CallbackInfo& info) {
         std::string path = info[0].As<Napi::String>();
-        VectorStoreLoader::loadDirectory(store_.get(), path);
+        // Use adaptive loader as default for best performance
+        VectorStoreLoader::loadDirectoryAdaptive(store_.get(), path);
+    }
+    
+    void LoadDirMMap(const Napi::CallbackInfo& info) {
+        std::string path = info[0].As<Napi::String>();
+        VectorStoreLoader::loadDirectoryMMap(store_.get(), path);
+    }
+    
+    void LoadDirAdaptive(const Napi::CallbackInfo& info) {
+        std::string path = info[0].As<Napi::String>();
+        VectorStoreLoader::loadDirectoryAdaptive(store_.get(), path);
     }
     
     void AddDocument(const Napi::CallbackInfo& info) {
