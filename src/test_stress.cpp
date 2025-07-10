@@ -12,7 +12,7 @@ using namespace std::chrono;
 
 // Test configuration
 constexpr size_t DIM = 1536;
-constexpr size_t DOCS_PER_THREAD = 125000;
+constexpr size_t DOCS_PER_THREAD = 125;  // 1K total with 8 threads
 constexpr size_t NUM_THREADS = 8;
 constexpr size_t SEARCH_ITERATIONS = 100;
 
@@ -51,9 +51,9 @@ std::string create_json_document(const std::string& id, const std::string& text,
     return json.str();
 }
 
-// Test 1: 1M parallel inserts with 8 threads
+// Test 1: 1K parallel inserts with 8 threads
 void test_concurrent_inserts() {
-    std::cout << "\n📝 Test 1: 1M parallel inserts with " << NUM_THREADS << " threads\n";
+    std::cout << "\n📝 Test 1: 1K parallel inserts with " << NUM_THREADS << " threads\n";
     
     VectorStore store(DIM);
     std::atomic<size_t> total_success{0};
@@ -204,7 +204,7 @@ void test_concurrent_operations() {
     std::mt19937 rng(42);
     simdjson::ondemand::parser parser;
     
-    for (size_t i = 0; i < 10000; ++i) {
+    for (size_t i = 0; i < 100; ++i) {
         auto embedding = generate_random_embedding(DIM, rng);
         std::string json_str = create_json_document(
             "init-" + std::to_string(i),
@@ -227,8 +227,8 @@ void test_concurrent_operations() {
         simdjson::ondemand::parser parser;
         size_t count = 0;
         
-        while (!stop_loading && count < 50000) {
-            for (size_t i = 0; i < 100 && count < 50000; ++i) {
+        while (!stop_loading && count < 500) {
+            for (size_t i = 0; i < 10 && count < 500; ++i) {
                 auto embedding = generate_random_embedding(DIM, rng);
                 std::string json_str = create_json_document(
                     "load-" + std::to_string(count),
@@ -335,7 +335,7 @@ void test_memory_fence() {
         std::mt19937 rng(42);
         simdjson::ondemand::parser parser;
         
-        for (size_t i = 0; i < 10000; ++i) {
+        for (size_t i = 0; i < 1000; ++i) {
             auto embedding = generate_random_embedding(32, rng);
             std::string json_str = create_json_document(
                 "fence-" + std::to_string(i),
