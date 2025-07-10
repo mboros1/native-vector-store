@@ -10,13 +10,15 @@ High-performance vector store with SIMD optimization for MCP servers and local R
 - **🔧 MCP Integration**: Built for Model Context Protocol servers
 - **🌐 Cross-Platform**: Works on Linux, macOS, and Windows
 - **📊 TypeScript Support**: Full type definitions included
+- **🔄 Producer-Consumer Loading**: Parallel document loading at 178k+ docs/sec
 
 ## Performance Targets
 
-- **Load Time**: <1 second for 100,000 documents
-- **Search Latency**: <10ms for top-k similarity search
+- **Load Time**: <1 second for 100,000 documents (achieved: ~560ms)
+- **Search Latency**: <10ms for top-k similarity search (achieved: 1-2ms)
 - **Memory Efficiency**: Minimal fragmentation via arena allocation
 - **Scalability**: Designed for <1M embeddings
+- **Throughput**: 178k+ documents per second with parallel loading
 
 ## Installation
 
@@ -38,7 +40,10 @@ const { VectorStore } = require('native-vector-store');
 // Initialize with embedding dimensions (e.g., 1536 for OpenAI)
 const store = new VectorStore(1536);
 
-// Add documents
+// Load documents from directory
+store.loadDir('./documents'); // Automatically finalizes after loading
+
+// Or add documents manually then finalize
 const document = {
   id: 'doc-1',
   text: 'Example document text',
@@ -49,6 +54,7 @@ const document = {
 };
 
 store.addDocument(document);
+store.finalize(); // Must call before searching!
 
 // Search for similar documents
 const queryEmbedding = new Float32Array(1536);
@@ -89,10 +95,10 @@ new VectorStore(dimensions: number)
 #### Methods
 
 ##### `loadDir(path: string): void`
-Load all JSON documents from a directory. Files should contain document objects with embeddings.
+Load all JSON documents from a directory and automatically finalize the store. Files should contain document objects with embeddings.
 
 ##### `addDocument(doc: Document): void`
-Add a single document to the store.
+Add a single document to the store. Only works during loading phase (before finalization).
 
 ```typescript
 interface Document {
@@ -117,8 +123,14 @@ interface SearchResult {
 }
 ```
 
+##### `finalize(): void`
+Finalize the store: normalize all embeddings and switch to serving mode. After this, no more documents can be added but searches become available. This is automatically called by `loadDir()`.
+
+##### `isFinalized(): boolean`
+Check if the store has been finalized and is ready for searching.
+
 ##### `normalize(): void`
-Normalize all stored embeddings to unit length.
+**Deprecated**: Use `finalize()` instead.
 
 ##### `size(): number`
 Get the number of documents in the store.

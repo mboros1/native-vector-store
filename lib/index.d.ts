@@ -38,8 +38,20 @@ export class VectorStore {
   
   /**
    * Normalize all stored embeddings
+   * @deprecated Use finalize() instead
    */
   normalize(): void;
+  
+  /**
+   * Finalize the store: normalize embeddings and switch to serving mode
+   * After calling this, no more documents can be added
+   */
+  finalize(): void;
+  
+  /**
+   * Check if the store has been finalized
+   */
+  isFinalized(): boolean;
   
   /**
    * Get the number of documents in the store

@@ -6,6 +6,7 @@ build/
 *.log
 .DS_Store
 test/benchmark_data/
+test_data/
 
 # C++ build artifacts
 *.o

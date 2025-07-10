@@ -1,12 +1,7 @@
 #include <napi.h>
 #include "vector_store.h"
-#include <dirent.h>
-#include <filesystem>
+#include "vector_store_loader.h"
 #include <cmath>
-#include <cctype>
-#include <vector>
-#include <mutex>
-#include <omp.h>
 
 class VectorStoreWrapper : public Napi::ObjectWrap<VectorStoreWrapper> {
     std::unique_ptr<VectorStore> store_;
@@ -19,6 +14,8 @@ public:
             InstanceMethod("addDocument", &VectorStoreWrapper::AddDocument),
             InstanceMethod("search", &VectorStoreWrapper::Search),
             InstanceMethod("normalize", &VectorStoreWrapper::Normalize),
+            InstanceMethod("finalize", &VectorStoreWrapper::FinalizeStore),
+            InstanceMethod("isFinalized", &VectorStoreWrapper::IsFinalized),
             InstanceMethod("size", &VectorStoreWrapper::Size)
         });
         
@@ -34,86 +31,7 @@ public:
     
     void LoadDir(const Napi::CallbackInfo& info) {
         std::string path = info[0].As<Napi::String>();
-        
-        std::vector<std::filesystem::path> json_files;
-        
-        // Collect all JSON files
-        for (const auto& entry : std::filesystem::directory_iterator(path)) {
-            if (entry.path().extension() == ".json") {
-                json_files.push_back(entry.path());
-            }
-        }
-        
-        // Process files in parallel using OpenMP
-        #pragma omp parallel for schedule(dynamic)
-        for (size_t i = 0; i < json_files.size(); ++i) {
-            // Load file using error code approach
-            simdjson::padded_string json;
-            auto error = simdjson::padded_string::load(json_files[i].string()).get(json);
-            if (error) {
-                fprintf(stderr, "Error loading %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
-                continue;
-            }
-            
-            // Check first character to determine if it's an array
-            const char* json_start = json.data();
-            while (json_start && *json_start && std::isspace(*json_start)) {
-                json_start++;
-            }
-            
-            bool is_array = (json_start && *json_start == '[');
-            
-            // Each thread needs its own parser (parsers are not thread-safe)
-            simdjson::ondemand::parser doc_parser;
-            simdjson::ondemand::document doc;
-            error = doc_parser.iterate(json).get(doc);
-            if (error) {
-                fprintf(stderr, "Error parsing %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
-                continue;
-            }
-            
-            if (is_array) {
-                // Process as array
-                simdjson::ondemand::array arr;
-                error = doc.get_array().get(arr);
-                if (error) {
-                    fprintf(stderr, "Error getting array from %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
-                    continue;
-                }
-                
-                for (auto doc_element : arr) {
-                    simdjson::ondemand::object obj;
-                    error = doc_element.get_object().get(obj);
-                    if (!error) {
-                        auto add_error = store_->add_document(obj);
-                        if (add_error) {
-                            fprintf(stderr, "Error adding document from %s: %s\n", 
-                                   json_files[i].c_str(), simdjson::error_message(add_error));
-                        }
-                    } else {
-                        fprintf(stderr, "Error getting object from array in %s: %s\n", 
-                               json_files[i].c_str(), simdjson::error_message(error));
-                    }
-                }
-            } else {
-                // Process as single document object
-                simdjson::ondemand::object obj;
-                error = doc.get_object().get(obj);
-                if (!error) {
-                    auto add_error = store_->add_document(obj);
-                    if (add_error) {
-                        fprintf(stderr, "Error adding single document from %s: %s\n", 
-                               json_files[i].c_str(), simdjson::error_message(add_error));
-                    }
-                } else {
-                    fprintf(stderr, "Error getting object from %s: %s\n", 
-                           json_files[i].c_str(), simdjson::error_message(error));
-                }
-            }
-        }
-        
-        // Normalize after batch load
-        store_->normalize_all();
+        VectorStoreLoader::loadDirectory(store_.get(), path);
     }
     
     void AddDocument(const Napi::CallbackInfo& info) {
@@ -198,6 +116,14 @@ public:
     
     void Normalize(const Napi::CallbackInfo& info) {
         store_->normalize_all();
+    }
+    
+    void FinalizeStore(const Napi::CallbackInfo& info) {
+        store_->finalize();
+    }
+    
+    Napi::Value IsFinalized(const Napi::CallbackInfo& info) {
+        return Napi::Boolean::New(info.Env(), store_->is_finalized());
     }
     
     Napi::Value Size(const Napi::CallbackInfo& info) {
