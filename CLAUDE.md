@@ -112,6 +112,12 @@ Each entry contains:
 - **Normalization**: Vectorized sqrt and multiplication
 - **Parallel Search**: OpenMP threading across document corpus
 
+### Thread-Safe Top-K Selection
+- **Small k or n**: Uses simple shared scores array (k > 100 or n < 10,000)
+- **Large n, small k**: Per-thread min-heaps with post-merge
+- **No Custom Reductions**: Avoids OpenMP reduction complexity for better TSAN compatibility
+- **Cache Efficiency**: Each thread works with local heap, minimizing false sharing
+
 ### JSON Processing
 - **simdjson**: High-performance streaming parser
 - **Error Handling**: Comprehensive error codes for parsing failures
@@ -157,6 +163,7 @@ if (error) {
 - **Phase Transition**: `finalize()` provides memory barrier for safe transition
 - **Search Parallelism**: OpenMP used internally for parallel score computation
 - **Memory Safety**: Arena allocator uses mutex for chunk creation, atomic ops for allocation
+- **Top-K Selection**: Per-thread heaps avoid shared memory contention for large searches
 
 ## Testing Strategy
 

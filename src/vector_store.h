@@ -9,6 +9,8 @@
 #include <omp.h>
 #include <mutex>
 #include <cassert>
+#include <algorithm>
+#include <functional>
 
 class ArenaAllocator {
     static constexpr size_t CHUNK_SIZE = 1 << 26;  // 64MB chunks
@@ -98,6 +100,47 @@ struct Document {
     std::string_view text;
     std::string_view metadata_json;  // Full JSON including embedding
 };
+
+// Per-thread top-k tracker for thread-safe parallel search
+struct TopK {
+    size_t k;
+    std::vector<std::pair<float, size_t>> heap; // min-heap by score
+    
+    explicit TopK(size_t k = 0) : k(k) { 
+        heap.reserve(k + 1); // Reserve k+1 to avoid reallocation during push
+    }
+    
+    void push(float score, size_t idx) {
+        if (heap.size() < k) {
+            heap.emplace_back(score, idx);
+            std::push_heap(heap.begin(), heap.end(), cmp);
+        } else if (k > 0 && score > heap.front().first) {
+            // Replace the minimum element
+            std::pop_heap(heap.begin(), heap.end(), cmp);
+            heap.back() = {score, idx};
+            std::push_heap(heap.begin(), heap.end(), cmp);
+        }
+    }
+    
+    // Comparator for min-heap (greater than for min-heap behavior)
+    static bool cmp(const std::pair<float, size_t>& a, const std::pair<float, size_t>& b) { 
+        return a.first > b.first;
+    }
+    
+    void merge(const TopK& other) {
+        // More efficient: if we have space, bulk insert then re-heapify
+        if (heap.size() + other.heap.size() <= k) {
+            heap.insert(heap.end(), other.heap.begin(), other.heap.end());
+            std::make_heap(heap.begin(), heap.end(), cmp);
+        } else {
+            // Otherwise, insert one by one
+            for (const auto& [score, idx] : other.heap) {
+                push(score, idx);
+            }
+        }
+    }
+};
+
 
 class VectorStore {
     const size_t dim_;
@@ -264,8 +307,11 @@ public:
             }
         }
         
-        // Switch to serving phase
-        phase_.store(Phase::SERVING, std::memory_order_release);
+        // Ensure all threads see the normalized data
+        #pragma omp barrier
+        
+        // Switch to serving phase with full fence
+        phase_.store(Phase::SERVING, std::memory_order_seq_cst);
     }
     
     // Deprecated: use finalize() instead
@@ -284,29 +330,70 @@ public:
         if (n == 0 || k == 0) return {};
         
         k = std::min(k, n);  // Ensure k doesn't exceed count
-        std::vector<float> scores(n);
         
-        #pragma omp parallel for if(omp_get_level() == 0)
-        for (size_t i = 0; i < n; ++i) {
-            float score = 0.0f;
-            const float* emb = entries_[i].embedding;
+        // For small k or n, use simple approach
+        if (k > 100 || n < 10000) {
+            // Use shared scores array - simple and fast for these cases
+            std::vector<float> scores(n);
             
-            #pragma omp simd reduction(+:score)
-            for (size_t j = 0; j < dim_; ++j) {
-                score += emb[j] * query[j];
+            #pragma omp parallel for if(omp_get_level() == 0)
+            for (size_t i = 0; i < n; ++i) {
+                float score = 0.0f;
+                const float* emb = entries_[i].embedding;
+                
+                #pragma omp simd reduction(+:score)
+                for (size_t j = 0; j < dim_; ++j) {
+                    score += emb[j] * query[j];
+                }
+                scores[i] = score;
             }
-            scores[i] = score;
+            
+            // Top-k selection
+            std::vector<std::pair<float, size_t>> idx(n);
+            for (size_t i = 0; i < n; ++i) {
+                idx[i] = {scores[i], i};
+            }
+            std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
+                             [](const auto& a, const auto& b) { return a.first > b.first; });
+            idx.resize(k);
+            return idx;
+        } else {
+            // For large n and small k, use per-thread heaps without custom reduction
+            const int num_threads = omp_get_max_threads();
+            std::vector<TopK> thread_heaps(num_threads, TopK(k));
+            
+            #pragma omp parallel if(omp_get_level() == 0)
+            {
+                const int tid = omp_get_thread_num();
+                TopK& local_heap = thread_heaps[tid];
+                
+                #pragma omp for nowait
+                for (size_t i = 0; i < n; ++i) {
+                    float score = 0.0f;
+                    const float* emb = entries_[i].embedding;
+                    
+                    #pragma omp simd reduction(+:score)
+                    for (size_t j = 0; j < dim_; ++j) {
+                        score += emb[j] * query[j];
+                    }
+                    
+                    local_heap.push(score, i);
+                }
+            }
+            
+            // Merge thread-local heaps
+            TopK final_heap(k);
+            for (const auto& heap : thread_heaps) {
+                final_heap.merge(heap);
+            }
+            
+            // Extract and sort final results
+            auto top = std::move(final_heap.heap);
+            std::sort(top.begin(), top.end(), 
+                      [](const auto& a, const auto& b) { return a.first > b.first; });
+            
+            return top;
         }
-        
-        // Top-k selection
-        std::vector<std::pair<float, size_t>> idx(n);
-        for (size_t i = 0; i < n; ++i) {
-            idx[i] = {scores[i], i};
-        }
-        std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
-                         [](const auto& a, const auto& b) { return a.first > b.first; });
-        idx.resize(k);
-        return idx;
     }
     
     const Entry& get_entry(size_t idx) const {
