@@ -110,6 +110,10 @@ function functionalTest() {
   
   console.log(`✅ Added 2 documents, store size: ${store.size()}`);
   
+  // Finalize the store to transition to serving phase
+  store.finalize();
+  console.log('✅ Store finalized and ready for searching');
+  
   // Test 2: Search functionality
   console.log('🔍 Test 2: Search functionality');
   const query = generateRandomEmbedding(dim);

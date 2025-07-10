@@ -1,12 +1,14 @@
 #include <napi.h>
 #include "vector_store.h"
+#include "atomic_queue.h"
 #include <dirent.h>
 #include <filesystem>
+#include <fstream>
 #include <cmath>
 #include <cctype>
 #include <vector>
-#include <mutex>
-#include <omp.h>
+#include <thread>
+#include <atomic>
 
 class VectorStoreWrapper : public Napi::ObjectWrap<VectorStoreWrapper> {
     std::unique_ptr<VectorStore> store_;
@@ -37,81 +39,147 @@ public:
     void LoadDir(const Napi::CallbackInfo& info) {
         std::string path = info[0].As<Napi::String>();
         
-        std::vector<std::filesystem::path> json_files;
-        
         // Collect all JSON files
+        std::vector<std::filesystem::path> json_files;
         for (const auto& entry : std::filesystem::directory_iterator(path)) {
             if (entry.path().extension() == ".json") {
                 json_files.push_back(entry.path());
             }
         }
         
-        // Process files in parallel using OpenMP
-        #pragma omp parallel for schedule(dynamic)
-        for (size_t i = 0; i < json_files.size(); ++i) {
-            // Load file using error code approach
-            simdjson::padded_string json;
-            auto error = simdjson::padded_string::load(json_files[i].string()).get(json);
-            if (error) {
-                fprintf(stderr, "Error loading %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
-                continue;
-            }
-            
-            // Check first character to determine if it's an array
-            const char* json_start = json.data();
-            while (json_start && *json_start && std::isspace(*json_start)) {
-                json_start++;
-            }
-            
-            bool is_array = (json_start && *json_start == '[');
-            
-            // Each thread needs its own parser (parsers are not thread-safe)
-            simdjson::ondemand::parser doc_parser;
-            simdjson::ondemand::document doc;
-            error = doc_parser.iterate(json).get(doc);
-            if (error) {
-                fprintf(stderr, "Error parsing %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
-                continue;
-            }
-            
-            if (is_array) {
-                // Process as array
-                simdjson::ondemand::array arr;
-                error = doc.get_array().get(arr);
-                if (error) {
-                    fprintf(stderr, "Error getting array from %s: %s\n", json_files[i].c_str(), simdjson::error_message(error));
-                    continue;
+        if (json_files.empty()) {
+            store_->finalize();
+            return;
+        }
+        
+        // Producer-consumer queue for file data
+        struct FileData {
+            std::string filename;
+            std::string content;
+        };
+        
+        // Queue with bounded capacity (max ~100MB of buffered data)
+        // Assuming average file size of 100KB, this allows ~1000 files in queue
+        atomic_queue::AtomicQueue<FileData*, 1024> queue;
+        
+        // Atomic flags for coordination
+        std::atomic<bool> producer_done{false};
+        std::atomic<size_t> files_processed{0};
+        
+        // Producer thread - sequential file reading
+        std::thread producer([&]() {
+            for (const auto& filepath : json_files) {
+                try {
+                    // Read file content
+                    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+                    if (!file) {
+                        fprintf(stderr, "Error opening %s\n", filepath.c_str());
+                        continue;
+                    }
+                    
+                    std::streamsize size = file.tellg();
+                    file.seekg(0, std::ios::beg);
+                    
+                    std::string content(size, '\0');
+                    if (!file.read(content.data(), size)) {
+                        fprintf(stderr, "Error reading %s\n", filepath.c_str());
+                        continue;
+                    }
+                    
+                    // Create file data and push to queue
+                    auto* data = new FileData{filepath.string(), std::move(content)};
+                    queue.push(data);
+                    
+                } catch (const std::exception& e) {
+                    fprintf(stderr, "Error processing %s: %s\n", filepath.c_str(), e.what());
                 }
+            }
+            producer_done = true;
+        });
+        
+        // Consumer threads - parallel JSON parsing
+        size_t num_workers = std::thread::hardware_concurrency();
+        std::vector<std::thread> consumers;
+        
+        for (size_t w = 0; w < num_workers; ++w) {
+            consumers.emplace_back([&]() {
+                // Each thread needs its own parser
+                simdjson::ondemand::parser doc_parser;
+                FileData* data = nullptr;
                 
-                for (auto doc_element : arr) {
-                    simdjson::ondemand::object obj;
-                    error = doc_element.get_object().get(obj);
-                    if (!error) {
-                        auto add_error = store_->add_document(obj);
-                        if (add_error) {
-                            fprintf(stderr, "Error adding document from %s: %s\n", 
-                                   json_files[i].c_str(), simdjson::error_message(add_error));
+                while (true) {
+                    // Try to get work from queue
+                    if (queue.try_pop(data)) {
+                        // Process the file
+                        simdjson::padded_string json(data->content);
+                        
+                        // Check if it's an array or object
+                        const char* json_start = json.data();
+                        while (json_start && *json_start && std::isspace(*json_start)) {
+                            json_start++;
                         }
+                        bool is_array = (json_start && *json_start == '[');
+                        
+                        simdjson::ondemand::document doc;
+                        auto error = doc_parser.iterate(json).get(doc);
+                        if (error) {
+                            fprintf(stderr, "Error parsing %s: %s\n", data->filename.c_str(), simdjson::error_message(error));
+                            delete data;
+                            continue;
+                        }
+                        
+                        if (is_array) {
+                            // Process as array
+                            simdjson::ondemand::array arr;
+                            error = doc.get_array().get(arr);
+                            if (error) {
+                                fprintf(stderr, "Error getting array from %s: %s\n", data->filename.c_str(), simdjson::error_message(error));
+                                delete data;
+                                continue;
+                            }
+                            
+                            for (auto doc_element : arr) {
+                                simdjson::ondemand::object obj;
+                                error = doc_element.get_object().get(obj);
+                                if (!error) {
+                                    auto add_error = store_->add_document(obj);
+                                    if (add_error) {
+                                        fprintf(stderr, "Error adding document from %s: %s\n", 
+                                               data->filename.c_str(), simdjson::error_message(add_error));
+                                    }
+                                }
+                            }
+                        } else {
+                            // Process as single document
+                            simdjson::ondemand::object obj;
+                            error = doc.get_object().get(obj);
+                            if (!error) {
+                                auto add_error = store_->add_document(obj);
+                                if (add_error) {
+                                    fprintf(stderr, "Error adding document from %s: %s\n", 
+                                           data->filename.c_str(), simdjson::error_message(add_error));
+                                }
+                            }
+                        }
+                        
+                        delete data;
+                        files_processed++;
+                        
+                    } else if (producer_done.load()) {
+                        // No more work and producer is done
+                        break;
                     } else {
-                        fprintf(stderr, "Error getting object from array in %s: %s\n", 
-                               json_files[i].c_str(), simdjson::error_message(error));
+                        // Queue is empty but producer might add more
+                        std::this_thread::yield();
                     }
                 }
-            } else {
-                // Process as single document object
-                simdjson::ondemand::object obj;
-                error = doc.get_object().get(obj);
-                if (!error) {
-                    auto add_error = store_->add_document(obj);
-                    if (add_error) {
-                        fprintf(stderr, "Error adding single document from %s: %s\n", 
-                               json_files[i].c_str(), simdjson::error_message(add_error));
-                    }
-                } else {
-                    fprintf(stderr, "Error getting object from %s: %s\n", 
-                           json_files[i].c_str(), simdjson::error_message(error));
-                }
-            }
+            });
+        }
+        
+        // Wait for all threads to complete
+        producer.join();
+        for (auto& consumer : consumers) {
+            consumer.join();
         }
         
         // Finalize after batch load - normalize and switch to serving phase

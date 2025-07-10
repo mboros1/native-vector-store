@@ -42,8 +42,14 @@ public:
         while (true) {
             size_t old_offset = chunk->offset.load(std::memory_order_relaxed);
             
-            // Align the offset
-            size_t aligned_offset = (old_offset + align - 1) & ~(align - 1);
+            // Calculate the pointer that would result from current offset
+            void* ptr = chunk->data + old_offset;
+            
+            // Calculate how much padding we need for alignment
+            size_t misalignment = (uintptr_t)ptr & (align - 1);
+            size_t padding = misalignment ? (align - misalignment) : 0;
+            
+            size_t aligned_offset = old_offset + padding;
             size_t new_offset = aligned_offset + size;
             
             if (new_offset > CHUNK_SIZE) {
@@ -108,7 +114,7 @@ class VectorStore {
     };
     
     std::vector<Entry> entries_;
-    size_t count_{0};  // No need for atomic during single-threaded loading
+    std::atomic<size_t> count_{0};  // Atomic for parallel loading
     std::atomic<Phase> phase_{Phase::LOADING};
     
 public:
@@ -211,12 +217,12 @@ public:
         std::memcpy(meta_ptr, raw_json.data(), raw_json.size());
         meta_ptr[raw_json.size()] = '\0';
         
-        // Simple increment - no atomics needed during loading phase
-        size_t idx = count_++;
+        // Atomic increment for parallel loading
+        size_t idx = count_.fetch_add(1, std::memory_order_relaxed);
         
         // Bounds check
         if (idx >= entries_.size()) {
-            count_--;
+            count_.fetch_sub(1, std::memory_order_relaxed);
             return simdjson::CAPACITY;
         }
         
@@ -235,8 +241,11 @@ public:
     
     // Finalize the store: normalize and switch to serving phase
     void finalize() {
+        // Get final count
+        size_t final_count = count_.load(std::memory_order_acquire);
+        
         // Normalize all embeddings (single-threaded, no races)
-        for (size_t i = 0; i < count_; ++i) {
+        for (size_t i = 0; i < final_count; ++i) {
             float* emb = entries_[i].embedding;
             if (!emb) continue;  // Skip uninitialized entries
             
@@ -271,13 +280,14 @@ public:
             return {};  // No searches during loading phase
         }
         
-        if (count_ == 0 || k == 0) return {};
+        size_t n = count_.load(std::memory_order_acquire);
+        if (n == 0 || k == 0) return {};
         
-        k = std::min(k, count_);  // Ensure k doesn't exceed count
-        std::vector<float> scores(count_);
+        k = std::min(k, n);  // Ensure k doesn't exceed count
+        std::vector<float> scores(n);
         
         #pragma omp parallel for if(omp_get_level() == 0)
-        for (size_t i = 0; i < count_; ++i) {
+        for (size_t i = 0; i < n; ++i) {
             float score = 0.0f;
             const float* emb = entries_[i].embedding;
             
@@ -289,8 +299,8 @@ public:
         }
         
         // Top-k selection
-        std::vector<std::pair<float, size_t>> idx(count_);
-        for (size_t i = 0; i < count_; ++i) {
+        std::vector<std::pair<float, size_t>> idx(n);
+        for (size_t i = 0; i < n; ++i) {
             idx[i] = {scores[i], i};
         }
         std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
@@ -304,7 +314,7 @@ public:
     }
     
     size_t size() const {
-        return count_;
+        return count_.load(std::memory_order_acquire);
     }
     
     bool is_finalized() const {
