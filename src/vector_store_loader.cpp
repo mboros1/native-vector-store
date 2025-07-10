@@ -42,30 +42,25 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
     // Producer thread - sequential file reading
     std::thread producer([&]() {
         for (const auto& filepath : json_files) {
-            try {
-                // Read file content
-                std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-                if (!file) {
-                    fprintf(stderr, "Error opening %s\n", filepath.c_str());
-                    continue;
-                }
-                
-                std::streamsize size = file.tellg();
-                file.seekg(0, std::ios::beg);
-                
-                std::string content(size, '\0');
-                if (!file.read(content.data(), size)) {
-                    fprintf(stderr, "Error reading %s\n", filepath.c_str());
-                    continue;
-                }
-                
-                // Create file data and push to queue
-                auto* data = new FileData{filepath.string(), std::move(content)};
-                queue.push(data);
-                
-            } catch (const std::exception& e) {
-                fprintf(stderr, "Error processing %s: %s\n", filepath.c_str(), e.what());
+            // Read file content
+            std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+            if (!file) {
+                fprintf(stderr, "Error opening %s\n", filepath.c_str());
+                continue;
             }
+            
+            std::streamsize size = file.tellg();
+            file.seekg(0, std::ios::beg);
+            
+            std::string content(size, '\0');
+            if (!file.read(content.data(), size)) {
+                fprintf(stderr, "Error reading %s\n", filepath.c_str());
+                continue;
+            }
+            
+            // Create file data and push to queue
+            auto* data = new FileData{filepath.string(), std::move(content)};
+            queue.push(data);
         }
         producer_done = true;
     });
