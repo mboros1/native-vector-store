@@ -2,7 +2,7 @@
   "targets": [
     {
       "target_name": "vector_store",
-      "sources": ["src/binding.cc"],
+      "sources": ["src/binding.cc", "src/vector_store_loader.cpp"],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
         "src"
