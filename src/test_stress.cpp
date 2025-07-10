@@ -311,15 +311,14 @@ void test_memory_fence() {
             while (!stop_readers) {
                 size_t n = store.size();
                 for (size_t i = 0; i < n; ++i) {
-                    try {
-                        const auto& entry = store.get_entry(i);
-                        // Verify entry is complete
-                        if (entry.embedding && !entry.doc.id.empty()) {
-                            reads++;
-                        } else if (entry.embedding || !entry.doc.id.empty()) {
-                            // Partial entry detected!
-                            reader_saw_incomplete = true;
-                        }
+                    const auto& entry = store.get_entry(i);
+                    // Verify entry is complete
+                    if (entry.embedding && !entry.doc.id.empty()) {
+                        reads++;
+                    } else if (entry.embedding || !entry.doc.id.empty()) {
+                        // Partial entry detected!
+                        reader_saw_incomplete = true;
+                    }
                 }
                 std::this_thread::yield();
             }
