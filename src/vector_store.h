@@ -8,7 +8,6 @@
 #include <simdjson.h>
 #include <omp.h>
 #include <mutex>
-#include <stdexcept>
 #include <cassert>
 
 class ArenaAllocator {
@@ -31,12 +30,12 @@ public:
         // Validate alignment is power of 2 and reasonable
         assert(align > 0 && (align & (align - 1)) == 0);
         if (align > 4096) {
-            throw std::invalid_argument("Alignment too large");
+            return nullptr;  // Alignment too large
         }
         
         // Validate size
         if (size > CHUNK_SIZE) {
-            throw std::bad_alloc();  // Cannot allocate larger than chunk size
+            return nullptr;  // Cannot allocate larger than chunk size
         }
         
         Chunk* chunk = current_.load(std::memory_order_acquire);
@@ -179,6 +178,9 @@ public:
         
         // Single arena allocation
         char* base = (char*)arena_.allocate(emb_size + id_size + text_size + meta_size);
+        if (!base) {
+            return simdjson::MEMALLOC;  // Allocation failed
+        }
         
         // Layout: [embedding][id][text][metadata_json]
         float* emb_ptr = (float*)base;

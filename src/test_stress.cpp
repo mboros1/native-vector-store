@@ -118,38 +118,38 @@ void test_oversize_allocation() {
     
     VectorStore store(10);
     
-    try {
-        // Create a document with metadata that exceeds chunk size
-        std::stringstream huge_json;
-        huge_json << "{\"id\":\"huge\",\"text\":\"test\",\"metadata\":{\"embedding\":[";
-        for (int i = 0; i < 10; ++i) {
-            if (i > 0) huge_json << ",";
-            huge_json << "0.1";
+    // Create a document with metadata that exceeds chunk size
+    std::stringstream huge_json;
+    huge_json << "{\"id\":\"huge\",\"text\":\"test\",\"metadata\":{\"embedding\":[";
+    for (int i = 0; i < 10; ++i) {
+        if (i > 0) huge_json << ",";
+        huge_json << "0.1";
+    }
+    huge_json << "],\"huge\":\"";
+    // Add 64MB + 1 byte of data
+    for (size_t i = 0; i < 67108865; ++i) {
+        huge_json << "x";
+    }
+    huge_json << "\"}}";
+    
+    std::string json_str = huge_json.str();
+    simdjson::padded_string padded(json_str);
+    simdjson::ondemand::parser parser;
+    simdjson::ondemand::document doc;
+    
+    auto error = parser.iterate(padded).get(doc);
+    if (!error) {
+        // This should fail in the allocator
+        error = store.add_document(doc);
+        if (error == simdjson::MEMALLOC) {
+            std::cout << "✅ Correctly rejected oversize allocation\n";
+        } else {
+            std::cout << "❌ Should have failed with MEMALLOC error, got: " << simdjson::error_message(error) << "\n";
+            std::exit(1);
         }
-        huge_json << "],\"huge\":\"";
-        // Add 64MB + 1 byte of data
-        for (size_t i = 0; i < 67108865; ++i) {
-            huge_json << "x";
-        }
-        huge_json << "\"}}";
-        
-        std::string json_str = huge_json.str();
-        simdjson::padded_string padded(json_str);
-        simdjson::ondemand::parser parser;
-        simdjson::ondemand::document doc;
-        
-        auto error = parser.iterate(padded).get(doc);
-        if (!error) {
-            // This should fail in the allocator
-            store.add_document(doc);
-        }
-        
-        std::cout << "❌ Should have thrown error for oversize allocation\n";
+    } else {
+        std::cout << "❌ Failed to parse test JSON: " << simdjson::error_message(error) << "\n";
         std::exit(1);
-    } catch (const std::bad_alloc& e) {
-        std::cout << "✅ Correctly rejected oversize allocation: " << e.what() << "\n";
-    } catch (const std::exception& e) {
-        std::cout << "✅ Correctly rejected oversize allocation: " << e.what() << "\n";
     }
 }
 
@@ -164,24 +164,22 @@ void test_alignment_requests() {
             size_t valid_aligns[] = {1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096};
             
             for (size_t align : valid_aligns) {
-                try {
-                    void* ptr = allocate(128, align);
-                    assert(ptr != nullptr);
-                    assert(((uintptr_t)ptr % align) == 0);
-                } catch (const std::exception& e) {
-                    std::cout << "❌ Failed with alignment " << align << ": " << e.what() << "\n";
+                void* ptr = allocate(128, align);
+                if (!ptr) {
+                    std::cout << "❌ Failed to allocate with alignment " << align << "\n";
                     std::exit(1);
                 }
+                assert(((uintptr_t)ptr % align) == 0);
             }
             std::cout << "✅ All valid alignments handled correctly\n";
             
             // Test invalid alignment (>4096)
-            try {
-                allocate(128, 8192);
+            void* ptr = allocate(128, 8192);
+            if (ptr) {
                 std::cout << "❌ Should have rejected alignment > 4096\n";
                 std::exit(1);
-            } catch (const std::invalid_argument& e) {
-                std::cout << "✅ Correctly rejected large alignment: " << e.what() << "\n";
+            } else {
+                std::cout << "✅ Correctly rejected large alignment\n";
             }
         }
     };
@@ -322,9 +320,6 @@ void test_memory_fence() {
                             // Partial entry detected!
                             reader_saw_incomplete = true;
                         }
-                    } catch (...) {
-                        // Entry might not exist yet
-                    }
                 }
                 std::this_thread::yield();
             }
@@ -374,17 +369,12 @@ int main() {
     std::cout << "🔥 Starting concurrent stress tests...\n";
     std::cout << "   Build with: -fsanitize=address,thread -g\n";
     
-    try {
-        test_concurrent_inserts();
-        test_oversize_allocation();
-        test_alignment_requests();
-        test_concurrent_operations();
-        test_memory_fence();
-        
-        std::cout << "\n✅ All stress tests passed!\n";
-        return 0;
-    } catch (const std::exception& e) {
-        std::cout << "\n❌ Test failed: " << e.what() << "\n";
-        return 1;
-    }
+    test_concurrent_inserts();
+    test_oversize_allocation();
+    test_alignment_requests();
+    test_concurrent_operations();
+    test_memory_fence();
+    
+    std::cout << "\n✅ All stress tests passed!\n";
+    return 0;
 }
