@@ -312,13 +312,17 @@ void test_memory_fence() {
                 size_t n = store.size();
                 for (size_t i = 0; i < n; ++i) {
                     const auto& entry = store.get_entry(i);
-                    // Verify entry is complete
-                    if (entry.embedding && !entry.doc.id.empty()) {
-                        reads++;
-                    } else if (entry.embedding || !entry.doc.id.empty()) {
-                        // Partial entry detected!
-                        reader_saw_incomplete = true;
+                    // Check if entry has embedding (our "ready" flag)
+                    if (entry.embedding) {
+                        // Entry should be fully constructed
+                        if (entry.doc.id.empty() || entry.doc.text.empty()) {
+                            // Partial entry detected!
+                            reader_saw_incomplete = true;
+                        } else {
+                            reads++;
+                        }
                     }
+                    // If no embedding, entry is not ready yet - skip it
                 }
                 std::this_thread::yield();
             }

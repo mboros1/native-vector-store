@@ -201,7 +201,7 @@ public:
         std::memcpy(meta_ptr, raw_json.data(), raw_json.size());
         meta_ptr[raw_json.size()] = '\0';
         
-        // Store entry with both document and embedding pointer
+        // Reserve slot atomically
         size_t idx = count_.fetch_add(1, std::memory_order_acq_rel);
         
         // Bounds check
@@ -210,21 +210,17 @@ public:
             return simdjson::CAPACITY;
         }
         
-        // Construct entry
-        Entry new_entry{
-            .doc = Document{
-                .id = std::string_view(id_ptr, id.size()),
-                .text = std::string_view(text_ptr, text.size()),
-                .metadata_json = std::string_view(meta_ptr, raw_json.size())
-            },
-            .embedding = emb_ptr
-        };
+        // Construct entry directly in place
+        entries_[idx].doc.id = std::string_view(id_ptr, id.size());
+        entries_[idx].doc.text = std::string_view(text_ptr, text.size());
+        entries_[idx].doc.metadata_json = std::string_view(meta_ptr, raw_json.size());
         
-        // Write entry
-        entries_[idx] = new_entry;
-        
-        // Memory fence to ensure entry is fully written before other threads can see it
+        // Memory fence before writing the embedding pointer
+        // This ensures all string views are visible before embedding becomes non-null
         std::atomic_thread_fence(std::memory_order_release);
+        
+        // Write embedding pointer last - this acts as the "entry is ready" flag
+        entries_[idx].embedding = emb_ptr;
         
         return simdjson::SUCCESS;
     }
