@@ -7,48 +7,83 @@
 #include <string_view>
 #include <simdjson.h>
 #include <omp.h>
+#include <mutex>
+#include <stdexcept>
+#include <cassert>
 
 class ArenaAllocator {
     static constexpr size_t CHUNK_SIZE = 1 << 26;  // 64MB chunks
     struct Chunk {
         alignas(64) char data[CHUNK_SIZE];
         std::atomic<size_t> offset{0};
-        std::unique_ptr<Chunk> next;
+        std::atomic<Chunk*> next{nullptr};
     };
     
     std::unique_ptr<Chunk> head_;
     std::atomic<Chunk*> current_;
+    std::mutex chunk_creation_mutex_;
     
 public:
     ArenaAllocator() : head_(std::make_unique<Chunk>()), 
                        current_(head_.get()) {}
     
     void* allocate(size_t size, size_t align = 64) {
-        size = (size + align - 1) & ~(align - 1);  // Round up
+        // Validate alignment is power of 2 and reasonable
+        assert(align > 0 && (align & (align - 1)) == 0);
+        if (align > 4096) {
+            throw std::invalid_argument("Alignment too large");
+        }
+        
+        // Validate size
+        if (size > CHUNK_SIZE) {
+            throw std::bad_alloc();  // Cannot allocate larger than chunk size
+        }
         
         Chunk* chunk = current_.load(std::memory_order_acquire);
         while (true) {
             size_t old_offset = chunk->offset.load(std::memory_order_relaxed);
-            size_t new_offset = old_offset + size;
+            
+            // Align the offset
+            size_t aligned_offset = (old_offset + align - 1) & ~(align - 1);
+            size_t new_offset = aligned_offset + size;
             
             if (new_offset > CHUNK_SIZE) {
                 // Need new chunk
-                Chunk* expected = chunk;
-                if (!chunk->next) {
-                    auto new_chunk = std::make_unique<Chunk>();
-                    Chunk* raw_new = new_chunk.get();
-                    chunk->next = std::move(new_chunk);
-                    current_.compare_exchange_weak(expected, raw_new);
+                Chunk* next = chunk->next.load(std::memory_order_acquire);
+                if (!next) {
+                    // Lock to prevent multiple threads creating chunks
+                    std::lock_guard<std::mutex> lock(chunk_creation_mutex_);
+                    // Double-check after acquiring lock
+                    next = chunk->next.load(std::memory_order_acquire);
+                    if (!next) {
+                        auto new_chunk = std::make_unique<Chunk>();
+                        next = new_chunk.get();
+                        chunk->next.store(next, std::memory_order_release);
+                        // Transfer ownership after setting atomic pointer
+                        new_chunk.release();
+                    }
                 }
-                chunk = current_.load(std::memory_order_acquire);
+                // Update current to the new chunk
+                current_.store(next, std::memory_order_release);
+                chunk = next;
                 continue;
             }
             
             if (chunk->offset.compare_exchange_weak(old_offset, new_offset,
                                                    std::memory_order_release,
                                                    std::memory_order_relaxed)) {
-                return chunk->data + old_offset;
+                return chunk->data + aligned_offset;
             }
+        }
+    }
+    
+    ~ArenaAllocator() {
+        // Clean up linked chunks
+        Chunk* chunk = head_->next.load(std::memory_order_acquire);
+        while (chunk) {
+            Chunk* next = chunk->next.load(std::memory_order_acquire);
+            delete chunk;
+            chunk = next;
         }
     }
 };
@@ -70,10 +105,11 @@ class VectorStore {
     
     std::vector<Entry> entries_;
     std::atomic<size_t> count_{0};
+    std::mutex entries_mutex_;
     
 public:
     explicit VectorStore(size_t dim) : dim_(dim) {
-        entries_.reserve(1'000'000);  // Pre-size to avoid realloc
+        entries_.resize(1'000'000);  // Pre-size with default-constructed entries
     }
     
     // Overload for document type (used in test_main.cpp)
@@ -164,8 +200,16 @@ public:
         meta_ptr[raw_json.size()] = '\0';
         
         // Store entry with both document and embedding pointer
-        size_t idx = count_.fetch_add(1);
-        entries_[idx] = Entry{
+        size_t idx = count_.fetch_add(1, std::memory_order_acq_rel);
+        
+        // Bounds check
+        if (idx >= entries_.size()) {
+            count_.fetch_sub(1, std::memory_order_acq_rel);
+            return simdjson::CAPACITY;
+        }
+        
+        // Construct entry
+        Entry new_entry{
             .doc = Document{
                 .id = std::string_view(id_ptr, id.size()),
                 .text = std::string_view(text_ptr, text.size()),
@@ -174,23 +218,34 @@ public:
             .embedding = emb_ptr
         };
         
+        // Write entry
+        entries_[idx] = new_entry;
+        
+        // Memory fence to ensure entry is fully written before other threads can see it
+        std::atomic_thread_fence(std::memory_order_release);
+        
         return simdjson::SUCCESS;
     }
     
     void normalize_all() {
         size_t n = count_.load(std::memory_order_acquire);
-        #pragma omp parallel for
+        #pragma omp parallel for if(omp_get_level() == 0)
         for (size_t i = 0; i < n; ++i) {
             float* emb = entries_[i].embedding;
+            if (!emb) continue;  // Skip uninitialized entries
+            
             float sum = 0.0f;
             #pragma omp simd reduction(+:sum)
             for (size_t j = 0; j < dim_; ++j) {
                 sum += emb[j] * emb[j];
             }
-            float inv_norm = 1.0f / std::sqrt(sum);
-            #pragma omp simd
-            for (size_t j = 0; j < dim_; ++j) {
-                emb[j] *= inv_norm;
+            
+            if (sum > 1e-10f) {  // Avoid division by zero
+                float inv_norm = 1.0f / std::sqrt(sum);
+                #pragma omp simd
+                for (size_t j = 0; j < dim_; ++j) {
+                    emb[j] *= inv_norm;
+                }
             }
         }
     }
@@ -198,12 +253,20 @@ public:
     std::vector<std::pair<float, size_t>> 
     search(const float* query, size_t k) const {
         size_t n = count_.load(std::memory_order_acquire);
+        if (n == 0 || k == 0) return {};
+        
+        k = std::min(k, n);  // Ensure k doesn't exceed n
         std::vector<float> scores(n);
         
-        #pragma omp parallel for
+        #pragma omp parallel for if(omp_get_level() == 0)
         for (size_t i = 0; i < n; ++i) {
             float score = 0.0f;
             const float* emb = entries_[i].embedding;
+            if (!emb) {
+                scores[i] = -std::numeric_limits<float>::infinity();
+                continue;
+            }
+            
             #pragma omp simd reduction(+:score)
             for (size_t j = 0; j < dim_; ++j) {
                 score += emb[j] * query[j];
