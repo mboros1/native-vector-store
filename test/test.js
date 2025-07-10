@@ -48,6 +48,9 @@ function performanceTest() {
     store.addDocument(doc);
   }
   
+  // Finalize the store before searching
+  store.finalize();
+  
   const loadTime = Date.now() - startLoad;
   console.log(`✅ Created and added ${numDocs} JS objects in ${loadTime}ms (${(loadTime/numDocs).toFixed(2)}ms per doc)`);
   console.log(`   Note: This tests JS object creation, not file loading. See benchmark_parallel.js for file loading performance.`);

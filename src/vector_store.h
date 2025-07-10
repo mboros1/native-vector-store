@@ -102,9 +102,14 @@ class VectorStore {
         float* embedding;  // Extracted pointer for fast access
     };
     
+    enum class Phase {
+        LOADING,     // Can add documents, no searches allowed
+        SERVING      // No document additions, only searches
+    };
+    
     std::vector<Entry> entries_;
-    std::atomic<size_t> count_{0};
-    std::mutex entries_mutex_;
+    size_t count_{0};  // No need for atomic during single-threaded loading
+    std::atomic<Phase> phase_{Phase::LOADING};
     
 public:
     explicit VectorStore(size_t dim) : dim_(dim) {
@@ -122,6 +127,11 @@ public:
     }
     
     simdjson::error_code add_document(simdjson::ondemand::object& json_doc) {
+        // Check if we're in loading phase
+        if (phase_.load(std::memory_order_acquire) != Phase::LOADING) {
+            return simdjson::INCORRECT_TYPE;  // Cannot add documents after finalization
+        }
+        
         // Parse with error handling
         std::string_view id, text;
         auto error = json_doc["id"].get_string().get(id);
@@ -201,34 +211,32 @@ public:
         std::memcpy(meta_ptr, raw_json.data(), raw_json.size());
         meta_ptr[raw_json.size()] = '\0';
         
-        // Reserve slot atomically
-        size_t idx = count_.fetch_add(1, std::memory_order_acq_rel);
+        // Simple increment - no atomics needed during loading phase
+        size_t idx = count_++;
         
         // Bounds check
         if (idx >= entries_.size()) {
-            count_.fetch_sub(1, std::memory_order_acq_rel);
+            count_--;
             return simdjson::CAPACITY;
         }
         
-        // Construct entry directly in place
-        entries_[idx].doc.id = std::string_view(id_ptr, id.size());
-        entries_[idx].doc.text = std::string_view(text_ptr, text.size());
-        entries_[idx].doc.metadata_json = std::string_view(meta_ptr, raw_json.size());
-        
-        // Memory fence before writing the embedding pointer
-        // This ensures all string views are visible before embedding becomes non-null
-        std::atomic_thread_fence(std::memory_order_release);
-        
-        // Write embedding pointer last - this acts as the "entry is ready" flag
-        entries_[idx].embedding = emb_ptr;
+        // Construct entry directly - no synchronization needed
+        entries_[idx] = Entry{
+            .doc = Document{
+                .id = std::string_view(id_ptr, id.size()),
+                .text = std::string_view(text_ptr, text.size()),
+                .metadata_json = std::string_view(meta_ptr, raw_json.size())
+            },
+            .embedding = emb_ptr
+        };
         
         return simdjson::SUCCESS;
     }
     
-    void normalize_all() {
-        size_t n = count_.load(std::memory_order_acquire);
-        #pragma omp parallel for if(omp_get_level() == 0)
-        for (size_t i = 0; i < n; ++i) {
+    // Finalize the store: normalize and switch to serving phase
+    void finalize() {
+        // Normalize all embeddings (single-threaded, no races)
+        for (size_t i = 0; i < count_; ++i) {
             float* emb = entries_[i].embedding;
             if (!emb) continue;  // Skip uninitialized entries
             
@@ -246,24 +254,32 @@ public:
                 }
             }
         }
+        
+        // Switch to serving phase
+        phase_.store(Phase::SERVING, std::memory_order_release);
+    }
+    
+    // Deprecated: use finalize() instead
+    void normalize_all() {
+        finalize();
     }
     
     std::vector<std::pair<float, size_t>> 
     search(const float* query, size_t k) const {
-        size_t n = count_.load(std::memory_order_acquire);
-        if (n == 0 || k == 0) return {};
+        // Check if we're in serving phase
+        if (phase_.load(std::memory_order_acquire) != Phase::SERVING) {
+            return {};  // No searches during loading phase
+        }
         
-        k = std::min(k, n);  // Ensure k doesn't exceed n
-        std::vector<float> scores(n);
+        if (count_ == 0 || k == 0) return {};
+        
+        k = std::min(k, count_);  // Ensure k doesn't exceed count
+        std::vector<float> scores(count_);
         
         #pragma omp parallel for if(omp_get_level() == 0)
-        for (size_t i = 0; i < n; ++i) {
+        for (size_t i = 0; i < count_; ++i) {
             float score = 0.0f;
             const float* emb = entries_[i].embedding;
-            if (!emb) {
-                scores[i] = -std::numeric_limits<float>::infinity();
-                continue;
-            }
             
             #pragma omp simd reduction(+:score)
             for (size_t j = 0; j < dim_; ++j) {
@@ -273,8 +289,8 @@ public:
         }
         
         // Top-k selection
-        std::vector<std::pair<float, size_t>> idx(n);
-        for (size_t i = 0; i < n; ++i) {
+        std::vector<std::pair<float, size_t>> idx(count_);
+        for (size_t i = 0; i < count_; ++i) {
             idx[i] = {scores[i], i};
         }
         std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
@@ -288,6 +304,10 @@ public:
     }
     
     size_t size() const {
-        return count_.load(std::memory_order_acquire);
+        return count_;
+    }
+    
+    bool is_finalized() const {
+        return phase_.load(std::memory_order_acquire) == Phase::SERVING;
     }
 };

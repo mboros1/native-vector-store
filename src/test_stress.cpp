@@ -188,110 +188,89 @@ void test_alignment_requests() {
     allocator.test_alignments();
 }
 
-// Test 4: Concurrent normalize_all + search while loading
-void test_concurrent_operations() {
-    std::cout << "\n🔄 Test 4: Concurrent normalize_all + search while loading\n";
+// Test 4: Phase separation - load, finalize, then search
+void test_phase_separation() {
+    std::cout << "\n🔄 Test 4: Phase separation - load, finalize, then search\n";
     
     VectorStore store(DIM);
-    std::atomic<bool> stop_loading{false};
-    std::atomic<bool> stop_normalizing{false};
-    std::atomic<bool> stop_searching{false};
-    std::atomic<size_t> docs_loaded{0};
-    std::atomic<size_t> normalizations{0};
-    std::atomic<size_t> searches{0};
+    auto start = high_resolution_clock::now();
     
-    // Pre-load some documents
+    // Phase 1: Load documents (single-threaded for simplicity)
     std::mt19937 rng(42);
     simdjson::ondemand::parser parser;
+    size_t docs_loaded = 0;
     
-    for (size_t i = 0; i < 100; ++i) {
+    for (size_t i = 0; i < 1000; ++i) {
         auto embedding = generate_random_embedding(DIM, rng);
         std::string json_str = create_json_document(
-            "init-" + std::to_string(i),
-            "Initial document " + std::to_string(i),
+            "doc-" + std::to_string(i),
+            "Document " + std::to_string(i),
             embedding
         );
         
         simdjson::padded_string padded(json_str);
         simdjson::ondemand::document doc;
         if (!parser.iterate(padded).get(doc)) {
-            store.add_document(doc);
+            auto error = store.add_document(doc);
+            if (!error) {
+                docs_loaded++;
+            }
         }
     }
     
-    auto start = high_resolution_clock::now();
+    auto load_time = duration_cast<milliseconds>(high_resolution_clock::now() - start).count();
+    std::cout << "   Loaded " << docs_loaded << " documents in " << load_time << "ms\n";
     
-    // Thread 1: Continuous loading
-    std::thread loader([&]() {
-        std::mt19937 rng(1);
-        simdjson::ondemand::parser parser;
-        size_t count = 0;
-        
-        while (!stop_loading && count < 500) {
-            for (size_t i = 0; i < 10 && count < 500; ++i) {
-                auto embedding = generate_random_embedding(DIM, rng);
-                std::string json_str = create_json_document(
-                    "load-" + std::to_string(count),
-                    "Loading document " + std::to_string(count),
-                    embedding
-                );
-                
-                simdjson::padded_string padded(json_str);
-                simdjson::ondemand::document doc;
-                if (!parser.iterate(padded).get(doc)) {
-                    auto error = store.add_document(doc);
-                    if (!error) {
-                        count++;
-                    }
-                }
+    // Verify searches fail before finalization
+    auto query = generate_random_embedding(DIM, rng);
+    auto results = store.search(query.data(), 10);
+    assert(results.empty());
+    std::cout << "   ✅ Searches correctly blocked before finalization\n";
+    
+    // Phase 2: Finalize the store
+    auto finalize_start = high_resolution_clock::now();
+    store.finalize();
+    auto finalize_time = duration_cast<milliseconds>(high_resolution_clock::now() - finalize_start).count();
+    std::cout << "   Finalized (normalized) in " << finalize_time << "ms\n";
+    
+    // Verify no more documents can be added
+    {
+        auto embedding = generate_random_embedding(DIM, rng);
+        std::string json_str = create_json_document("blocked", "Should fail", embedding);
+        simdjson::padded_string padded(json_str);
+        simdjson::ondemand::document doc;
+        parser.iterate(padded).get(doc);
+        auto error = store.add_document(doc);
+        assert(error == simdjson::INCORRECT_TYPE);
+        std::cout << "   ✅ Document additions correctly blocked after finalization\n";
+    }
+    
+    // Phase 3: Concurrent searches (multiple threads)
+    std::atomic<size_t> total_searches{0};
+    auto search_start = high_resolution_clock::now();
+    
+    std::vector<std::thread> searchers;
+    for (size_t t = 0; t < 4; ++t) {
+        searchers.emplace_back([&store, &total_searches, t]() {
+            std::mt19937 rng(t);
+            for (size_t i = 0; i < 25; ++i) {
+                auto query = generate_random_embedding(DIM, rng);
+                auto results = store.search(query.data(), 10);
+                assert(!results.empty() && results.size() <= 10);
+                total_searches++;
             }
-            std::this_thread::sleep_for(milliseconds(10));
-        }
-        docs_loaded = count;
-        stop_loading = true;
-    });
+        });
+    }
     
-    // Thread 2: Continuous normalization
-    std::thread normalizer([&]() {
-        size_t iterations = 0;
-        while (!stop_normalizing && iterations < 100) {
-            store.normalize_all();
-            iterations++;
-            std::this_thread::sleep_for(milliseconds(50));
-        }
-        normalizations = iterations;
-        stop_normalizing = true;
-    });
+    for (auto& t : searchers) {
+        t.join();
+    }
     
-    // Thread 3: Continuous searching
-    std::thread searcher([&]() {
-        std::mt19937 rng(3);
-        size_t iterations = 0;
-        
-        while (!stop_searching && iterations < SEARCH_ITERATIONS) {
-            auto query = generate_random_embedding(DIM, rng);
-            auto results = store.search(query.data(), 10);
-            assert(results.size() <= 10);
-            iterations++;
-            std::this_thread::sleep_for(milliseconds(30));
-        }
-        searches = iterations;
-        stop_searching = true;
-    });
+    auto search_time = duration_cast<milliseconds>(high_resolution_clock::now() - search_start).count();
+    std::cout << "   Performed " << total_searches.load() << " concurrent searches in " << search_time << "ms\n";
     
-    // Wait for all operations to complete
-    loader.join();
-    normalizer.join();
-    searcher.join();
-    
-    auto end = high_resolution_clock::now();
-    auto elapsed = duration_cast<milliseconds>(end - start).count();
-    
-    std::cout << "✅ Concurrent operations completed in " << elapsed << "ms\n";
-    std::cout << "   Documents loaded: " << docs_loaded.load() << "\n";
-    std::cout << "   Normalizations: " << normalizations.load() << "\n";
-    std::cout << "   Searches: " << searches.load() << "\n";
-    std::cout << "   Final store size: " << store.size() << "\n";
+    auto total_time = duration_cast<milliseconds>(high_resolution_clock::now() - start).count();
+    std::cout << "✅ Phase separation test completed in " << total_time << "ms\n";
 }
 
 // Test 5: Memory fence effectiveness
@@ -391,7 +370,7 @@ int main() {
     test_concurrent_inserts();
     test_oversize_allocation();
     test_alignment_requests();
-    test_concurrent_operations();
+    test_phase_separation();
     test_memory_fence();
     
     std::cout << "\n✅ All stress tests passed!\n";

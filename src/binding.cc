@@ -19,6 +19,8 @@ public:
             InstanceMethod("addDocument", &VectorStoreWrapper::AddDocument),
             InstanceMethod("search", &VectorStoreWrapper::Search),
             InstanceMethod("normalize", &VectorStoreWrapper::Normalize),
+            InstanceMethod("finalize", &VectorStoreWrapper::FinalizeStore),
+            InstanceMethod("isFinalized", &VectorStoreWrapper::IsFinalized),
             InstanceMethod("size", &VectorStoreWrapper::Size)
         });
         
@@ -112,8 +114,8 @@ public:
             }
         }
         
-        // Normalize after batch load
-        store_->normalize_all();
+        // Finalize after batch load - normalize and switch to serving phase
+        store_->finalize();
     }
     
     void AddDocument(const Napi::CallbackInfo& info) {
@@ -198,6 +200,14 @@ public:
     
     void Normalize(const Napi::CallbackInfo& info) {
         store_->normalize_all();
+    }
+    
+    void FinalizeStore(const Napi::CallbackInfo& info) {
+        store_->finalize();
+    }
+    
+    Napi::Value IsFinalized(const Napi::CallbackInfo& info) {
+        return Napi::Boolean::New(info.Env(), store_->is_finalized());
     }
     
     Napi::Value Size(const Napi::CallbackInfo& info) {
