@@ -71,8 +71,17 @@ test-tsan: LDFLAGS += -fsanitize=thread
 test-tsan: clean $(STRESS_TARGET)
 	./$(STRESS_TARGET)
 
-# Run stress tests
+# Run stress tests with sanitizers by default
+# Use SANITIZER=none to disable, SANITIZER=thread for TSan
+SANITIZER ?= address
+
+ifeq ($(SANITIZER),address)
+stress: test-asan
+else ifeq ($(SANITIZER),thread)
+stress: test-tsan
+else
 stress: $(STRESS_TARGET)
 	./$(STRESS_TARGET)
+endif
 
 .PHONY: all clean run debug test-asan test-tsan stress

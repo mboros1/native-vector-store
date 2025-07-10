@@ -370,7 +370,23 @@ void test_memory_fence() {
 
 int main() {
     std::cout << "🔥 Starting concurrent stress tests...\n";
-    std::cout << "   Build with: -fsanitize=address,thread -g\n";
+    
+    // Detect which sanitizer is enabled
+    #if defined(__has_feature)
+        #if __has_feature(address_sanitizer)
+            std::cout << "   Running with AddressSanitizer (ASAN)\n";
+        #elif __has_feature(thread_sanitizer)
+            std::cout << "   Running with ThreadSanitizer (TSAN)\n";
+        #endif
+    #elif defined(__SANITIZE_ADDRESS__)
+        std::cout << "   Running with AddressSanitizer (ASAN)\n";
+    #elif defined(__SANITIZE_THREAD__)
+        std::cout << "   Running with ThreadSanitizer (TSAN)\n";
+    #else
+        std::cout << "   ⚠️  Running without sanitizers - use 'make stress' for ASAN by default\n";
+        std::cout << "   Or use: make stress SANITIZER=thread for TSAN\n";
+        std::cout << "           make stress SANITIZER=none to disable\n";
+    #endif
     
     test_concurrent_inserts();
     test_oversize_allocation();
