@@ -8,6 +8,7 @@
 #include <simdjson.h>
 #include <omp.h>
 #include <mutex>
+#include <shared_mutex>
 #include <cassert>
 #include <algorithm>
 #include <functional>
@@ -110,6 +111,12 @@ struct TopK {
         heap.reserve(k + 1); // Reserve k+1 to avoid reallocation during push
     }
     
+    // Make TopK move-only to prevent copy-construction races
+    TopK(const TopK&) = delete;
+    TopK& operator=(const TopK&) = delete;
+    TopK(TopK&&) = default;
+    TopK& operator=(TopK&&) = default;
+    
     void push(float score, size_t idx) {
         if (heap.size() < k) {
             heap.emplace_back(score, idx);
@@ -151,14 +158,10 @@ class VectorStore {
         float* embedding;  // Extracted pointer for fast access
     };
     
-    enum class Phase {
-        LOADING,     // Can add documents, no searches allowed
-        SERVING      // No document additions, only searches
-    };
-    
     std::vector<Entry> entries_;
     std::atomic<size_t> count_{0};  // Atomic for parallel loading
-    std::atomic<Phase> phase_{Phase::LOADING};
+    std::atomic<bool> is_finalized_{false};  // Simple flag: false = loading, true = serving
+    mutable std::shared_mutex search_mutex_;  // Protects against overlapping OpenMP teams
     
 public:
     explicit VectorStore(size_t dim) : dim_(dim) {
@@ -176,9 +179,9 @@ public:
     }
     
     simdjson::error_code add_document(simdjson::ondemand::object& json_doc) {
-        // Check if we're in loading phase
-        if (phase_.load(std::memory_order_acquire) != Phase::LOADING) {
-            return simdjson::INCORRECT_TYPE;  // Cannot add documents after finalization
+        // Cannot add documents after finalization
+        if (is_finalized_.load(std::memory_order_acquire)) {
+            return simdjson::INCORRECT_TYPE;
         }
         
         // Parse with error handling
@@ -284,6 +287,11 @@ public:
     
     // Finalize the store: normalize and switch to serving phase
     void finalize() {
+        // If already finalized, do nothing
+        if (is_finalized_.load(std::memory_order_acquire)) {
+            return;
+        }
+        
         // Get final count
         size_t final_count = count_.load(std::memory_order_acquire);
         
@@ -310,8 +318,8 @@ public:
         // Ensure all threads see the normalized data
         #pragma omp barrier
         
-        // Switch to serving phase with full fence
-        phase_.store(Phase::SERVING, std::memory_order_seq_cst);
+        // Mark as finalized - this is the ONLY place this flag is set
+        is_finalized_.store(true, std::memory_order_seq_cst);
     }
     
     // Deprecated: use finalize() instead
@@ -321,9 +329,13 @@ public:
     
     std::vector<std::pair<float, size_t>> 
     search(const float* query, size_t k) const {
-        // Check if we're in serving phase
-        if (phase_.load(std::memory_order_acquire) != Phase::SERVING) {
-            return {};  // No searches during loading phase
+        // Exclusive lock: prevent overlapping OpenMP teams
+        // Since each search uses all threads via OpenMP, concurrent searches provide no benefit
+        std::unique_lock<std::shared_mutex> lock(search_mutex_);
+
+        // Search can ONLY run if finalized
+        if (!is_finalized_.load(std::memory_order_acquire)) {
+            return {};
         }
         
         size_t n = count_.load(std::memory_order_acquire);
@@ -331,12 +343,23 @@ public:
         
         k = std::min(k, n);  // Ensure k doesn't exceed count
         
-        // For small k or n, use simple approach
-        if (k > 100 || n < 10000) {
-            // Use shared scores array - simple and fast for these cases
-            std::vector<float> scores(n);
+        
+        // Always use per-thread heaps to avoid any shared memory races
+        const int num_threads = omp_get_max_threads();
+        std::vector<TopK> thread_heaps;
+        thread_heaps.reserve(num_threads);
+        for (int i = 0; i < num_threads; ++i) {
+            thread_heaps.emplace_back(k);  // in-place construction, no copies
+        }
+
+         std::vector<std::pair<float,std::size_t>> result;  
+        
+        #pragma omp parallel
+        {
+            const int tid = omp_get_thread_num();
+            TopK& local_heap = thread_heaps[tid];
             
-            #pragma omp parallel for if(omp_get_level() == 0)
+            #pragma omp for  // default barrier kept - ensures all threads finish before merge
             for (size_t i = 0; i < n; ++i) {
                 float score = 0.0f;
                 const float* emb = entries_[i].embedding;
@@ -345,55 +368,23 @@ public:
                 for (size_t j = 0; j < dim_; ++j) {
                     score += emb[j] * query[j];
                 }
-                scores[i] = score;
-            }
-            
-            // Top-k selection
-            std::vector<std::pair<float, size_t>> idx(n);
-            for (size_t i = 0; i < n; ++i) {
-                idx[i] = {scores[i], i};
-            }
-            std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
-                             [](const auto& a, const auto& b) { return a.first > b.first; });
-            idx.resize(k);
-            return idx;
-        } else {
-            // For large n and small k, use per-thread heaps without custom reduction
-            const int num_threads = omp_get_max_threads();
-            std::vector<TopK> thread_heaps(num_threads, TopK(k));
-            
-            #pragma omp parallel if(omp_get_level() == 0)
-            {
-                const int tid = omp_get_thread_num();
-                TopK& local_heap = thread_heaps[tid];
                 
-                #pragma omp for nowait
-                for (size_t i = 0; i < n; ++i) {
-                    float score = 0.0f;
-                    const float* emb = entries_[i].embedding;
-                    
-                    #pragma omp simd reduction(+:score)
-                    for (size_t j = 0; j < dim_; ++j) {
-                        score += emb[j] * query[j];
-                    }
-                    
-                    local_heap.push(score, i);
-                }
+                local_heap.push(score, i);
             }
-            
-            // Merge thread-local heaps
-            TopK final_heap(k);
-            for (const auto& heap : thread_heaps) {
-                final_heap.merge(heap);
+
+            #pragma omp barrier
+            #pragma omp single
+            {
+                TopK final_heap(k);
+                for (auto& th : thread_heaps) final_heap.merge(th);
+                result = std::move(final_heap.heap);
             }
-            
-            // Extract and sort final results
-            auto top = std::move(final_heap.heap);
-            std::sort(top.begin(), top.end(), 
-                      [](const auto& a, const auto& b) { return a.first > b.first; });
-            
-            return top;
         }
+        
+        std::sort(result.begin(), result.end(), 
+                  [](const auto& a, const auto& b) { return a.first > b.first; });
+        
+        return result;
     }
     
     const Entry& get_entry(size_t idx) const {
@@ -405,6 +396,6 @@ public:
     }
     
     bool is_finalized() const {
-        return phase_.load(std::memory_order_acquire) == Phase::SERVING;
+        return is_finalized_.load(std::memory_order_acquire);
     }
 };
