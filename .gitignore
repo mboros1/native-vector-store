@@ -28,3 +28,6 @@ cpp_std_partitioned/
 .env
 .env.local
 *.tgz
+
+# Auto-generated files
+config.status

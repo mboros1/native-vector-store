@@ -1,4 +1,0 @@
-#!/bin/bash
-# Configuration status for native-vector-store
-echo "native-vector-store is configured and ready to build"
-echo "Run 'make' to build the project"
