@@ -18,7 +18,7 @@ We discovered that optimal file loading strategies vary dramatically based on fi
 
 ### Phase 1: Baseline Optimization
 First, we optimized the standard loader:
-- Pre-allocated reusable buffers (100MB capacity)
+- Pre-allocated reusable buffers (1MB initial, grows as needed)
 - Used `filesystem::file_size()` to avoid redundant syscalls
 - Implemented producer-consumer pattern with lock-free queues
 

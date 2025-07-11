@@ -68,7 +68,7 @@ void VectorStoreLoader::loadDirectoryAdaptive(VectorStore* store, const std::str
     std::thread producer([&]() {
         // Reusable buffer for standard loading
         std::vector<char> buffer;
-        buffer.reserve(10 * 1024 * 1024); // Reserve 10MB
+        buffer.reserve(1024 * 1024); // Reserve 1MB initial capacity
         
         for (const auto& file_info : file_infos) {
             auto* data = new MixedFileData{
@@ -93,6 +93,10 @@ void VectorStoreLoader::loadDirectoryAdaptive(VectorStore* store, const std::str
                 
             } else {
                 // Standard load for larger files
+                // Ensure buffer has enough capacity
+                if (file_info.size > buffer.capacity()) {
+                    buffer.reserve(file_info.size);
+                }
                 buffer.resize(file_info.size);
                 
                 std::ifstream file(file_info.path, std::ios::binary);

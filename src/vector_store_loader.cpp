@@ -43,7 +43,8 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
     std::thread producer([&]() {
         // Reusable buffer to avoid repeated allocations
         std::vector<char> buffer;
-        buffer.reserve(100 * 1024 * 1024); // Reserve 100MB capacity
+        // Start with reasonable capacity, will grow as needed
+        buffer.reserve(1024 * 1024); // 1MB initial capacity
         
         for (const auto& filepath : json_files) {
             // Get file size without opening (one syscall)
@@ -62,6 +63,10 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                 continue;
             }
             
+            // Ensure buffer has enough capacity
+            if (size > buffer.capacity()) {
+                buffer.reserve(size);
+            }
             // Resize buffer to exact size needed
             buffer.resize(size);
             
