@@ -33,7 +33,7 @@ endif
 TARGET = test_vector_store
 STRESS_TARGET = test_stress
 SOURCES = test_main.cpp
-STRESS_SOURCES = test_stress.cpp vector_store_loader.cpp
+STRESS_SOURCES = test_stress.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
 
