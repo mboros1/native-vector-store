@@ -1,3 +1,3 @@
-const { VectorStore } = require('./build/Release/vector_store');
+const { VectorStore } = require('node-gyp-build')(__dirname);
 
 module.exports = { VectorStore };

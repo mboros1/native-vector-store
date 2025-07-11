@@ -4,12 +4,23 @@
   "description": "High-performance vector store with SIMD optimization for MCP servers",
   "main": "index.js",
   "types": "lib/index.d.ts",
+  "author": "Your Name <your.email@example.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mboros1/native-vector-store.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mboros1/native-vector-store/issues"
+  },
+  "homepage": "https://github.com/mboros1/native-vector-store#readme",
   "scripts": {
     "build": "node-gyp rebuild",
     "clean": "node-gyp clean",
     "test": "node test/test.js",
-    "install": "node-gyp rebuild",
-    "prepack": "npm run build",
+    "install": "node-gyp-build",
+    "prebuildify": "prebuildify --napi --strip",
+    "prebuildify-cross": "prebuildify-cross -i centos7-devtoolset7 -i alpine -i linux-arm64 -i darwin-arm64 -i darwin-x64+arm64",
     "benchmark": "node test/test.js",
     "example": "node examples/mcp-server.js demo",
     "embed": "node embed_dir.js"
@@ -25,11 +36,15 @@
   "dependencies": {
     "dotenv": "^17.2.0",
     "node-addon-api": "^7.0.0",
+    "node-gyp-build": "^4.8.0",
     "openai": "^5.8.3"
   },
   "devDependencies": {
-    "node-gyp": "^10.0.0"
+    "node-gyp": "^10.0.0",
+    "prebuildify": "^6.0.0"
   },
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"],
   "engines": {
     "node": ">=14.0.0"
   },

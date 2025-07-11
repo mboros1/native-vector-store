@@ -1,0 +1,40 @@
+# Source files (we ship the built binary)
+src/*.o
+src/test_*
+src/Makefile
+
+# Build artifacts (but keep prebuilds/)
+build/
+!prebuilds/
+*.log
+.DS_Store
+
+# Test data
+test/
+out/
+out_embedded/
+cpp_std_embedded/
+cpp_std_embeddings/
+cpp_std_partitioned/
+test_data/
+*.bin
+benchmark_results.txt
+
+# Development files
+.env
+.env.local
+*.dSYM/
+**/*.dSYM/
+CLAUDE.md
+.claude_context/
+
+# Git
+.git/
+.gitignore
+
+# Other
+docs/
+scripts/generate_embeddings.js
+scripts/partition_cpp_docs.js
+embed_dir.js
+test_doc.json
