@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "cpp-reference": {
+      "command": "node",
+      "args": [
+        "/path/to/native-vector-store/examples/mcp-cpp-reference-openai.js"
+      ],
+      "env": {
+        "OPENAI_API_KEY": "your-openai-api-key-here",
+        "CPP_DOCS_PATH": "/path/to/cpp_std_embedded"
+      }
+    }
+  }
+}

@@ -39,6 +39,9 @@
     "node-gyp-build": "^4.8.0",
     "openai": "^5.8.3"
   },
+  "optionalDependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
   "devDependencies": {
     "node-gyp": "^10.0.0",
     "prebuildify": "^6.0.0"
