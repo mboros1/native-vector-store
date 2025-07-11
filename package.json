@@ -1,11 +1,11 @@
 {
   "name": "native-vector-store",
   "version": "0.1.0",
-  "description": "High-performance vector store with SIMD optimization for MCP servers",
+  "description": "High-performance local vector store with SIMD optimization for MCP servers",
   "main": "index.js",
   "types": "lib/index.d.ts",
-  "author": "Your Name <your.email@example.com>",
-  "license": "MIT",
+  "author": "Martin Boros <mboros04@gmail.com>",
+  "license": "Apache 2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mboros1/native-vector-store.git"
