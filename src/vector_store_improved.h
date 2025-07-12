@@ -7,6 +7,11 @@
 #include <mutex>
 #include <shared_mutex>
 
+// Design note on references vs pointers:
+// - Use references (&) when the parameter must not be null and won't change
+// - Use pointers (*) only when nullptr is a valid value or ownership transfer
+// - For output parameters, prefer return values or use references with clear names
+
 // Document represents a searchable item with its text content and metadata.
 // The metadata includes the embedding vector used for similarity search.
 struct Document {

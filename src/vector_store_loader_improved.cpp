@@ -23,7 +23,7 @@ using namespace internal;
 // Loads all JSON files from a directory into the vector store.
 // This orchestrates the entire producer-consumer loading process.
 LoaderStats loadDirectory(
-    VectorStore* store, 
+    VectorStore& store, 
     const std::string& directory_path,
     const LoaderConfig& config
 ) {
@@ -38,7 +38,7 @@ LoaderStats loadDirectory(
         if (config.verbose) {
             std::cerr << "No JSON files found in " << directory_path << std::endl;
         }
-        store->finalize();  // Finalize even if empty
+        store.finalize();  // Finalize even if empty
         return stats;
     }
     
@@ -62,8 +62,8 @@ LoaderStats loadDirectory(
     // Step 4: Start producer thread (reads files)
     std::thread producer(producerThread, 
         std::ref(files), 
-        &queue, 
-        &stats, 
+        std::ref(queue), 
+        std::ref(stats), 
         std::ref(config)
     );
     
@@ -71,10 +71,10 @@ LoaderStats loadDirectory(
     std::vector<std::thread> consumers;
     for (size_t i = 0; i < num_consumers; ++i) {
         consumers.emplace_back(consumerThread,
-            store,
-            &queue,
-            &producer_done,
-            &stats
+            std::ref(store),
+            std::ref(queue),
+            std::ref(producer_done),
+            std::ref(stats)
         );
     }
     
@@ -87,7 +87,7 @@ LoaderStats loadDirectory(
     }
     
     // Step 7: Finalize the store (normalize embeddings)
-    store->finalize();
+    store.finalize();
     
     // Calculate elapsed time
     auto end_time = std::chrono::high_resolution_clock::now();
@@ -104,7 +104,7 @@ LoaderStats loadDirectory(
 
 // Loads a single JSON file synchronously.
 // This is useful for testing or when you want to load files one at a time.
-bool loadFile(VectorStore* store, const std::string& file_path) {
+bool loadFile(VectorStore& store, const std::string& file_path) {
     // Read file contents
     std::ifstream file(file_path, std::ios::binary | std::ios::ate);
     if (!file) {
@@ -131,11 +131,11 @@ bool loadFile(VectorStore* store, const std::string& file_path) {
             // Process array of documents
             for (auto element : doc.get_array()) {
                 simdjson::ondemand::object obj = element.get_object();
-                store->add_document(obj);
+                store.add_document(obj);
             }
         } else {
             // Process single document
-            store->add_document(doc);
+            store.add_document(doc);
         }
         
         return true;
@@ -191,11 +191,10 @@ namespace internal {
 // Sequential I/O is optimal for both HDDs and SSDs.
 void producerThread(
     const std::vector<std::filesystem::path>& files,
-    void* queue_ptr,
-    LoaderStats* stats,
+    atomic_queue::AtomicQueue<QueuedFile*, 1024>& queue,
+    LoaderStats& stats,
     const LoaderConfig& config
 ) {
-    auto* queue = static_cast<atomic_queue::AtomicQueue<QueuedFile*, 1024>*>(queue_ptr);
     
     // Pre-allocate a reusable buffer for file reading
     std::string read_buffer;
@@ -209,7 +208,7 @@ void producerThread(
             // Get file size to decide loading method
             auto file_size = std::filesystem::file_size(filepath);
             file_data->size = file_size;
-            stats->bytes_processed += file_size;
+            stats.bytes_processed += file_size;
             
             // Decide whether to use memory mapping
             if (config.use_adaptive_loading && shouldUseMmap(filepath, config)) {
@@ -217,7 +216,7 @@ void producerThread(
                 file_data->mmap_data = memoryMapFile(filepath, file_data->size);
                 if (file_data->mmap_data) {
                     file_data->is_mmap = true;
-                    stats->mmap_files++;
+                    stats.mmap_files++;
                 }
             }
             
@@ -227,7 +226,7 @@ void producerThread(
                 std::ifstream file(filepath, std::ios::binary);
                 if (!file) {
                     delete file_data;
-                    stats->files_failed++;
+                    stats.files_failed++;
                     continue;
                 }
                 
@@ -239,22 +238,22 @@ void producerThread(
                 
                 if (!file.read(read_buffer.data(), file_size)) {
                     delete file_data;
-                    stats->files_failed++;
+                    stats.files_failed++;
                     continue;
                 }
                 
                 // Copy to file data (queue owns the memory)
                 file_data->content = read_buffer;
-                stats->standard_files++;
+                stats.standard_files++;
             }
             
             // Queue the file for processing
             // This blocks if queue is full, providing backpressure
-            queue->push(file_data);
+            queue.push(file_data);
             
         } catch (const std::exception& e) {
             delete file_data;
-            stats->files_failed++;
+            stats.files_failed++;
             if (config.verbose) {
                 std::cerr << "Failed to read " << filepath << ": " << e.what() << std::endl;
             }
@@ -265,12 +264,11 @@ void producerThread(
 // Consumer thread: processes queued files by parsing JSON.
 // Multiple consumers work in parallel for CPU-intensive parsing.
 void consumerThread(
-    VectorStore* store,
-    void* queue_ptr,
-    std::atomic<bool>* producer_done,
-    LoaderStats* stats
+    VectorStore& store,
+    atomic_queue::AtomicQueue<QueuedFile*, 1024>& queue,
+    std::atomic<bool>& producer_done,
+    LoaderStats& stats
 ) {
-    auto* queue = static_cast<atomic_queue::AtomicQueue<QueuedFile*, 1024>*>(queue_ptr);
     
     // Each consumer needs its own parser (they're not thread-safe)
     simdjson::ondemand::parser parser;
@@ -279,14 +277,14 @@ void consumerThread(
         QueuedFile* file_data = nullptr;
         
         // Try to get a file from the queue
-        if (queue->try_pop(file_data)) {
+        if (queue.try_pop(file_data)) {
             // Process the file
             bool success = parseJsonFile(store, *file_data, stats);
             
             if (success) {
-                stats->files_loaded++;
+                stats.files_loaded++;
             } else {
-                stats->files_failed++;
+                stats.files_failed++;
             }
             
             // Clean up memory-mapped files
@@ -295,7 +293,7 @@ void consumerThread(
             }
             
             delete file_data;
-        } else if (producer_done->load()) {
+        } else if (producer_done.load()) {
             // Producer is done and queue is empty, exit
             break;
         } else {

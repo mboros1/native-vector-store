@@ -48,7 +48,7 @@ namespace VectorStoreLoader {
     // Automatically finalizes the store after loading.
     // Returns statistics about the loading process.
     LoaderStats loadDirectory(
-        VectorStore* store, 
+        VectorStore& store, 
         const std::string& directory_path,
         const LoaderConfig& config = LoaderConfig{}
     );
@@ -57,7 +57,7 @@ namespace VectorStoreLoader {
     // File can contain either a single document or an array of documents.
     // Does NOT finalize the store (caller must do it).
     bool loadFile(
-        VectorStore* store,
+        VectorStore& store,
         const std::string& file_path
     );
     
@@ -96,27 +96,27 @@ namespace VectorStoreLoader {
         // Stops when all files are read or queue is terminated.
         void producerThread(
             const std::vector<std::filesystem::path>& files,
-            void* queue,  // atomic_queue::AtomicQueue<QueuedFile*>*
-            LoaderStats* stats,
+            atomic_queue::AtomicQueue<QueuedFile*>& queue,
+            LoaderStats& stats,
             const LoaderConfig& config
         );
         
         // Consumer thread function: dequeues files and parses JSON.
         // Stops when producer is done and queue is empty.
         void consumerThread(
-            VectorStore* store,
-            void* queue,  // atomic_queue::AtomicQueue<QueuedFile*>*
-            std::atomic<bool>* producer_done,
-            LoaderStats* stats
+            VectorStore& store,
+            atomic_queue::AtomicQueue<QueuedFile*>& queue,
+            std::atomic<bool>& producer_done,
+            LoaderStats& stats
         );
         
         // Parses a JSON file that may contain one or many documents.
         // Handles both single document and array formats.
         // Updates stats with number of documents parsed.
         bool parseJsonFile(
-            VectorStore* store,
+            VectorStore& store,
             const QueuedFile& file,
-            LoaderStats* stats
+            LoaderStats& stats
         );
         
         // Memory-maps a file for zero-copy access.
