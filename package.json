@@ -40,14 +40,21 @@
     "openai": "^5.8.3"
   },
   "optionalDependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4"
+    "@modelcontextprotocol/sdk": "^1.15.1"
   },
   "devDependencies": {
     "node-gyp": "^10.0.0",
     "prebuildify": "^6.0.0"
   },
-  "os": ["darwin", "linux", "win32"],
-  "cpu": ["x64", "arm64"],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "engines": {
     "node": ">=14.0.0"
   },

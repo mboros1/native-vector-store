@@ -32,8 +32,8 @@ endif
 
 TARGET = test_vector_store
 STRESS_TARGET = test_stress
-SOURCES = test_main.cpp
-STRESS_SOURCES = test_stress.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp
+SOURCES = test_main.cpp vector_store.cpp
+STRESS_SOURCES = test_stress.cpp vector_store.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
 
@@ -55,7 +55,7 @@ clean:
 rebuild: clean all
 
 run: $(TARGET)
-	./$(TARGET)
+	./$(TARGET) ../test
 
 debug: $(TARGET)
 	lldb ./$(TARGET)
