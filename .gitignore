@@ -12,6 +12,8 @@ test_data/
 *.o
 src/test_vector_store
 src/test_main
+src/stress_test
+src/test_stress
 *.a
 *.so
 *.dylib
