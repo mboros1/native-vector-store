@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include "atomic_queue.h"
 
 // Forward declarations
 class VectorStore;

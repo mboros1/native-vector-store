@@ -1,0 +1,68 @@
+# Makefile for building the improved/refactored vector store
+# This demonstrates the modular build approach
+
+CXX = g++
+CXXFLAGS = -std=c++17 -O3 -march=native -fopenmp -fno-exceptions -Wall -Wextra
+INCLUDES = -I. -I/usr/local/include
+
+# Platform-specific flags
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    # macOS - use Homebrew paths
+    INCLUDES += -I/opt/homebrew/include -I/opt/homebrew/opt/libomp/include
+    LDFLAGS = -L/opt/homebrew/lib -L/opt/homebrew/opt/libomp/lib
+    LIBS = -lsimdjson -lomp
+else
+    # Linux
+    LIBS = -lsimdjson -lgomp
+endif
+
+# Source files
+SRCS = vector_store_improved.cpp \
+       vector_store_loader_improved.cpp \
+       vector_store_loader_internal.cpp
+
+# Object files
+OBJS = $(SRCS:.cpp=.o)
+
+# Header dependencies
+HEADERS = vector_store_improved.h \
+          vector_store_loader_improved.h \
+          vector_store_loader_internal.h \
+          atomic_queue.h \
+          defs.h
+
+# Target library
+TARGET = libvectorstore_improved.a
+
+# Build rules
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	ar rcs $@ $^
+
+%.o: %.cpp $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Example test program
+test_improved: test_improved.o $(TARGET)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(TARGET) $(LIBS)
+
+clean:
+	rm -f $(OBJS) $(TARGET) test_improved test_improved.o
+
+# Show the modular structure
+info:
+	@echo "=== Improved Vector Store Structure ==="
+	@echo "Core Components:"
+	@echo "  - vector_store_improved.{h,cpp}: Main store implementation"
+	@echo "  - vector_store_loader_improved.{h,cpp}: Public loading API"
+	@echo "  - vector_store_loader_internal.{h,cpp}: Internal implementation"
+	@echo ""
+	@echo "Key Improvements:"
+	@echo "  - Clear separation of interface and implementation"
+	@echo "  - References instead of pointers where appropriate"
+	@echo "  - Comprehensive documentation explaining HOW things work"
+	@echo "  - Modular design for easier testing and maintenance"
+
+.PHONY: all clean info
