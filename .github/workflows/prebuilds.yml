@@ -21,18 +21,32 @@ jobs:
       
       - name: Install dependencies
         run: |
-          dnf install -y nodejs npm gcc-c++ make python3 git
-          dnf install -y libgomp-devel
-          # Install static libgomp
-          dnf install -y libgomp-static
+          dnf install -y nodejs npm gcc-c++ make python3 git cmake
+          
+      - name: Build static libomp
+        run: |
+          # Build OpenMP from source to get static library
+          git clone --depth 1 --branch llvmorg-18.1.8 https://github.com/llvm/llvm-project.git
+          cmake -S llvm-project/openmp -B openmp-build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DLIBOMP_ENABLE_SHARED=OFF \
+                -DLIBOMP_ENABLE_STATIC=ON \
+                -DCMAKE_C_COMPILER=gcc \
+                -DCMAKE_CXX_COMPILER=g++
+          cmake --build openmp-build --target omp -j$(nproc)
+          # Install the static library
+          cp openmp-build/runtime/src/libomp.a /usr/local/lib/
+          # Also copy headers
+          cp -r llvm-project/openmp/runtime/src/*.h /usr/local/include/ || true
       
       - name: Install npm dependencies
         run: npm ci
       
       - name: Build for Linux ${{ matrix.arch }}
         run: |
-          # Static link libgomp to avoid runtime dependency
-          export LDFLAGS="-static-libgcc -static-libstdc++ -Wl,-Bstatic -lgomp -Wl,-Bdynamic"
+          # Static link libomp to avoid runtime dependency
+          export LDFLAGS="-L/usr/local/lib -static-libgcc -static-libstdc++ -Wl,-Bstatic -lomp -Wl,-Bdynamic"
+          export CXXFLAGS="-I/usr/local/include"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
       
       - uses: actions/upload-artifact@v4
