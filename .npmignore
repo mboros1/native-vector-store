@@ -38,3 +38,6 @@ scripts/generate_embeddings.js
 scripts/partition_cpp_docs.js
 embed_dir.js
 test_doc.json
+
+# Make sure deps (vendored dependencies) are included
+!deps/

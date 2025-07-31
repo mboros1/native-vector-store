@@ -1,0 +1,155 @@
+name: Build Prebuilds
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Allow manual triggering for testing
+
+jobs:
+  prebuild-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:40
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          dnf install -y nodejs npm gcc-c++ make python3 git
+          dnf install -y libgomp-devel
+          # Install static libgomp
+          dnf install -y libgomp-static
+      
+      - name: Install npm dependencies
+        run: npm ci
+      
+      - name: Build for Linux ${{ matrix.arch }}
+        run: |
+          # Static link libgomp to avoid runtime dependency
+          export LDFLAGS="-static-libgcc -static-libstdc++ -Wl,-Bstatic -lgomp -Wl,-Bdynamic"
+          npx prebuildify --napi --strip --arch=${{ matrix.arch }}
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-linux-${{ matrix.arch }}
+          path: prebuilds/
+
+  prebuild-alpine:
+    runs-on: ubuntu-latest
+    container:
+      image: node:18-alpine
+    strategy:
+      matrix:
+        arch: [x64]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install build dependencies
+        run: |
+          apk add --no-cache python3 make g++ git
+          # Alpine uses musl, which includes OpenMP support
+      
+      - name: Install npm dependencies
+        run: npm ci
+      
+      - name: Build for Alpine ${{ matrix.arch }}
+        run: |
+          npx prebuildify --napi --strip --arch=${{ matrix.arch }} --tag-libc
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-alpine-${{ matrix.arch }}
+          path: prebuilds/
+
+  prebuild-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install libomp
+        run: |
+          brew install libomp
+          # Find libomp static library
+          export LIBOMP_PREFIX=$(brew --prefix libomp)
+          echo "LIBOMP_PREFIX=$LIBOMP_PREFIX" >> $GITHUB_ENV
+      
+      - name: Install npm dependencies
+        run: npm ci
+      
+      - name: Build for macOS ${{ matrix.arch }}
+        run: |
+          # Try to statically link libomp
+          export LDFLAGS="-L${{ env.LIBOMP_PREFIX }}/lib"
+          npx prebuildify --napi --strip --arch=${{ matrix.arch }}
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-darwin-${{ matrix.arch }}
+          path: prebuilds/
+
+  prebuild-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install npm dependencies
+        run: npm ci
+      
+      - name: Build for Windows ${{ matrix.arch }}
+        run: |
+          npx prebuildify --napi --strip --arch=${{ matrix.arch }}
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prebuilds-win32-${{ matrix.arch }}
+          path: prebuilds/
+
+  package:
+    needs: [prebuild-linux, prebuild-alpine, prebuild-macos, prebuild-windows]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prebuilds-*
+          merge-multiple: true
+          path: prebuilds/
+      
+      - name: List prebuilds
+        run: find prebuilds -type f -name "*.node" | sort
+      
+      - name: Create package
+        run: |
+          npm pack
+          
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: "*.tgz"

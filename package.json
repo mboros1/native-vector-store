@@ -44,7 +44,8 @@
   },
   "devDependencies": {
     "node-gyp": "^10.0.0",
-    "prebuildify": "^6.0.0"
+    "prebuildify": "^6.0.0",
+    "prebuildify-cross": "^5.0.0"
   },
   "os": [
     "darwin",
