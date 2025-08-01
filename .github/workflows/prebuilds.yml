@@ -58,7 +58,7 @@ jobs:
         run: |
           # Static link only libomp, keep the addon as a shared object
           export CXXFLAGS="-fopenmp -I/usr/local/include"
-          export LDFLAGS="-L/usr/local/lib -Wl,-Bstatic -l:libomp.a -Wl,-Bdynamic -static-libgcc -static-libstdc++ -pthread"
+          export LDFLAGS="-L/usr/local/lib -Wl,-Bstatic -l:libomp.a -Wl,-Bdynamic -static-libgcc -pthread"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
           
       - name: Verify static linking
