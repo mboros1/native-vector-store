@@ -212,11 +212,9 @@ jobs:
           mkdir test-install && cd test-install
           npm init -y >/dev/null
           npm install ../native-vector-store-*.tgz
-          # Run a simple test to verify the module loads
-          node -e "const vs = require('native-vector-store'); console.log('✓ Module loaded successfully');"
-          # Copy test files and run full test suite
-          cp -r ../test .
-          npm test
+          # Copy and run the installation test
+          cp ../test/test-installed.js .
+          node test-installed.js
 
   test-linux-arm64:
     needs: package
@@ -245,9 +243,8 @@ jobs:
               mkdir test-install && cd test-install &&
               npm init -y >/dev/null &&
               npm install ../native-vector-store-*.tgz &&
-              node -e \"const vs = require('native-vector-store'); console.log('✓ Module loaded successfully');\" &&
-              cp -r ../test . &&
-              npm test
+              cp ../test/test-installed.js . &&
+              node test-installed.js
             "
 
   test-alpine-x64:
@@ -268,11 +265,9 @@ jobs:
           mkdir test-install && cd test-install
           npm init -y >/dev/null
           npm install ../native-vector-store-*.tgz
-          # Run a simple test to verify the module loads
-          node -e "const vs = require('native-vector-store'); console.log('✓ Module loaded successfully');"
-          # Copy test files and run full test suite
-          cp -r ../test .
-          npm test
+          # Copy and run the installation test
+          cp ../test/test-installed.js .
+          node test-installed.js
 
   test-macos:
     needs: package
@@ -303,11 +298,9 @@ jobs:
           mkdir test-install && cd test-install
           npm init -y >/dev/null
           npm install ../native-vector-store-*.tgz
-          # Run a simple test to verify the module loads
-          node -e "const vs = require('native-vector-store'); console.log('✓ Module loaded successfully');"
-          # Copy test files and run full test suite
-          cp -r ../test .
-          npm test
+          # Copy and run the installation test
+          cp ../test/test-installed.js .
+          node test-installed.js
 
   test-windows-x64:
     needs: package
@@ -332,8 +325,6 @@ jobs:
           mkdir test-install && cd test-install
           npm init -y >/dev/null
           npm install ../native-vector-store-*.tgz
-          # Run a simple test to verify the module loads
-          node -e "const vs = require('native-vector-store'); console.log('✓ Module loaded successfully');"
-          # Copy test files and run full test suite
-          cp -r ../test .
-          npm test
+          # Copy and run the installation test
+          cp ../test/test-installed.js .
+          node test-installed.js
