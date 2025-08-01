@@ -98,9 +98,28 @@ jobs:
           echo "Checking for static libgomp:"
           find /usr -name "libgomp.a" 2>/dev/null || echo "No libgomp.a found!"
           
+          # Also check what gcc package provides
+          echo ""
+          echo "Checking gcc package contents for libgomp:"
+          apk info -L gcc | grep -E "(gomp|omp)" || echo "No OpenMP files in gcc package"
+          
+          # Check if we need to install gcc-gfortran for libgomp
+          echo ""
+          echo "Available libgomp packages:"
+          apk search libgomp
+          
           # Static link only libgomp, keep the addon as shared object
+          # Note: On Alpine, libgomp.a is in the gcc package
           export CXXFLAGS="-fopenmp"
-          export LDFLAGS="-Wl,-Bstatic -lgomp -Wl,-Bdynamic -pthread"
+          # Try to force static linking of libgomp with full path if found
+          LIBGOMP_A=$(find /usr -name "libgomp.a" 2>/dev/null | head -1)
+          if [ -n "$LIBGOMP_A" ]; then
+            echo "Found libgomp.a at: $LIBGOMP_A"
+            export LDFLAGS="-Wl,-Bstatic $LIBGOMP_A -Wl,-Bdynamic -pthread"
+          else
+            echo "Warning: libgomp.a not found, trying with -lgomp"
+            export LDFLAGS="-Wl,-Bstatic -lgomp -Wl,-Bdynamic -pthread"
+          fi
           
           # Verify the flags are set
           echo "CXXFLAGS: $CXXFLAGS"
@@ -397,6 +416,13 @@ jobs:
           
           echo ""
           echo "Package installed. Now let's debug why node-gyp-build can't find prebuilds..."
+          
+          # TEMPORARY: Remove the non-musl Linux prebuild that segfaults on Alpine
+          echo ""
+          echo "Removing incompatible linux-x64 prebuild for Alpine test:"
+          rm -f node_modules/native-vector-store/prebuilds/linux-x64/native-vector-store.node
+          echo "Remaining prebuilds:"
+          find node_modules/native-vector-store/prebuilds -name "*.node" | grep linux | sort
           
           # Check what node-gyp-build will look for
           echo ""
