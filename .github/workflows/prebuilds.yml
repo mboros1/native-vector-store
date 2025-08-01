@@ -21,7 +21,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          dnf install -y gcc-c++ make cmake git nodejs npm python3
+          dnf install -y gcc-c++ make cmake git nodejs npm python3 perl
           
       - name: Build static libomp
         run: |
