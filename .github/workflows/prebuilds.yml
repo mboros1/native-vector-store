@@ -94,9 +94,9 @@ jobs:
       
       - name: Build for Alpine ${{ matrix.arch }}
         run: |
-          # Static link libgomp (included with gcc in build-base)
+          # Static link only libgomp, keep the addon as shared object
           export CXXFLAGS="-fopenmp"
-          export LDFLAGS="-static -static-libgcc -l:libgomp.a"
+          export LDFLAGS="-Wl,-Bstatic -l:libgomp.a -Wl,-Bdynamic -pthread"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }} --tag-libc
       
       - uses: actions/upload-artifact@v4
