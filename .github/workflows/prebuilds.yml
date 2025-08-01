@@ -27,20 +27,19 @@ jobs:
         run: |
           # Build only the OpenMP runtime library from source
           git clone --depth 1 --branch llvmorg-18.1.8 https://github.com/llvm/llvm-project.git
-          cd llvm-project/openmp
-          # Build from the openmp directory with options to skip libomptarget
-          cmake -S . -B build \
+          # Build only the runtime subdirectory to avoid libomptarget
+          mkdir -p openmp-build
+          cd openmp-build
+          cmake ../llvm-project/openmp/runtime \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DLIBOMP_ENABLE_SHARED=OFF \
-                -DLIBOMP_ENABLE_STATIC=ON \
-                -DLIBOMP_LIBOMPTARGET=OFF \
                 -DCMAKE_C_COMPILER=gcc \
                 -DCMAKE_CXX_COMPILER=g++
-          cmake --build build --target omp -j$(nproc)
+          make -j$(nproc)
           # Install the static library
-          cp build/runtime/src/libomp.a /usr/local/lib/
+          cp src/libomp.a /usr/local/lib/
           # Copy the main header
-          cp runtime/src/omp.h /usr/local/include/
+          cp ../llvm-project/openmp/runtime/src/omp.h /usr/local/include/
       
       - name: Install npm dependencies
         run: npm ci
