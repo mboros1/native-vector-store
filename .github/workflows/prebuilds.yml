@@ -251,14 +251,20 @@ jobs:
           find prebuilds -type f -name "*.node" | sort
           echo ""
           echo "Full prebuild directory structure:"
-          ls -la prebuilds/
+          tree prebuilds/ || find prebuilds -type f | sort
+          echo ""
+          echo "Checking musl prebuilds specifically:"
+          find prebuilds -path "*musl*" -name "*.node" | sort
       
       - name: Create package
         run: |
           npm pack
           echo ""
-          echo "Package contents:"
-          tar -tzf *.tgz | grep -E "(prebuilds|node_modules)" || echo "No prebuilds in package!"
+          echo "Package contents (prebuilds only):"
+          tar -tzf *.tgz | grep "prebuilds" | sort
+          echo ""
+          echo "Musl prebuilds in package:"
+          tar -tzf *.tgz | grep -E "musl|alpine" | sort || echo "No musl/alpine prebuilds found!"
           
       - uses: actions/upload-artifact@v4
         with:
@@ -341,8 +347,32 @@ jobs:
           mkdir test-install && cd test-install
           npm init -y >/dev/null
           
+          # Extract and examine the package first
+          echo "Extracting package to examine contents..."
+          tar -xzf ../native-vector-store-*.tgz
+          echo ""
+          echo "Package prebuild structure:"
+          find package/prebuilds -type f 2>/dev/null | sort || echo "No prebuilds directory found"
+          echo ""
+          echo "Looking for musl prebuilds:"
+          find package -path "*musl*" -name "*.node" 2>/dev/null | sort || echo "No musl prebuilds found"
+          
           # Install the package normally (with install scripts)
+          echo ""
+          echo "Installing package..."
           npm install ../native-vector-store-*.tgz
+          
+          # Check what node-gyp-build will look for
+          echo ""
+          echo "Node platform info:"
+          node -p "process.platform"
+          node -p "process.arch" 
+          node -p "process.versions"
+          
+          # Check installed package structure
+          echo ""
+          echo "Installed package prebuilds:"
+          find node_modules/native-vector-store/prebuilds -type f 2>/dev/null | sort || echo "No prebuilds found in installed package"
           
           # Copy and run the installation test
           cp ../test/test-installed.js .
