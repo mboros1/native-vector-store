@@ -56,15 +56,18 @@ jobs:
       
       - name: Build for Linux ${{ matrix.arch }}
         run: |
-          # Static link everything including libomp
+          # Static link only libomp, keep the addon as a shared object
           export CXXFLAGS="-fopenmp -I/usr/local/include"
-          export LDFLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++ -l:libomp.a -pthread"
+          export LDFLAGS="-L/usr/local/lib -Wl,-Bstatic -l:libomp.a -Wl,-Bdynamic -static-libgcc -static-libstdc++ -pthread"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
           
       - name: Verify static linking
         run: |
-          # Check that no shared libraries are needed
-          objdump -p prebuilds/linux-${{ matrix.arch }}/*.node | grep NEEDED || echo "✓ No shared dependencies"
+          # Check that OpenMP is statically linked
+          echo "Checking for OpenMP dependencies..."
+          objdump -p prebuilds/linux-${{ matrix.arch }}/*.node | grep NEEDED | grep -i omp || echo "✓ No OpenMP runtime dependency"
+          echo "All shared library dependencies:"
+          ldd prebuilds/linux-${{ matrix.arch }}/*.node || true
       
       - uses: actions/upload-artifact@v4
         with:
