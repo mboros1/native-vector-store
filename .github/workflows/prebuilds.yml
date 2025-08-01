@@ -179,9 +179,12 @@ jobs:
       
       - name: Build for macOS ${{ matrix.arch }}
         run: |
-          # Try to statically link libomp
-          export LDFLAGS="-L${{ env.LIBOMP_PREFIX }}/lib"
+          # Build with dynamic libomp linking
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
+          
+          # Verify the build
+          echo "Checking dynamic dependencies:"
+          otool -L prebuilds/darwin-${{ matrix.arch }}/*.node || true
       
       - uses: actions/upload-artifact@v4
         with:

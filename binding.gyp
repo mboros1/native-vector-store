@@ -18,15 +18,22 @@
       "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
       "conditions": [
         ["OS=='mac'", {
-          "include_dirs": ["/opt/homebrew/opt/libomp/include"],
+          "include_dirs": [
+            "/opt/homebrew/opt/libomp/include",
+            "/usr/local/opt/libomp/include"
+          ],
           "xcode_settings": {
             "GCC_ENABLE_CPP_EXCEPTIONS": "NO",
             "OTHER_CFLAGS": ["-Xpreprocessor", "-fopenmp"],
             "OTHER_CPLUSPLUSFLAGS": ["-Xpreprocessor", "-fopenmp", "-std=c++17"],
-            "OTHER_LDFLAGS": ["-L/opt/homebrew/opt/libomp/lib", "-lomp"],
+            "OTHER_LDFLAGS": ["-lomp"],
             "CLANG_CXX_LANGUAGE_STANDARD": "c++17"
           },
-          "libraries": ["-L/opt/homebrew/opt/libomp/lib", "-lomp"]
+          "libraries": ["-lomp"],
+          "library_dirs": [
+            "/opt/homebrew/opt/libomp/lib",
+            "/usr/local/opt/libomp/lib"
+          ]
         }],
         ["OS=='linux'", {
           "cflags_cc": ["-fopenmp"],
