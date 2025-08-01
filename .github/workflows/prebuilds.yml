@@ -188,3 +188,136 @@ jobs:
         with:
           name: npm-package
           path: "*.tgz"
+
+  # Test jobs for each platform
+  test-linux-x64:
+    needs: prebuild-linux
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-linux-x64
+          path: prebuilds/
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run tests with prebuild
+        run: |
+          echo "Testing Linux x64 prebuild..."
+          npm test
+
+  test-linux-arm64:
+    needs: prebuild-linux
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-linux-arm64
+          path: prebuilds/
+      
+      - name: Run tests in ARM64 container
+        uses: docker://node:18-bullseye
+        with:
+          platform: linux/arm64
+          args: |
+            sh -c "
+              cd /github/workspace && 
+              npm ci && 
+              echo 'Testing Linux ARM64 prebuild...' && 
+              npm test
+            "
+
+  test-alpine-x64:
+    needs: prebuild-alpine
+    runs-on: ubuntu-latest
+    container: node:18-alpine
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-alpine-x64
+          path: prebuilds/
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run tests with prebuild
+        run: |
+          echo "Testing Alpine x64 prebuild..."
+          npm test
+
+  test-macos:
+    needs: prebuild-macos
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-13  # Intel Mac
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-darwin-${{ matrix.arch }}
+          path: prebuilds/
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run tests with prebuild
+        run: |
+          echo "Testing macOS ${{ matrix.arch }} prebuild..."
+          npm test
+
+  test-windows-x64:
+    needs: prebuild-windows
+    runs-on: windows-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          name: prebuilds-win32-x64
+          path: prebuilds/
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run tests with prebuild
+        run: |
+          echo "Testing Windows x64 prebuild..."
+          npm test
