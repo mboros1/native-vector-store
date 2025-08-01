@@ -367,10 +367,13 @@ jobs:
           echo "Looking for musl prebuilds:"
           find package -path "*musl*" -name "*.node" 2>/dev/null | sort || echo "No musl prebuilds found"
           
-          # Install the package normally (with install scripts)
+          # Install the package without running scripts first to debug
           echo ""
-          echo "Installing package..."
-          npm install ../native-vector-store-*.tgz
+          echo "Installing package without scripts to debug..."
+          npm install --ignore-scripts ../native-vector-store-*.tgz
+          
+          echo ""
+          echo "Package installed. Now let's debug why node-gyp-build can't find prebuilds..."
           
           # Check what node-gyp-build will look for
           echo ""
@@ -477,6 +480,13 @@ jobs:
               console.log('Stack:', e.stack);
             }
           "
+          cd ../..
+          
+          # Now try to run the install script manually
+          echo ""
+          echo "Running install script manually:"
+          cd node_modules/native-vector-store
+          npm run install || echo "Install script failed"
           cd ../..
           
           # Copy and run the installation test
