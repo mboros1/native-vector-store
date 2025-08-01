@@ -29,7 +29,8 @@ jobs:
           cmake -S llvm-project/openmp -B openmp-build \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DLIBOMP_ENABLE_SHARED=OFF \
-                -DLIBOMP_ENABLE_STATIC=ON
+                -DLIBOMP_ENABLE_STATIC=ON \
+                -DOPENMP_ENABLE_LIBOMPTARGET=OFF
           cmake --build openmp-build --target omp -j$(nproc)
           
           # Install the archive and header where the linker can find them
