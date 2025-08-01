@@ -25,21 +25,31 @@ jobs:
           
       - name: Build static libomp
         run: |
+          set -euo pipefail
+          
           git clone --depth 1 --branch llvmorg-18.1.8 https://github.com/llvm/llvm-project.git
+          
           cmake -S llvm-project/openmp -B openmp-build \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DLIBOMP_ENABLE_SHARED=OFF \
-                -DLIBOMP_ENABLE_STATIC=ON \
                 -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
-                -DOPENMP_ENABLE_ARCHER=OFF \
-                -DCMAKE_VERBOSE_MAKEFILE=ON
-          cmake --build openmp-build --target omp -j$(nproc) -- -v
+                -DOPENMP_ENABLE_ARCHER=OFF
           
-          # Find where libomp.a was built and copy manually
-          echo "Finding libomp.a..."
-          find openmp-build -name 'libomp.a' -print
-          cp $(find openmp-build -name 'libomp.a') /usr/local/lib/
-          cp $(find llvm-project/openmp -name 'omp.h' | grep -E 'include/omp.h$' | head -1) /usr/local/include/
+          cmake --build openmp-build --target omp -j"$(nproc)"
+          
+          # Locate artifacts robustly
+          LIBOMP_PATH=$(find openmp-build -type f -name 'libomp.a' | head -n 1)
+          HEADER_PATH=$(find llvm-project/openmp -type f -name 'omp.h' | head -n 1)
+          
+          if [[ -z "$LIBOMP_PATH" || -z "$HEADER_PATH" ]]; then
+            echo "❌  libomp.a or omp.h not found"; exit 1
+          fi
+          
+          echo "libomp.a → $LIBOMP_PATH"
+          echo "omp.h    → $HEADER_PATH"
+          
+          cp "$LIBOMP_PATH" /usr/local/lib/
+          cp "$HEADER_PATH" /usr/local/include/
       
       - name: Install npm dependencies
         run: npm ci
