@@ -121,42 +121,40 @@ jobs:
       
       - name: Ensure correct musl prebuild layout
         run: |
-          # Calculate the correct destination path
+          # Calculate the correct destination paths
           ABI_DIR="napi-v$(node -p 'process.versions.napi')"
           ARCH="${{ matrix.arch }}"
-          DEST="prebuilds/linux-${ARCH}-musl/${ABI_DIR}"
           
-          echo "Expected destination: $DEST"
+          echo "Expected destinations for musl prebuild:"
+          echo "- prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
+          echo "- prebuilds/linux-${ARCH}-musl/native-vector-store.node"
           
-          # Check if prebuildify already put it in the right place
-          if [ -f "$DEST/native-vector-store.node" ]; then
-            echo "✅ Prebuild already in correct location"
-          else
-            echo "📁 Creating destination directory: $DEST"
-            mkdir -p "$DEST"
-            
-            # Find the musl prebuild (could be in various locations)
-            MUSL_NODE=$(find prebuilds -name "*.musl.node" -o -name "*.node" | grep -E "(musl|linux-${ARCH})" | head -1)
-            
-            if [ -n "$MUSL_NODE" ]; then
-              echo "📋 Found musl prebuild at: $MUSL_NODE"
-              cp "$MUSL_NODE" "$DEST/native-vector-store.node"
-              echo "✅ Copied to: $DEST/native-vector-store.node"
-            else
-              echo "❌ No musl prebuild found!"
-              exit 1
-            fi
+          # Find the musl prebuild
+          MUSL_NODE=$(find prebuilds -name "*.musl.node" -o -name "*.node" | grep -E "(musl|linux-${ARCH})" | head -1)
+          
+          if [ -z "$MUSL_NODE" ]; then
+            echo "❌ No musl prebuild found!"
+            exit 1
           fi
           
-          # Final validation
-          test -f "$DEST/native-vector-store.node" || {
-            echo "❌ Prebuild missing at $DEST"
-            exit 1
-          }
+          echo "📋 Found musl prebuild at: $MUSL_NODE"
           
-          # Clean up any duplicates in the wrong location
-          if [ "$MUSL_NODE" != "$DEST/native-vector-store.node" ] && [ -f "$MUSL_NODE" ]; then
-            echo "🧹 Removing duplicate at: $MUSL_NODE"
+          # Ensure it exists in both locations node-gyp-build might check
+          mkdir -p "prebuilds/linux-${ARCH}-musl/${ABI_DIR}"
+          mkdir -p "prebuilds/linux-${ARCH}-musl"
+          
+          # Copy to both locations
+          cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
+          cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/native-vector-store.node"
+          
+          # Also try the non-ABI location that node-gyp-build might check
+          mkdir -p "prebuilds/linux-${ARCH}"
+          cp "$MUSL_NODE" "prebuilds/linux-${ARCH}/native-vector-store.node"
+          
+          echo "✅ Copied musl prebuild to multiple locations for compatibility"
+          
+          # Clean up the original if it's in a different location
+          if [ "$MUSL_NODE" != "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node" ]; then
             rm -f "$MUSL_NODE"
           fi
           
@@ -419,6 +417,22 @@ jobs:
               console.log('❌ Failed to load prebuild:', e.message);
             }
           "
+          
+          # Debug what node-gyp-build is actually doing
+          echo ""
+          echo "Debugging node-gyp-build behavior:"
+          cd node_modules/native-vector-store
+          NODE_DEBUG=node-gyp-build node -e "
+            try {
+              console.log('Attempting to load with node-gyp-build...');
+              const binding = require('.');
+              console.log('✅ Loaded successfully with node-gyp-build!');
+            } catch (e) {
+              console.log('❌ node-gyp-build failed:', e.message);
+              console.log('Stack:', e.stack);
+            }
+          "
+          cd ../..
           
           # Copy and run the installation test
           cp ../test/test-installed.js .
