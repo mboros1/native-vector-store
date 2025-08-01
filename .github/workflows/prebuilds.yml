@@ -35,7 +35,7 @@ jobs:
           
           # Install the archive and header where the linker can find them
           cp openmp-build/runtime/src/libomp.a /usr/local/lib/
-          cp llvm-project/openmp/runtime/src/omp.h /usr/local/include/
+          cp llvm-project/openmp/runtime/src/include/omp.h /usr/local/include/
       
       - name: Install npm dependencies
         run: npm ci
