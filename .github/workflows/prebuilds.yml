@@ -269,6 +269,12 @@ jobs:
           echo ""
           echo "Musl prebuilds in package:"
           tar -tzf *.tgz | grep -E "musl|alpine" | sort || echo "No musl/alpine prebuilds found!"
+          echo ""
+          echo "Verifying exact musl prebuild path:"
+          tar -tf native-vector-store-*.tgz | grep "linux-x64-musl/napi-v" || echo "❌ Missing expected musl prebuild path!"
+          echo ""
+          echo "All .node files in package:"
+          tar -tf native-vector-store-*.tgz | grep "\.node$" | sort
           
       - uses: actions/upload-artifact@v4
         with:
@@ -409,12 +415,31 @@ jobs:
           echo ""
           echo "Testing if prebuild can be loaded directly:"
           node -e "
-            try {
-              const binding = require('./node_modules/native-vector-store/prebuilds/linux-x64-musl/napi-v9/native-vector-store.node');
-              console.log('✅ Prebuild loaded successfully!');
-              console.log('Available methods:', Object.keys(binding));
-            } catch (e) {
-              console.log('❌ Failed to load prebuild:', e.message);
+            const fs = require('fs');
+            const path = './node_modules/native-vector-store/prebuilds/linux-x64-musl/napi-v9/native-vector-store.node';
+            
+            // First check if file exists
+            if (!fs.existsSync(path)) {
+              console.log('❌ Prebuild file does not exist at:', path);
+              console.log('Contents of prebuilds directory:');
+              try {
+                const files = require('child_process').execSync('find node_modules/native-vector-store/prebuilds -type f', {encoding: 'utf8'});
+                console.log(files);
+              } catch (e) {}
+            } else {
+              console.log('✅ Prebuild file exists at:', path);
+              try {
+                const binding = require(path);
+                console.log('✅ Prebuild loaded successfully!');
+                console.log('Available methods:', Object.keys(binding));
+                console.log('typeof VectorStore:', typeof binding.VectorStore);
+              } catch (e) {
+                console.log('❌ Failed to load prebuild:', e.message);
+                console.log('Error code:', e.code);
+                if (e.message.includes('version') || e.message.includes('NODE_MODULE_VERSION')) {
+                  console.log('This appears to be an ABI version mismatch');
+                }
+              }
             }
           "
           
@@ -422,6 +447,26 @@ jobs:
           echo ""
           echo "Debugging node-gyp-build behavior:"
           cd node_modules/native-vector-store
+          
+          # First, try node-gyp-build directly to see what paths it checks
+          echo "Running node-gyp-build directly to see paths it checks:"
+          node -e "
+            try {
+              console.log('Attempting node-gyp-build from:', __dirname);
+              const binding = require('node-gyp-build')(__dirname);
+              console.log('✅ node-gyp-build succeeded!');
+              console.log('Loaded binding:', Object.keys(binding));
+            } catch (e) {
+              console.log('❌ node-gyp-build failed:', e.message);
+              if (e.message.includes('No native build was found')) {
+                console.log('Full error details:', e.toString());
+              }
+            }
+          "
+          
+          # Also try with debug enabled
+          echo ""
+          echo "Running with NODE_DEBUG=node-gyp-build:"
           NODE_DEBUG=node-gyp-build node -e "
             try {
               console.log('Attempting to load with node-gyp-build...');
