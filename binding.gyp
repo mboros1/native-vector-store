@@ -30,13 +30,7 @@
         }],
         ["OS=='linux'", {
           "cflags_cc": ["-fopenmp"],
-          "libraries": ["-lgomp"],
-          "conditions": [
-            ["'<!(echo $LDFLAGS)' != ''", {
-              "ldflags": ["<!(echo $LDFLAGS)"],
-              "libraries!": ["-lgomp"]
-            }]
-          ]
+          "libraries": ["-lgomp"]
         }],
         ["OS=='win'", {
           "msvs_settings": {

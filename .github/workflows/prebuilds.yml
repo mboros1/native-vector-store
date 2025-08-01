@@ -21,53 +21,26 @@ jobs:
       
       - name: Install dependencies
         run: |
-          dnf install -y gcc-c++ make cmake git nodejs npm python3 perl
+          dnf install -y gcc-c++ make git nodejs npm python3 libgomp-devel
           
-      - name: Build static libomp
-        run: |
-          set -euo pipefail
-          
-          git clone --depth 1 --branch llvmorg-18.1.8 https://github.com/llvm/llvm-project.git
-          
-          cmake -S llvm-project/openmp -B openmp-build \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DLIBOMP_ENABLE_SHARED=OFF \
-                -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
-                -DOPENMP_ENABLE_ARCHER=OFF
-          
-          cmake --build openmp-build --target omp -j"$(nproc)"
-          
-          # Locate artifacts robustly
-          LIBOMP_PATH=$(find openmp-build -type f -name 'libomp.a' | head -n 1)
-          HEADER_PATH=$(find llvm-project/openmp -type f -name 'omp.h' | head -n 1)
-          
-          if [[ -z "$LIBOMP_PATH" || -z "$HEADER_PATH" ]]; then
-            echo "❌  libomp.a or omp.h not found"; exit 1
-          fi
-          
-          echo "libomp.a → $LIBOMP_PATH"
-          echo "omp.h    → $HEADER_PATH"
-          
-          cp "$LIBOMP_PATH" /usr/local/lib/
-          cp "$HEADER_PATH" /usr/local/include/
       
       - name: Install npm dependencies
         run: npm ci
       
       - name: Build for Linux ${{ matrix.arch }}
         run: |
-          # Static link only libomp, keep the addon as a shared object
-          export CXXFLAGS="-fopenmp -I/usr/local/include"
-          export LDFLAGS="-L/usr/local/lib -Wl,-Bstatic -l:libomp.a -Wl,-Bdynamic -static-libgcc -pthread"
+          # Build with dynamic OpenMP linking
+          export CXXFLAGS="-fopenmp"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
           
-      - name: Verify static linking
+      - name: Verify dynamic dependencies
         run: |
-          # Check that OpenMP is statically linked
-          echo "Checking for OpenMP dependencies..."
-          objdump -p prebuilds/linux-${{ matrix.arch }}/*.node | grep NEEDED | grep -i omp || echo "✓ No OpenMP runtime dependency"
-          echo "All shared library dependencies:"
+          # Check dynamic dependencies
+          echo "Checking shared library dependencies:"
           ldd prebuilds/linux-${{ matrix.arch }}/*.node || true
+          echo ""
+          echo "Required libraries:"
+          objdump -p prebuilds/linux-${{ matrix.arch }}/*.node | grep NEEDED
       
       - uses: actions/upload-artifact@v4
         with:
@@ -94,46 +67,18 @@ jobs:
       
       - name: Build for Alpine ${{ matrix.arch }}
         run: |
-          # First verify we have static libgomp
-          echo "Checking for static libgomp:"
-          find /usr -name "libgomp.a" 2>/dev/null || echo "No libgomp.a found!"
-          
-          # Also check what gcc package provides
-          echo ""
-          echo "Checking gcc package contents for libgomp:"
-          apk info -L gcc | grep -E "(gomp|omp)" || echo "No OpenMP files in gcc package"
-          
-          # Check if we need to install gcc-gfortran for libgomp
-          echo ""
-          echo "Available libgomp packages:"
-          apk search libgomp
-          
-          # Static link only libgomp, keep the addon as shared object
-          # Note: On Alpine, libgomp.a is in the gcc package
+          # Build with dynamic OpenMP linking
           export CXXFLAGS="-fopenmp"
-          # Try to force static linking of libgomp with full path if found
-          LIBGOMP_A=$(find /usr -name "libgomp.a" 2>/dev/null | head -1)
-          if [ -n "$LIBGOMP_A" ]; then
-            echo "Found libgomp.a at: $LIBGOMP_A"
-            export LDFLAGS="-Wl,-Bstatic $LIBGOMP_A -Wl,-Bdynamic -pthread"
-          else
-            echo "Warning: libgomp.a not found, trying with -lgomp"
-            export LDFLAGS="-Wl,-Bstatic -lgomp -Wl,-Bdynamic -pthread"
-          fi
-          
-          # Verify the flags are set
-          echo "CXXFLAGS: $CXXFLAGS"
-          echo "LDFLAGS: $LDFLAGS"
           echo "Building musl prebuild for NAPI_VERSION=$(node -p 'process.versions.napi')"
           npx prebuildify --napi --arch=${{ matrix.arch }} --tag-libc
           
-          # Verify the build doesn't depend on libgomp.so
+          # Check dynamic dependencies
           echo ""
           echo "Checking dynamic dependencies of built prebuild:"
           BUILT_NODE=$(find prebuilds -name "*.node" -type f | head -1)
           if [ -n "$BUILT_NODE" ]; then
             echo "Checking: $BUILT_NODE"
-            ldd "$BUILT_NODE" 2>&1 | grep -E "(gomp|omp)" || echo "✅ No dynamic OpenMP dependencies found"
+            ldd "$BUILT_NODE" 2>&1 || true
           fi
       
       - name: Inspect prebuild outputs
@@ -340,6 +285,11 @@ jobs:
         with:
           node-version: '18'
       
+      - name: Install OpenMP runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgomp1
+      
       - name: Test packaged tarball
         run: |
           echo "Testing Linux x64 prebuild..."
@@ -372,6 +322,7 @@ jobs:
           platform: linux/arm64
           args: |
             sh -c "
+              apt-get update && apt-get install -y libgomp1 &&
               cd /github/workspace && 
               echo 'Testing Linux ARM64 prebuild...' &&
               mkdir test-install && cd test-install &&
@@ -393,156 +344,19 @@ jobs:
         with:
           name: npm-package
       
+      - name: Install OpenMP runtime
+        run: |
+          apk add --no-cache libgomp
+      
       - name: Test packaged tarball  
         run: |
           echo "Testing Alpine x64 prebuild..."
           mkdir test-install && cd test-install
           npm init -y >/dev/null
-          
-          # Extract and examine the package first
-          echo "Extracting package to examine contents..."
-          tar -xzf ../native-vector-store-*.tgz
-          echo ""
-          echo "Package prebuild structure:"
-          find package/prebuilds -type f 2>/dev/null | sort || echo "No prebuilds directory found"
-          echo ""
-          echo "Looking for musl prebuilds:"
-          find package -path "*musl*" -name "*.node" 2>/dev/null | sort || echo "No musl prebuilds found"
-          
-          # Install the package without running scripts first to debug
-          echo ""
-          echo "Installing package without scripts to debug..."
-          npm install --ignore-scripts ../native-vector-store-*.tgz
-          
-          echo ""
-          echo "Package installed. Now let's debug why node-gyp-build can't find prebuilds..."
-          
-          # TEMPORARY: Remove the non-musl Linux prebuild that segfaults on Alpine
-          echo ""
-          echo "Removing incompatible linux-x64 prebuild for Alpine test:"
-          rm -f node_modules/native-vector-store/prebuilds/linux-x64/native-vector-store.node
-          echo "Remaining prebuilds:"
-          find node_modules/native-vector-store/prebuilds -name "*.node" | grep linux | sort
-          
-          # Check what node-gyp-build will look for
-          echo ""
-          echo "Node platform info:"
-          node -p "process.platform"
-          node -p "process.arch" 
-          node -p "process.versions.napi"
-          node -p "process.report.getReport().header.glibcVersionRuntime || 'musl'"
-          
-          # Debug node-gyp-build behavior
-          echo ""
-          echo "Debugging node-gyp-build prebuild detection:"
-          cd node_modules/native-vector-store
-          echo "Current directory: $(pwd)"
-          echo "Files in prebuilds:"
-          find prebuilds -type f 2>/dev/null | sort || echo "No prebuilds directory"
-          
-          # Try to manually check what node-gyp-build would look for
-          echo ""
-          echo "Testing node-gyp-build detection:"
-          node -e "
-            const os = require('os');
-            const path = require('path');
-            console.log('Platform:', os.platform());
-            console.log('Arch:', os.arch());
-            console.log('Expected paths node-gyp-build might check:');
-            const abi = 'napi-v' + process.versions.napi;
-            console.log('- prebuilds/' + os.platform() + '-' + os.arch() + '/' + abi);
-            console.log('- prebuilds/' + os.platform() + '-' + os.arch());
-            // For musl
-            console.log('- prebuilds/' + os.platform() + '-' + os.arch() + '-musl/' + abi);
-            console.log('- prebuilds/' + os.platform() + '-' + os.arch() + '-musl');
-          "
-          cd ../..
-          
-          # Check installed package structure
-          echo ""
-          echo "Installed package prebuilds:"
-          find node_modules/native-vector-store/prebuilds -type f 2>/dev/null | sort || echo "No prebuilds found in installed package"
-          
-          # Try loading the prebuild directly to verify it works
-          echo ""
-          echo "Testing if prebuild can be loaded directly:"
-          node -e "
-            const fs = require('fs');
-            const path = './node_modules/native-vector-store/prebuilds/linux-x64-musl/napi-v9/native-vector-store.node';
-            
-            // First check if file exists
-            if (!fs.existsSync(path)) {
-              console.log('❌ Prebuild file does not exist at:', path);
-              console.log('Contents of prebuilds directory:');
-              try {
-                const files = require('child_process').execSync('find node_modules/native-vector-store/prebuilds -type f', {encoding: 'utf8'});
-                console.log(files);
-              } catch (e) {}
-            } else {
-              console.log('✅ Prebuild file exists at:', path);
-              try {
-                const binding = require(path);
-                console.log('✅ Prebuild loaded successfully!');
-                console.log('Available methods:', Object.keys(binding));
-                console.log('typeof VectorStore:', typeof binding.VectorStore);
-              } catch (e) {
-                console.log('❌ Failed to load prebuild:', e.message);
-                console.log('Error code:', e.code);
-                if (e.message.includes('version') || e.message.includes('NODE_MODULE_VERSION')) {
-                  console.log('This appears to be an ABI version mismatch');
-                }
-              }
-            }
-          "
-          
-          # Debug what node-gyp-build is actually doing
-          echo ""
-          echo "Debugging node-gyp-build behavior:"
-          cd node_modules/native-vector-store
-          
-          # First, try node-gyp-build directly to see what paths it checks
-          echo "Running node-gyp-build directly to see paths it checks:"
-          node -e "
-            try {
-              console.log('Attempting node-gyp-build from:', __dirname);
-              const binding = require('node-gyp-build')(__dirname);
-              console.log('✅ node-gyp-build succeeded!');
-              console.log('Loaded binding:', Object.keys(binding));
-            } catch (e) {
-              console.log('❌ node-gyp-build failed:', e.message);
-              if (e.message.includes('No native build was found')) {
-                console.log('Full error details:', e.toString());
-              }
-            }
-          "
-          
-          # Also try with debug enabled
-          echo ""
-          echo "Running with NODE_DEBUG=node-gyp-build:"
-          NODE_DEBUG=node-gyp-build node -e "
-            try {
-              console.log('Attempting to load with node-gyp-build...');
-              const binding = require('.');
-              console.log('✅ Loaded successfully with node-gyp-build!');
-            } catch (e) {
-              console.log('❌ node-gyp-build failed:', e.message);
-              console.log('Stack:', e.stack);
-            }
-          "
-          cd ../..
-          
-          # Now try to run the install script manually
-          echo ""
-          echo "Running install script manually:"
-          cd node_modules/native-vector-store
-          npm run install || echo "Install script failed"
-          cd ../..
-          
+          npm install ../native-vector-store-*.tgz
           # Copy and run the installation test
           cp ../test/test-installed.js .
-          echo ""
-          echo "Running test (this will fail if node-gyp-build can't find prebuild):"
-          node test-installed.js || echo "Test failed as expected"
+          node test-installed.js
 
   test-macos:
     needs: package
@@ -566,6 +380,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+      
+      - name: Install OpenMP runtime
+        run: |
+          brew install libomp
       
       - name: Test packaged tarball
         run: |

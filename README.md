@@ -28,15 +28,22 @@ npm install native-vector-store
 
 ### Prerequisites
 
-For most users, **no prerequisites are needed** - prebuilt binaries are included for:
-- Linux (x64, arm64)
+**Runtime Requirements:**
+- OpenMP runtime library (for parallel processing)
+  - **Linux**: `sudo apt-get install libgomp1` (Ubuntu/Debian) or `dnf install libgomp` (Fedora)
+  - **Alpine**: `apk add libgomp`
+  - **macOS**: `brew install libomp`
+  - **Windows**: Included with Visual C++ runtime
+
+Prebuilt binaries are included for:
+- Linux (x64, arm64, musl/Alpine)
 - macOS (x64, arm64/Apple Silicon)
 - Windows (x64)
 
 If building from source, you'll need:
 - Node.js ≥14.0.0
 - C++ compiler with OpenMP support
-- simdjson library (automatically handled by node-gyp)
+- simdjson library (vendored, no installation needed)
 
 ## Quick Start
 
