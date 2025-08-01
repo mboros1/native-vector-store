@@ -31,11 +31,15 @@ jobs:
                 -DLIBOMP_ENABLE_SHARED=OFF \
                 -DLIBOMP_ENABLE_STATIC=ON \
                 -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
-                -DOPENMP_ENABLE_ARCHER=OFF
-          cmake --build openmp-build --target omp -j$(nproc)
+                -DOPENMP_ENABLE_ARCHER=OFF \
+                -DCMAKE_VERBOSE_MAKEFILE=ON
+          cmake --build openmp-build --target omp -j$(nproc) -- -v
           
-          # Install the archive and headers using cmake
-          cmake --install openmp-build --prefix /usr/local
+          # Find where libomp.a was built and copy manually
+          echo "Finding libomp.a..."
+          find openmp-build -name 'libomp.a' -print
+          cp $(find openmp-build -name 'libomp.a') /usr/local/lib/
+          cp $(find llvm-project/openmp -name 'omp.h' | grep -E 'include/omp.h$' | head -1) /usr/local/include/
       
       - name: Install npm dependencies
         run: npm ci
