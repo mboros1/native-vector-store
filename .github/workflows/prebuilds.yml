@@ -97,7 +97,7 @@ jobs:
           # Static link only libgomp, keep the addon as shared object
           export CXXFLAGS="-fopenmp"
           export LDFLAGS="-Wl,-Bstatic -l:libgomp.a -Wl,-Bdynamic -pthread"
-          npx prebuildify --napi --strip --arch=${{ matrix.arch }} --tag-libc
+          npx prebuildify --napi --arch=${{ matrix.arch }} --tag-libc
       
       - uses: actions/upload-artifact@v4
         with:
