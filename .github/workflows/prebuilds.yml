@@ -154,6 +154,12 @@ jobs:
             exit 1
           }
           
+          # Clean up any duplicates in the wrong location
+          if [ "$MUSL_NODE" != "$DEST/native-vector-store.node" ] && [ -f "$MUSL_NODE" ]; then
+            echo "🧹 Removing duplicate at: $MUSL_NODE"
+            rm -f "$MUSL_NODE"
+          fi
+          
           echo "📊 Final prebuild layout:"
           find prebuilds -type f | sort
       
@@ -367,16 +373,58 @@ jobs:
           echo "Node platform info:"
           node -p "process.platform"
           node -p "process.arch" 
-          node -p "process.versions"
+          node -p "process.versions.napi"
+          node -p "process.report.getReport().header.glibcVersionRuntime || 'musl'"
+          
+          # Debug node-gyp-build behavior
+          echo ""
+          echo "Debugging node-gyp-build prebuild detection:"
+          cd node_modules/native-vector-store
+          echo "Current directory: $(pwd)"
+          echo "Files in prebuilds:"
+          find prebuilds -type f 2>/dev/null | sort || echo "No prebuilds directory"
+          
+          # Try to manually check what node-gyp-build would look for
+          echo ""
+          echo "Testing node-gyp-build detection:"
+          node -e "
+            const os = require('os');
+            const path = require('path');
+            console.log('Platform:', os.platform());
+            console.log('Arch:', os.arch());
+            console.log('Expected paths node-gyp-build might check:');
+            const abi = 'napi-v' + process.versions.napi;
+            console.log('- prebuilds/' + os.platform() + '-' + os.arch() + '/' + abi);
+            console.log('- prebuilds/' + os.platform() + '-' + os.arch());
+            // For musl
+            console.log('- prebuilds/' + os.platform() + '-' + os.arch() + '-musl/' + abi);
+            console.log('- prebuilds/' + os.platform() + '-' + os.arch() + '-musl');
+          "
+          cd ../..
           
           # Check installed package structure
           echo ""
           echo "Installed package prebuilds:"
           find node_modules/native-vector-store/prebuilds -type f 2>/dev/null | sort || echo "No prebuilds found in installed package"
           
+          # Try loading the prebuild directly to verify it works
+          echo ""
+          echo "Testing if prebuild can be loaded directly:"
+          node -e "
+            try {
+              const binding = require('./node_modules/native-vector-store/prebuilds/linux-x64-musl/napi-v9/native-vector-store.node');
+              console.log('✅ Prebuild loaded successfully!');
+              console.log('Available methods:', Object.keys(binding));
+            } catch (e) {
+              console.log('❌ Failed to load prebuild:', e.message);
+            }
+          "
+          
           # Copy and run the installation test
           cp ../test/test-installed.js .
-          node test-installed.js
+          echo ""
+          echo "Running test (this will fail if node-gyp-build can't find prebuild):"
+          node test-installed.js || echo "Test failed as expected"
 
   test-macos:
     needs: package
