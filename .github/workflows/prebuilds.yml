@@ -97,7 +97,65 @@ jobs:
           # Static link only libgomp, keep the addon as shared object
           export CXXFLAGS="-fopenmp"
           export LDFLAGS="-Wl,-Bstatic -l:libgomp.a -Wl,-Bdynamic -pthread"
+          echo "Building musl prebuild for NAPI_VERSION=$(node -p 'process.versions.napi')"
           npx prebuildify --napi --arch=${{ matrix.arch }} --tag-libc
+      
+      - name: Inspect prebuild outputs
+        run: |
+          echo "::group::prebuilds directory structure"
+          find prebuilds -type f | sort
+          echo "::endgroup::"
+          
+          echo "::group::musl .node file headers"
+          file prebuilds/**/*.node || true
+          echo "::endgroup::"
+          
+          echo "::group::Check dynamic dependencies"
+          if command -v ldd >/dev/null 2>&1; then
+            for f in prebuilds/**/*.node; do
+              echo "=== $f ==="
+              ldd "$f" 2>&1 || true
+            done
+          fi
+          echo "::endgroup::"
+      
+      - name: Ensure correct musl prebuild layout
+        run: |
+          # Calculate the correct destination path
+          ABI_DIR="napi-v$(node -p 'process.versions.napi')"
+          ARCH="${{ matrix.arch }}"
+          DEST="prebuilds/linux-${ARCH}-musl/${ABI_DIR}"
+          
+          echo "Expected destination: $DEST"
+          
+          # Check if prebuildify already put it in the right place
+          if [ -f "$DEST/native-vector-store.node" ]; then
+            echo "✅ Prebuild already in correct location"
+          else
+            echo "📁 Creating destination directory: $DEST"
+            mkdir -p "$DEST"
+            
+            # Find the musl prebuild (could be in various locations)
+            MUSL_NODE=$(find prebuilds -name "*.musl.node" -o -name "*.node" | grep -E "(musl|linux-${ARCH})" | head -1)
+            
+            if [ -n "$MUSL_NODE" ]; then
+              echo "📋 Found musl prebuild at: $MUSL_NODE"
+              cp "$MUSL_NODE" "$DEST/native-vector-store.node"
+              echo "✅ Copied to: $DEST/native-vector-store.node"
+            else
+              echo "❌ No musl prebuild found!"
+              exit 1
+            fi
+          fi
+          
+          # Final validation
+          test -f "$DEST/native-vector-store.node" || {
+            echo "❌ Prebuild missing at $DEST"
+            exit 1
+          }
+          
+          echo "📊 Final prebuild layout:"
+          find prebuilds -type f | sort
       
       - uses: actions/upload-artifact@v4
         with:
