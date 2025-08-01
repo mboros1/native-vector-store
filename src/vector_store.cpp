@@ -216,14 +216,17 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     }
     
     // Construct entry directly - no synchronization needed
-    entries_[idx] = Entry{
-        .doc = Document{
-            .id = std::string_view(id_ptr, id.size()),
-            .text = std::string_view(text_ptr, text.size()),
-            .metadata_json = std::string_view(meta_ptr, raw_json.size())
-        },
-        .embedding = emb_ptr
-    };
+    // Use traditional initialization for C++17 compatibility
+    Document doc;
+    doc.id = std::string_view(id_ptr, id.size());
+    doc.text = std::string_view(text_ptr, text.size());
+    doc.metadata_json = std::string_view(meta_ptr, raw_json.size());
+    
+    Entry entry;
+    entry.doc = doc;
+    entry.embedding = emb_ptr;
+    
+    entries_[idx] = entry;
     
     return simdjson::SUCCESS;
 }
@@ -301,7 +304,7 @@ VectorStore::search(const float* query, size_t k) const {
         TopK& local_heap = thread_heaps[tid];
         
         #pragma omp for  // default barrier kept - ensures all threads finish before merge
-        for (size_t i = 0; i < n; ++i) {
+        for (int i = 0; i < static_cast<int>(n); ++i) {
             float score = 0.0f;
             const float* emb = entries_[i].embedding;
             

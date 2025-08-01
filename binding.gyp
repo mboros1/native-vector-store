@@ -40,7 +40,10 @@
           "msvs_settings": {
             "VCCLCompilerTool": {
               "ExceptionHandling": 0,
-              "OpenMP": "true"
+              "OpenMP": "true",
+              "AdditionalOptions": [
+                "/openmp:experimental"
+              ]
             }
           }
         }]
