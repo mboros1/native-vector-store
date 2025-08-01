@@ -57,8 +57,8 @@ jobs:
       - name: Build for Linux ${{ matrix.arch }}
         run: |
           # Static link everything including libomp
-          export CXXFLAGS="-fopenmp=libomp -I/usr/local/include"
-          export LDFLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++ -l:libomp.a"
+          export CXXFLAGS="-fopenmp -I/usr/local/include"
+          export LDFLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++ -l:libomp.a -pthread"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
           
       - name: Verify static linking
