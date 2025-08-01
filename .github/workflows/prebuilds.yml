@@ -87,18 +87,16 @@ jobs:
       
       - name: Install build dependencies
         run: |
-          apk add --no-cache python3 make g++ git gcc
-          # Install gomp-dev for static libgomp.a
-          apk add --no-cache libgomp gomp-dev
+          apk add --no-cache build-base git python3
       
       - name: Install npm dependencies
         run: npm ci
       
       - name: Build for Alpine ${{ matrix.arch }}
         run: |
-          # Static link libgomp for Alpine
+          # Static link libgomp (included with gcc in build-base)
           export CXXFLAGS="-fopenmp"
-          export LDFLAGS="-static -static-libgcc -static-libstdc++ -l:libgomp.a"
+          export LDFLAGS="-static -static-libgcc -l:libgomp.a"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }} --tag-libc
       
       - uses: actions/upload-artifact@v4
