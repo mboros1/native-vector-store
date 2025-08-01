@@ -22,8 +22,9 @@
           "xcode_settings": {
             "GCC_ENABLE_CPP_EXCEPTIONS": "NO",
             "OTHER_CFLAGS": ["-Xpreprocessor", "-fopenmp"],
-            "OTHER_CPLUSPLUSFLAGS": ["-Xpreprocessor", "-fopenmp"],
-            "OTHER_LDFLAGS": ["-L/opt/homebrew/opt/libomp/lib", "-lomp"]
+            "OTHER_CPLUSPLUSFLAGS": ["-Xpreprocessor", "-fopenmp", "-std=c++17"],
+            "OTHER_LDFLAGS": ["-L/opt/homebrew/opt/libomp/lib", "-lomp"],
+            "CLANG_CXX_LANGUAGE_STANDARD": "c++17"
           },
           "libraries": ["-L/opt/homebrew/opt/libomp/lib", "-lomp"]
         }],

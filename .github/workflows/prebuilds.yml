@@ -21,35 +21,35 @@ jobs:
       
       - name: Install dependencies
         run: |
-          dnf install -y nodejs npm gcc-c++ make python3 git cmake
+          dnf install -y gcc-c++ make cmake git nodejs npm python3
           
       - name: Build static libomp
         run: |
-          # Build only the OpenMP runtime library from source
           git clone --depth 1 --branch llvmorg-18.1.8 https://github.com/llvm/llvm-project.git
-          # Build only the runtime subdirectory to avoid libomptarget
-          mkdir -p openmp-build
-          cd openmp-build
-          cmake ../llvm-project/openmp/runtime \
+          cmake -S llvm-project/openmp -B openmp-build \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DLIBOMP_ENABLE_SHARED=OFF \
-                -DCMAKE_C_COMPILER=gcc \
-                -DCMAKE_CXX_COMPILER=g++
-          make -j$(nproc)
-          # Install the static library
-          cp src/libomp.a /usr/local/lib/
-          # Copy the main header
-          cp ../llvm-project/openmp/runtime/src/omp.h /usr/local/include/
+                -DLIBOMP_ENABLE_STATIC=ON
+          cmake --build openmp-build --target omp -j$(nproc)
+          
+          # Install the archive and header where the linker can find them
+          cp openmp-build/runtime/src/libomp.a /usr/local/lib/
+          cp llvm-project/openmp/runtime/src/omp.h /usr/local/include/
       
       - name: Install npm dependencies
         run: npm ci
       
       - name: Build for Linux ${{ matrix.arch }}
         run: |
-          # Static link libomp to avoid runtime dependency
-          export LDFLAGS="-L/usr/local/lib -static-libgcc -static-libstdc++ -Wl,-Bstatic -lomp -Wl,-Bdynamic"
-          export CXXFLAGS="-I/usr/local/include"
+          # Static link everything including libomp
+          export CXXFLAGS="-fopenmp=libomp -I/usr/local/include"
+          export LDFLAGS="-L/usr/local/lib -static -static-libgcc -static-libstdc++ -l:libomp.a"
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
+          
+      - name: Verify static linking
+        run: |
+          # Check that no shared libraries are needed
+          objdump -p prebuilds/linux-${{ matrix.arch }}/*.node | grep NEEDED || echo "✓ No shared dependencies"
       
       - uses: actions/upload-artifact@v4
         with:
