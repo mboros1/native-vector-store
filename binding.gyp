@@ -30,10 +30,11 @@
         }],
         ["OS=='linux'", {
           "cflags_cc": ["-fopenmp"],
-          "libraries": ["-lgomp"],
           "conditions": [
             ["'<!(echo $LDFLAGS)' != ''", {
               "ldflags": ["<!(echo $LDFLAGS)"]
+            }, {
+              "libraries": ["-lgomp"]
             }]
           ]
         }],

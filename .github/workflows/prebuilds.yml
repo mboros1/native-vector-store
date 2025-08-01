@@ -94,11 +94,28 @@ jobs:
       
       - name: Build for Alpine ${{ matrix.arch }}
         run: |
+          # First verify we have static libgomp
+          echo "Checking for static libgomp:"
+          find /usr -name "libgomp.a" 2>/dev/null || echo "No libgomp.a found!"
+          
           # Static link only libgomp, keep the addon as shared object
           export CXXFLAGS="-fopenmp"
-          export LDFLAGS="-Wl,-Bstatic -l:libgomp.a -Wl,-Bdynamic -pthread"
+          export LDFLAGS="-Wl,-Bstatic -lgomp -Wl,-Bdynamic -pthread"
+          
+          # Verify the flags are set
+          echo "CXXFLAGS: $CXXFLAGS"
+          echo "LDFLAGS: $LDFLAGS"
           echo "Building musl prebuild for NAPI_VERSION=$(node -p 'process.versions.napi')"
           npx prebuildify --napi --arch=${{ matrix.arch }} --tag-libc
+          
+          # Verify the build doesn't depend on libgomp.so
+          echo ""
+          echo "Checking dynamic dependencies of built prebuild:"
+          BUILT_NODE=$(find prebuilds -name "*.node" -type f | head -1)
+          if [ -n "$BUILT_NODE" ]; then
+            echo "Checking: $BUILT_NODE"
+            ldd "$BUILT_NODE" 2>&1 | grep -E "(gomp|omp)" || echo "✅ No dynamic OpenMP dependencies found"
+          fi
       
       - name: Inspect prebuild outputs
         run: |
@@ -147,15 +164,21 @@ jobs:
           cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
           cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/native-vector-store.node"
           
-          # Also try the non-ABI location that node-gyp-build might check
-          mkdir -p "prebuilds/linux-${ARCH}"
-          cp "$MUSL_NODE" "prebuilds/linux-${ARCH}/native-vector-store.node"
+          # Don't copy to non-musl location as it might confuse node-gyp-build
+          # and cause it to load the wrong binary
           
           echo "✅ Copied musl prebuild to multiple locations for compatibility"
           
           # Clean up the original if it's in a different location
           if [ "$MUSL_NODE" != "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node" ]; then
             rm -f "$MUSL_NODE"
+          fi
+          
+          # IMPORTANT: Remove the regular Linux prebuild that won't work on Alpine
+          # This prevents node-gyp-build from trying to load it first
+          if [ -f "prebuilds/linux-${ARCH}/native-vector-store.node" ]; then
+            echo "🗑️ Removing incompatible linux-${ARCH} prebuild for Alpine package"
+            rm -f "prebuilds/linux-${ARCH}/native-vector-store.node"
           fi
           
           echo "📊 Final prebuild layout:"
