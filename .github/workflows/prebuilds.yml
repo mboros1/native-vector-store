@@ -177,12 +177,28 @@ jobs:
           merge-multiple: true
           path: prebuilds/
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies
+        run: npm ci
+      
       - name: List prebuilds
-        run: find prebuilds -type f -name "*.node" | sort
+        run: |
+          echo "Prebuilds found:"
+          find prebuilds -type f -name "*.node" | sort
+          echo ""
+          echo "Full prebuild directory structure:"
+          ls -la prebuilds/
       
       - name: Create package
         run: |
           npm pack
+          echo ""
+          echo "Package contents:"
+          tar -tzf *.tgz | grep -E "(prebuilds|node_modules)" || echo "No prebuilds in package!"
           
       - uses: actions/upload-artifact@v4
         with:
@@ -259,12 +275,31 @@ jobs:
         with:
           name: npm-package
       
-      - name: Test packaged tarball
+      - name: Test packaged tarball  
         run: |
           echo "Testing Alpine x64 prebuild..."
+          # First check what's in the tarball
+          echo "Package contents (prebuilds):"
+          tar -tzf native-vector-store-*.tgz | grep -E "(prebuilds|\.node)" || echo "No prebuilds found in tarball!"
+          
           mkdir test-install && cd test-install
           npm init -y >/dev/null
-          npm install ../native-vector-store-*.tgz
+          
+          # Install with --ignore-scripts to prevent build attempt
+          npm install ../native-vector-store-*.tgz --ignore-scripts
+          
+          # Check prebuild structure
+          echo ""
+          echo "Installed prebuild structure:"
+          find node_modules/native-vector-store -name "*.node" -o -name "prebuilds" -type d | head -20
+          
+          # Manually run node-gyp-build to see what happens
+          echo ""
+          echo "Testing node-gyp-build:"
+          cd node_modules/native-vector-store
+          npx node-gyp-build || echo "node-gyp-build failed"
+          cd ../..
+          
           # Copy and run the installation test
           cp ../test/test-installed.js .
           node test-installed.js
@@ -295,9 +330,27 @@ jobs:
       - name: Test packaged tarball
         run: |
           echo "Testing macOS ${{ matrix.arch }} prebuild..."
+          # Check tarball contents
+          echo "Package contents (prebuilds):"
+          tar -tzf native-vector-store-*.tgz | grep -E "(prebuilds|\.node)" || echo "No prebuilds found!"
+          
           mkdir test-install && cd test-install
           npm init -y >/dev/null
-          npm install ../native-vector-store-*.tgz
+          
+          # Install with --ignore-scripts first
+          npm install ../native-vector-store-*.tgz --ignore-scripts
+          
+          # Check what was installed
+          echo ""
+          echo "Checking for prebuilds:"
+          find node_modules/native-vector-store -name "*.node" 2>/dev/null | head -10 || echo "No .node files found"
+          ls -la node_modules/native-vector-store/prebuilds/ 2>/dev/null || echo "No prebuilds directory"
+          
+          # Now let it run the install script
+          cd node_modules/native-vector-store
+          npm run install || echo "Install script failed"
+          cd ../..
+          
           # Copy and run the installation test
           cp ../test/test-installed.js .
           node test-installed.js
