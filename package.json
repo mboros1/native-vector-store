@@ -1,6 +1,6 @@
 {
   "name": "native-vector-store",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "High-performance local vector store with SIMD optimization for MCP servers",
   "main": "index.js",
   "types": "lib/index.d.ts",
