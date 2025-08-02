@@ -154,10 +154,14 @@ jobs:
           path: prebuilds/
 
   prebuild-macos:
-    runs-on: macos-latest
     strategy:
       matrix:
-        arch: [x64, arm64]
+        include:
+          - arch: x64
+            runs-on: macos-13  # Intel Mac
+          - arch: arm64
+            runs-on: macos-latest  # ARM64 Mac
+    runs-on: ${{ matrix.runs-on }}
     
     steps:
       - uses: actions/checkout@v4
