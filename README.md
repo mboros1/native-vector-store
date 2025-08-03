@@ -2,6 +2,8 @@
 
 High-performance vector store with SIMD optimization for MCP servers and local RAG applications.
 
+📚 **[API Documentation](https://mboros1.github.io/native-vector-store/)** | 📦 **[npm](https://www.npmjs.com/package/native-vector-store)** | 🐙 **[GitHub](https://github.com/mboros1/native-vector-store)**
+
 ## Design Philosophy
 
 This vector store is designed for **immutable, one-time loading** scenarios common in modern cloud deployments:
@@ -266,6 +268,11 @@ const response = await server.handleMCPRequest('vector_search', {
 ```
 
 ## API Reference
+
+Full API documentation is available at:
+- **[Latest Documentation](https://mboros1.github.io/native-vector-store/)** - Always current
+- **Versioned Documentation** - Available at `https://mboros1.github.io/native-vector-store/{version}/` (e.g., `/v0.3.0/`)
+- **Local Documentation** - After installing: `open node_modules/native-vector-store/docs/index.html`
 
 ### `VectorStore`
 

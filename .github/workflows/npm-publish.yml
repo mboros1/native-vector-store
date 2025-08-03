@@ -76,3 +76,25 @@ jobs:
         with:
           name: npm-package
           path: "*.tgz"
+      
+      - name: Deploy docs to GitHub Pages (latest)
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Deploy documentation for ${{ github.ref_name }}'
+      
+      - name: Deploy versioned docs (releases only)
+        if: github.event_name == 'release'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          destination_dir: ${{ github.event.release.tag_name }}
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Deploy documentation for ${{ github.event.release.tag_name }}'
+          keep_files: true  # Don't delete other versions
