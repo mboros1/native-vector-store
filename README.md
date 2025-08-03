@@ -9,9 +9,9 @@ This vector store is designed for **immutable, one-time loading** scenarios comm
 - **📚 Load Once, Query Many**: Documents are loaded at startup and remain immutable during serving
 - **🚀 Optimized for Cold Starts**: Perfect for serverless functions and containerized deployments
 - **📁 File-Based Organization**: Leverages filesystem for natural document organization and versioning
-- **🎯 Focused API**: Does one thing exceptionally well - fast similarity search
+- **🎯 Focused API**: Does one thing exceptionally well - fast similarity search over focused corpora (sweet spot: <100k documents)
 
-This design eliminates complex state management, ensures consistent performance, and aligns perfectly with cloud-native deployment patterns.
+This design eliminates complex state management, ensures consistent performance, and aligns perfectly with cloud-native deployment patterns where domain-specific knowledge bases are the norm.
 
 ## Features
 
@@ -28,7 +28,7 @@ This design eliminates complex state management, ensures consistent performance,
 - **Load Time**: <1 second for 100,000 documents (achieved: ~560ms)
 - **Search Latency**: <10ms for top-k similarity search (achieved: 1-2ms)
 - **Memory Efficiency**: Minimal fragmentation via arena allocation
-- **Scalability**: Designed for <1M embeddings
+- **Scalability**: Designed for focused corpora (<100k documents optimal, <1M maximum)
 - **Throughput**: 178k+ documents per second with parallel loading
 
 ## Installation
@@ -330,10 +330,10 @@ Performance on typical hardware (M1 MacBook Pro):
    - Use smaller k values (5-20) for interactive applications
    - Pre-normalize query embeddings if making multiple searches
 
-4. **Deployment Optimization**:
-   - Preload in container images for faster cold starts
-   - Use memory-mapped files for very large corpora
-   - Consider sharding beyond 1M documents
+4. **Corpus Size Optimization**:
+   - Sweet spot: <100k documents for optimal load/search balance
+   - Beyond 100k: Consider if your use case truly needs all documents
+   - Focus on curated, domain-specific content rather than exhaustive datasets
 
 ### Comparison with Alternatives
 
@@ -344,6 +344,7 @@ Performance on typical hardware (M1 MacBook Pro):
 | Memory efficiency | High | Medium | Low | N/A |
 | Dependencies | Minimal | Heavy | Heavy | None |
 | Deployment | Simple | Complex | Complex | SaaS |
+| Sweet spot | <100k docs | Any size | Any size | Any size |
 
 ## Building from Source
 
@@ -385,21 +386,21 @@ npm run example
 
 ### MCP Servers
 Ideal for building local RAG (Retrieval-Augmented Generation) capabilities:
-- Fast document loading from knowledge bases
+- Fast document loading from focused knowledge bases
 - Low-latency similarity search for context retrieval
-- Memory-efficient storage for large document collections
+- Memory-efficient storage for domain-specific corpora
 
 ### Knowledge Management
 Perfect for personal knowledge management systems:
-- Index personal documents and notes
-- Fast semantic search across content
+- Index personal documents and notes (typically <10k documents)
+- Fast semantic search across focused content
 - Offline operation without external dependencies
 
 ### Research Applications
-Suitable for academic and research projects:
-- Literature review and citation analysis
-- Semantic clustering of research papers
-- Cross-reference discovery in document collections
+Suitable for academic and research projects with focused datasets:
+- Literature review within specific domains
+- Semantic clustering of curated paper collections
+- Cross-reference discovery in specialized corpora
 
 ## Contributing
 
