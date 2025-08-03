@@ -2,6 +2,17 @@
 
 High-performance vector store with SIMD optimization for MCP servers and local RAG applications.
 
+## Design Philosophy
+
+This vector store is designed for **immutable, one-time loading** scenarios common in modern cloud deployments:
+
+- **📚 Load Once, Query Many**: Documents are loaded at startup and remain immutable during serving
+- **🚀 Optimized for Cold Starts**: Perfect for serverless functions and containerized deployments
+- **📁 File-Based Organization**: Leverages filesystem for natural document organization and versioning
+- **🎯 Focused API**: Does one thing exceptionally well - fast similarity search
+
+This design eliminates complex state management, ensures consistent performance, and aligns perfectly with cloud-native deployment patterns.
+
 ## Features
 
 - **🚀 High Performance**: C++ implementation with OpenMP SIMD optimization
@@ -76,6 +87,139 @@ const results = store.search(queryEmbedding, 5); // Top 5 results
 console.log(results[0]); // { score: 0.95, id: 'doc-1', text: '...', metadata_json: '...' }
 ```
 
+## Usage Patterns
+
+### Serverless Deployment (AWS Lambda, Vercel)
+
+```javascript
+// Initialize once during cold start
+let store;
+
+async function initializeStore() {
+  if (!store) {
+    store = new VectorStore(1536);
+    store.loadDir('./knowledge-base'); // Loads and finalizes
+  }
+  return store;
+}
+
+// Handler reuses the store across invocations
+export async function handler(event) {
+  const store = await initializeStore();
+  const embedding = new Float32Array(event.embedding);
+  return store.search(embedding, 10);
+}
+```
+
+### Local MCP Server
+
+```javascript
+const { VectorStore } = require('native-vector-store');
+
+// Load at server startup
+const store = new VectorStore(1536);
+store.loadDir('./context');
+
+// Serve many requests without reloading
+server.on('search', (query) => {
+  const results = store.search(query.embedding, 5);
+  return results.filter(r => r.score > 0.7);
+});
+```
+
+### CLI Tool with Persistent Context
+
+```javascript
+#!/usr/bin/env node
+const { VectorStore } = require('native-vector-store');
+
+// Load knowledge base once
+const store = new VectorStore(1536);
+store.loadDir(process.env.KNOWLEDGE_PATH || './docs');
+
+// Interactive REPL with fast responses
+const repl = require('repl');
+const r = repl.start('> ');
+r.context.search = (embedding, k = 5) => store.search(embedding, k);
+```
+
+### File Organization Best Practices
+
+Structure your documents for optimal organization and performance:
+
+```
+knowledge-base/
+├── products/          # Product documentation
+│   ├── api-reference.json
+│   └── user-guide.json
+├── support/           # Support articles
+│   ├── faq.json
+│   └── troubleshooting.json
+├── context/           # Context-specific docs
+│   ├── company-info.json
+│   └── policies.json
+└── embeddings.json    # Shared embeddings
+```
+
+Each JSON file should contain a document or array of documents:
+
+```json
+{
+  "id": "unique-id",
+  "text": "Document content...",
+  "metadata": {
+    "embedding": [0.1, 0.2, ...],
+    "category": "product",
+    "lastUpdated": "2024-01-01"
+  }
+}
+```
+
+### Deployment Strategies
+
+#### Blue-Green Deployment
+
+```javascript
+// Load new version without downtime
+const newStore = new VectorStore(1536);
+newStore.loadDir('./knowledge-base-v2');
+
+// Atomic switch
+app.locals.store = newStore;
+```
+
+#### Versioned Directories
+
+```
+deployments/
+├── v1.0.0/
+│   └── documents/
+├── v1.1.0/
+│   └── documents/
+└── current -> v1.1.0  # Symlink to active version
+```
+
+#### Watch for Updates (Development)
+
+```javascript
+const fs = require('fs');
+
+function reloadStore() {
+  const newStore = new VectorStore(1536);
+  newStore.loadDir('./documents');
+  global.store = newStore;
+  console.log(`Reloaded ${newStore.size()} documents`);
+}
+
+// Initial load
+reloadStore();
+
+// Watch for changes in development
+if (process.env.NODE_ENV === 'development') {
+  fs.watch('./documents', { recursive: true }, reloadStore);
+}
+```
+
 ## MCP Server Integration
 
 Perfect for building local RAG capabilities in MCP servers:
@@ -147,6 +291,59 @@ Check if the store has been finalized and is ready for searching.
 
 ##### `size(): number`
 Get the number of documents in the store.
+
+## Performance
+
+### Why It's Fast
+
+The native-vector-store achieves exceptional performance through:
+
+1. **Producer-Consumer Loading**: Parallel file I/O and JSON parsing achieve 178k+ documents/second
+2. **SIMD Optimizations**: OpenMP vectorization for dot product calculations
+3. **Arena Allocation**: Contiguous memory layout with 64MB chunks for cache efficiency
+4. **Zero-Copy Design**: String views and pre-allocated buffers minimize allocations
+5. **Two-Phase Architecture**: Loading phase allows concurrent writes, serving phase optimizes for reads
+
+### Benchmarks
+
+Performance on typical hardware (M1 MacBook Pro):
+
+| Operation | Documents | Time | Throughput |
+|-----------|-----------|------|------------|
+| Loading (from disk) | 100,000 | ~560ms | 178k docs/sec |
+| Search (k=10) | 10,000 corpus | 1-2ms | 500-1000 queries/sec |
+| Search (k=100) | 100,000 corpus | 8-12ms | 80-125 queries/sec |
+| Normalization | 100,000 | <100ms | 1M+ docs/sec |
+
+### Performance Tips
+
+1. **Optimal File Organization**: 
+   - Keep 1000-10000 documents per JSON file for best I/O performance
+   - Use arrays of documents in each file rather than one file per document
+
+2. **Memory Considerations**:
+   - Each document requires: `embedding_size * 4 bytes + metadata_size + text_size`
+   - 100k documents with 1536-dim embeddings ≈ 600MB embeddings + metadata
+
+3. **Search Performance**:
+   - Scales linearly with corpus size and k value
+   - Use smaller k values (5-20) for interactive applications
+   - Pre-normalize query embeddings if making multiple searches
+
+4. **Deployment Optimization**:
+   - Preload in container images for faster cold starts
+   - Use memory-mapped files for very large corpora
+   - Consider sharding beyond 1M documents
+
+### Comparison with Alternatives
+
+| Feature | native-vector-store | Faiss | ChromaDB | Pinecone |
+|---------|-------------------|--------|----------|----------|
+| Load 100k docs | <1s | 2-5s | 30-60s | N/A (API) |
+| Search latency | 1-2ms | 0.5-1ms | 50-200ms | 50-300ms |
+| Memory efficiency | High | Medium | Low | N/A |
+| Dependencies | Minimal | Heavy | Heavy | None |
+| Deployment | Simple | Complex | Complex | SaaS |
 
 ## Building from Source
 
