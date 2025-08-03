@@ -17,6 +17,10 @@ jobs:
   publish:
     needs: build-prebuilds
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for pushing to gh-pages branch
+      pages: write     # Required for GitHub Pages
+      id-token: write  # Required for GitHub Pages
     
     steps:
       - uses: actions/checkout@v4
