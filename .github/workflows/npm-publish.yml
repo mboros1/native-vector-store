@@ -45,11 +45,24 @@ jobs:
       - name: Run tests
         run: npm test
       
+      - name: Generate documentation
+        run: |
+          echo "Generating JSDoc documentation..."
+          npm run docs
+          echo "Documentation generated. Contents:"
+          find docs -type f -name "*.html" | head -20
+          echo "Total documentation files: $(find docs -type f | wc -l)"
+          echo "Documentation size: $(du -sh docs | cut -f1)"
+      
       - name: Create package
         run: |
           # Ensure prebuilds are in the right location
           echo "Package contents:"
           npm pack --dry-run
+          echo ""
+          echo "Documentation files that will be included:"
+          npm pack --dry-run | grep -E "docs/.*\.(html|css|js)" | head -10
+          echo "... and more"
       
       - name: Publish to npm (if not dry run)
         if: github.event_name == 'release' || github.event.inputs.dry_run != 'true'

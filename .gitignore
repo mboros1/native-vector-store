@@ -33,3 +33,6 @@ cpp_std_partitioned/
 
 # Auto-generated files
 config.status
+
+# JSDoc generated documentation
+docs/
