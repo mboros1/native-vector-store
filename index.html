@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JSDoc: Home</title>
+
+    <script src="scripts/prettify/prettify.js"> </script>
+    <script src="scripts/prettify/lang-css.js"> </script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify-tomorrow.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc-default.css">
+</head>
+
+<body>
+
+<div id="main">
+
+    <h1 class="page-title">Home</h1>
+
+    
+
+
+
+    
+
+
+    <h3> </h3>
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+    <section>
+        <article><h1 id="native-vector-store">native-vector-store</h1>
+<p>High-performance vector store with SIMD optimization for MCP servers and local RAG applications.</p>
+<p>📚 <strong><a href="https://mboros1.github.io/native-vector-store/">API Documentation</a></strong> | 📦 <strong><a href="https://www.npmjs.com/package/native-vector-store">npm</a></strong> | 🐙 <strong><a href="https://github.com/mboros1/native-vector-store">GitHub</a></strong></p>
+<h2 id="design-philosophy">Design Philosophy</h2>
+<p>This vector store is designed for <strong>immutable, one-time loading</strong> scenarios common in modern cloud deployments:</p>
+<ul>
+<li><strong>📚 Load Once, Query Many</strong>: Documents are loaded at startup and remain immutable during serving</li>
+<li><strong>🚀 Optimized for Cold Starts</strong>: Perfect for serverless functions and containerized deployments</li>
+<li><strong>📁 File-Based Organization</strong>: Leverages filesystem for natural document organization and versioning</li>
+<li><strong>🎯 Focused API</strong>: Does one thing exceptionally well - fast similarity search over focused corpora (sweet spot: &lt;100k documents)</li>
+</ul>
+<p>This design eliminates complex state management, ensures consistent performance, and aligns perfectly with cloud-native deployment patterns where domain-specific knowledge bases are the norm.</p>
+<h2 id="features">Features</h2>
+<ul>
+<li><strong>🚀 High Performance</strong>: C++ implementation with OpenMP SIMD optimization</li>
+<li><strong>📦 Arena Allocation</strong>: Memory-efficient storage with 64MB chunks</li>
+<li><strong>⚡ Fast Search</strong>: Sub-10ms similarity search for large document collections</li>
+<li><strong>🔧 MCP Integration</strong>: Built for Model Context Protocol servers</li>
+<li><strong>🌐 Cross-Platform</strong>: Works on Linux, macOS, and Windows</li>
+<li><strong>📊 TypeScript Support</strong>: Full type definitions included</li>
+<li><strong>🔄 Producer-Consumer Loading</strong>: Parallel document loading at 178k+ docs/sec</li>
+</ul>
+<h2 id="performance-targets">Performance Targets</h2>
+<ul>
+<li><strong>Load Time</strong>: &lt;1 second for 100,000 documents (achieved: ~560ms)</li>
+<li><strong>Search Latency</strong>: &lt;10ms for top-k similarity search (achieved: 1-2ms)</li>
+<li><strong>Memory Efficiency</strong>: Minimal fragmentation via arena allocation</li>
+<li><strong>Scalability</strong>: Designed for focused corpora (&lt;100k documents optimal, &lt;1M maximum)</li>
+<li><strong>Throughput</strong>: 178k+ documents per second with parallel loading</li>
+</ul>
+<h2 id="installation">Installation</h2>
+<pre class="prettyprint source lang-bash"><code>npm install native-vector-store
+</code></pre>
+<h3 id="prerequisites">Prerequisites</h3>
+<p><strong>Runtime Requirements:</strong></p>
+<ul>
+<li>OpenMP runtime library (for parallel processing)
+<ul>
+<li><strong>Linux</strong>: <code>sudo apt-get install libgomp1</code> (Ubuntu/Debian) or <code>dnf install libgomp</code> (Fedora)</li>
+<li><strong>Alpine</strong>: <code>apk add libgomp</code></li>
+<li><strong>macOS</strong>: <code>brew install libomp</code></li>
+<li><strong>Windows</strong>: Included with Visual C++ runtime</li>
+</ul>
+</li>
+</ul>
+<p>Prebuilt binaries are included for:</p>
+<ul>
+<li>Linux (x64, arm64, musl/Alpine)</li>
+<li>macOS (x64, arm64/Apple Silicon)</li>
+<li>Windows (x64)</li>
+</ul>
+<p>If building from source, you'll need:</p>
+<ul>
+<li>Node.js ≥14.0.0</li>
+<li>C++ compiler with OpenMP support</li>
+<li>simdjson library (vendored, no installation needed)</li>
+</ul>
+<h2 id="quick-start">Quick Start</h2>
+<pre class="prettyprint source lang-javascript"><code>const { VectorStore } = require('native-vector-store');
+
+// Initialize with embedding dimensions (e.g., 1536 for OpenAI)
+const store = new VectorStore(1536);
+
+// Load documents from directory
+store.loadDir('./documents'); // Automatically finalizes after loading
+
+// Or add documents manually then finalize
+const document = {
+  id: 'doc-1',
+  text: 'Example document text',
+  metadata: {
+    embedding: new Array(1536).fill(0).map(() => Math.random()),
+    category: 'example'
+  }
+};
+
+store.addDocument(document);
+store.finalize(); // Must call before searching!
+
+// Search for similar documents
+const queryEmbedding = new Float32Array(1536);
+const results = store.search(queryEmbedding, 5); // Top 5 results
+
+console.log(results[0]); // { score: 0.95, id: 'doc-1', text: '...', metadata_json: '...' }
+</code></pre>
+<h2 id="usage-patterns">Usage Patterns</h2>
+<h3 id="serverless-deployment-(aws-lambda%2C-vercel)">Serverless Deployment (AWS Lambda, Vercel)</h3>
+<pre class="prettyprint source lang-javascript"><code>// Initialize once during cold start
+let store;
+
+async function initializeStore() {
+  if (!store) {
+    store = new VectorStore(1536);
+    store.loadDir('./knowledge-base'); // Loads and finalizes
+  }
+  return store;
+}
+
+// Handler reuses the store across invocations
+export async function handler(event) {
+  const store = await initializeStore();
+  const embedding = new Float32Array(event.embedding);
+  return store.search(embedding, 10);
+}
+</code></pre>
+<h3 id="local-mcp-server">Local MCP Server</h3>
+<pre class="prettyprint source lang-javascript"><code>const { VectorStore } = require('native-vector-store');
+
+// Load different knowledge domains at startup
+const stores = {
+  products: new VectorStore(1536),
+  support: new VectorStore(1536),
+  general: new VectorStore(1536)
+};
+
+stores.products.loadDir('./knowledge/products');
+stores.support.loadDir('./knowledge/support');
+stores.general.loadDir('./knowledge/general');
+
+// Route searches to appropriate domain
+server.on('search', (query) => {
+  const store = stores[query.domain] || stores.general;
+  const results = store.search(query.embedding, 5);
+  return results.filter(r => r.score > 0.7);
+});
+</code></pre>
+<h3 id="cli-tool-with-persistent-context">CLI Tool with Persistent Context</h3>
+<pre class="prettyprint source lang-javascript"><code>#!/usr/bin/env node
+const { VectorStore } = require('native-vector-store');
+
+// Load knowledge base once
+const store = new VectorStore(1536);
+store.loadDir(process.env.KNOWLEDGE_PATH || './docs');
+
+// Interactive REPL with fast responses
+const repl = require('repl');
+const r = repl.start('> ');
+r.context.search = (embedding, k = 5) => store.search(embedding, k);
+</code></pre>
+<h3 id="file-organization-best-practices">File Organization Best Practices</h3>
+<p>Structure your documents by category for separate vector stores:</p>
+<pre class="prettyprint source"><code>knowledge-base/
+├── products/          # Product documentation
+│   ├── api-reference.json
+│   └── user-guide.json
+├── support/           # Support articles
+│   ├── faq.json
+│   └── troubleshooting.json
+└── context/           # Context-specific docs
+    ├── company-info.json
+    └── policies.json
+</code></pre>
+<p>Load each category into its own VectorStore:</p>
+<pre class="prettyprint source lang-javascript"><code>// Create separate stores for different domains
+const productStore = new VectorStore(1536);
+const supportStore = new VectorStore(1536);
+const contextStore = new VectorStore(1536);
+
+// Load each category independently
+productStore.loadDir('./knowledge-base/products');
+supportStore.loadDir('./knowledge-base/support');
+contextStore.loadDir('./knowledge-base/context');
+
+// Search specific domains
+const productResults = productStore.search(queryEmbedding, 5);
+const supportResults = supportStore.search(queryEmbedding, 5);
+</code></pre>
+<p>Each JSON file contains self-contained documents with embeddings:</p>
+<pre class="prettyprint source lang-json"><code>{
+  &quot;id&quot;: &quot;unique-id&quot;,
+  &quot;text&quot;: &quot;Document content...&quot;,
+  &quot;metadata&quot;: {
+    &quot;embedding&quot;: [0.1, 0.2, ...],
+    &quot;category&quot;: &quot;product&quot;,
+    &quot;lastUpdated&quot;: &quot;2024-01-01&quot;
+  }
+}
+</code></pre>
+<h3 id="deployment-strategies">Deployment Strategies</h3>
+<h4 id="blue-green-deployment">Blue-Green Deployment</h4>
+<pre class="prettyprint source lang-javascript"><code>// Load new version without downtime
+const newStore = new VectorStore(1536);
+newStore.loadDir('./knowledge-base-v2');
+
+// Atomic switch
+app.locals.store = newStore;
+</code></pre>
+<h4 id="versioned-directories">Versioned Directories</h4>
+<pre class="prettyprint source"><code>deployments/
+├── v1.0.0/
+│   └── documents/
+├── v1.1.0/
+│   └── documents/
+└── current -> v1.1.0  # Symlink to active version
+</code></pre>
+<h4 id="watch-for-updates-(development)">Watch for Updates (Development)</h4>
+<pre class="prettyprint source lang-javascript"><code>const fs = require('fs');
+
+function reloadStore() {
+  const newStore = new VectorStore(1536);
+  newStore.loadDir('./documents');
+  global.store = newStore;
+  console.log(`Reloaded ${newStore.size()} documents`);
+}
+
+// Initial load
+reloadStore();
+
+// Watch for changes in development
+if (process.env.NODE_ENV === 'development') {
+  fs.watch('./documents', { recursive: true }, reloadStore);
+}
+</code></pre>
+<h2 id="mcp-server-integration">MCP Server Integration</h2>
+<p>Perfect for building local RAG capabilities in MCP servers:</p>
+<pre class="prettyprint source lang-javascript"><code>const { MCPVectorServer } = require('native-vector-store/examples/mcp-server');
+
+const server = new MCPVectorServer(1536);
+
+// Load document corpus
+await server.loadDocuments('./documents');
+
+// Handle MCP requests
+const response = await server.handleMCPRequest('vector_search', {
+  query: queryEmbedding,
+  k: 5,
+  threshold: 0.7
+});
+</code></pre>
+<h2 id="api-reference">API Reference</h2>
+<p>Full API documentation is available at:</p>
+<ul>
+<li><strong><a href="https://mboros1.github.io/native-vector-store/">Latest Documentation</a></strong> - Always current</li>
+<li><strong>Versioned Documentation</strong> - Available at <code>https://mboros1.github.io/native-vector-store/{version}/</code> (e.g., <code>/v0.3.0/</code>)</li>
+<li><strong>Local Documentation</strong> - After installing: <code>open node_modules/native-vector-store/docs/index.html</code></li>
+</ul>
+<h3 id="vectorstore"><code>VectorStore</code></h3>
+<h4 id="constructor">Constructor</h4>
+<pre class="prettyprint source lang-typescript"><code>new VectorStore(dimensions: number)
+</code></pre>
+<h4 id="methods">Methods</h4>
+<h5 id="loaddir(path%3A-string)%3A-void"><code>loadDir(path: string): void</code></h5>
+<p>Load all JSON documents from a directory and automatically finalize the store. Files should contain document objects with embeddings.</p>
+<h5 id="adddocument(doc%3A-document)%3A-void"><code>addDocument(doc: Document): void</code></h5>
+<p>Add a single document to the store. Only works during loading phase (before finalization).</p>
+<pre class="prettyprint source lang-typescript"><code>interface Document {
+  id: string;
+  text: string;
+  metadata: {
+    embedding: number[];
+    [key: string]: any;
+  };
+}
+</code></pre>
+<h5 id="search(query%3A-float32array%2C-k%3A-number%2C-normalizequery%3F%3A-boolean)%3A-searchresult%5B%5D"><code>search(query: Float32Array, k: number, normalizeQuery?: boolean): SearchResult[]</code></h5>
+<p>Search for k most similar documents.</p>
+<pre class="prettyprint source lang-typescript"><code>interface SearchResult {
+  score: number;
+  id: string;
+  text: string;
+  metadata_json: string;
+}
+</code></pre>
+<h5 id="finalize()%3A-void"><code>finalize(): void</code></h5>
+<p>Finalize the store: normalize all embeddings and switch to serving mode. After this, no more documents can be added but searches become available. This is automatically called by <code>loadDir()</code>.</p>
+<h5 id="isfinalized()%3A-boolean"><code>isFinalized(): boolean</code></h5>
+<p>Check if the store has been finalized and is ready for searching.</p>
+<h5 id="normalize()%3A-void"><code>normalize(): void</code></h5>
+<p><strong>Deprecated</strong>: Use <code>finalize()</code> instead.</p>
+<h5 id="size()%3A-number"><code>size(): number</code></h5>
+<p>Get the number of documents in the store.</p>
+<h2 id="performance">Performance</h2>
+<h3 id="why-it's-fast">Why It's Fast</h3>
+<p>The native-vector-store achieves exceptional performance through:</p>
+<ol>
+<li><strong>Producer-Consumer Loading</strong>: Parallel file I/O and JSON parsing achieve 178k+ documents/second</li>
+<li><strong>SIMD Optimizations</strong>: OpenMP vectorization for dot product calculations</li>
+<li><strong>Arena Allocation</strong>: Contiguous memory layout with 64MB chunks for cache efficiency</li>
+<li><strong>Zero-Copy Design</strong>: String views and pre-allocated buffers minimize allocations</li>
+<li><strong>Two-Phase Architecture</strong>: Loading phase allows concurrent writes, serving phase optimizes for reads</li>
+</ol>
+<h3 id="benchmarks">Benchmarks</h3>
+<p>Performance on typical hardware (M1 MacBook Pro):</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Documents</th>
+<th>Time</th>
+<th>Throughput</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loading (from disk)</td>
+<td>100,000</td>
+<td>~560ms</td>
+<td>178k docs/sec</td>
+</tr>
+<tr>
+<td>Search (k=10)</td>
+<td>10,000 corpus</td>
+<td>1-2ms</td>
+<td>500-1000 queries/sec</td>
+</tr>
+<tr>
+<td>Search (k=100)</td>
+<td>100,000 corpus</td>
+<td>8-12ms</td>
+<td>80-125 queries/sec</td>
+</tr>
+<tr>
+<td>Normalization</td>
+<td>100,000</td>
+<td>&lt;100ms</td>
+<td>1M+ docs/sec</td>
+</tr>
+</tbody>
+</table>
+<h3 id="performance-tips">Performance Tips</h3>
+<ol>
+<li>
+<p><strong>Optimal File Organization</strong>:</p>
+<ul>
+<li>Keep 1000-10000 documents per JSON file for best I/O performance</li>
+<li>Use arrays of documents in each file rather than one file per document</li>
+</ul>
+</li>
+<li>
+<p><strong>Memory Considerations</strong>:</p>
+<ul>
+<li>Each document requires: <code>embedding_size * 4 bytes + metadata_size + text_size</code></li>
+<li>100k documents with 1536-dim embeddings ≈ 600MB embeddings + metadata</li>
+</ul>
+</li>
+<li>
+<p><strong>Search Performance</strong>:</p>
+<ul>
+<li>Scales linearly with corpus size and k value</li>
+<li>Use smaller k values (5-20) for interactive applications</li>
+<li>Pre-normalize query embeddings if making multiple searches</li>
+</ul>
+</li>
+<li>
+<p><strong>Corpus Size Optimization</strong>:</p>
+<ul>
+<li>Sweet spot: &lt;100k documents for optimal load/search balance</li>
+<li>Beyond 100k: Consider if your use case truly needs all documents</li>
+<li>Focus on curated, domain-specific content rather than exhaustive datasets</li>
+</ul>
+</li>
+</ol>
+<h3 id="comparison-with-alternatives">Comparison with Alternatives</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>native-vector-store</th>
+<th>Faiss</th>
+<th>ChromaDB</th>
+<th>Pinecone</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Load 100k docs</td>
+<td>&lt;1s</td>
+<td>2-5s</td>
+<td>30-60s</td>
+<td>N/A (API)</td>
+</tr>
+<tr>
+<td>Search latency</td>
+<td>1-2ms</td>
+<td>0.5-1ms</td>
+<td>50-200ms</td>
+<td>50-300ms</td>
+</tr>
+<tr>
+<td>Memory efficiency</td>
+<td>High</td>
+<td>Medium</td>
+<td>Low</td>
+<td>N/A</td>
+</tr>
+<tr>
+<td>Dependencies</td>
+<td>Minimal</td>
+<td>Heavy</td>
+<td>Heavy</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Deployment</td>
+<td>Simple</td>
+<td>Complex</td>
+<td>Complex</td>
+<td>SaaS</td>
+</tr>
+<tr>
+<td>Sweet spot</td>
+<td>&lt;100k docs</td>
+<td>Any size</td>
+<td>Any size</td>
+<td>Any size</td>
+</tr>
+</tbody>
+</table>
+<h2 id="building-from-source">Building from Source</h2>
+<pre class="prettyprint source lang-bash"><code># Install dependencies
+npm install
+
+# Build native module
+npm run build
+
+# Run tests
+npm test
+
+# Run performance benchmarks
+npm run benchmark
+
+# Try MCP server example
+npm run example
+</code></pre>
+<h2 id="architecture">Architecture</h2>
+<h3 id="memory-layout">Memory Layout</h3>
+<ul>
+<li><strong>Arena Allocator</strong>: 64MB chunks for cache-friendly access</li>
+<li><strong>Contiguous Storage</strong>: Embeddings, strings, and metadata in single allocations</li>
+<li><strong>Zero-Copy Design</strong>: Direct memory access without serialization overhead</li>
+</ul>
+<h3 id="simd-optimization">SIMD Optimization</h3>
+<ul>
+<li><strong>OpenMP Pragmas</strong>: Vectorized dot product operations</li>
+<li><strong>Parallel Processing</strong>: Multi-threaded JSON loading and search</li>
+<li><strong>Cache-Friendly</strong>: Aligned memory access patterns</li>
+</ul>
+<h3 id="performance-characteristics">Performance Characteristics</h3>
+<ul>
+<li><strong>Load Performance</strong>: O(n) with parallel JSON parsing</li>
+<li><strong>Search Performance</strong>: O(n⋅d) with SIMD acceleration</li>
+<li><strong>Memory Usage</strong>: ~(d⋅4 + text_size) bytes per document</li>
+</ul>
+<h2 id="use-cases">Use Cases</h2>
+<h3 id="mcp-servers">MCP Servers</h3>
+<p>Ideal for building local RAG (Retrieval-Augmented Generation) capabilities:</p>
+<ul>
+<li>Fast document loading from focused knowledge bases</li>
+<li>Low-latency similarity search for context retrieval</li>
+<li>Memory-efficient storage for domain-specific corpora</li>
+</ul>
+<h3 id="knowledge-management">Knowledge Management</h3>
+<p>Perfect for personal knowledge management systems:</p>
+<ul>
+<li>Index personal documents and notes (typically &lt;10k documents)</li>
+<li>Fast semantic search across focused content</li>
+<li>Offline operation without external dependencies</li>
+</ul>
+<h3 id="research-applications">Research Applications</h3>
+<p>Suitable for academic and research projects with focused datasets:</p>
+<ul>
+<li>Literature review within specific domains</li>
+<li>Semantic clustering of curated paper collections</li>
+<li>Cross-reference discovery in specialized corpora</li>
+</ul>
+<h2 id="contributing">Contributing</h2>
+<ol>
+<li>Fork the repository</li>
+<li>Create a feature branch</li>
+<li>Make your changes</li>
+<li>Add tests for new functionality</li>
+<li>Ensure all tests pass</li>
+<li>Submit a pull request</li>
+</ol>
+<h2 id="license">License</h2>
+<p>MIT License - see LICENSE file for details.</p>
+<h2 id="benchmarks-1">Benchmarks</h2>
+<p>Performance on M1 MacBook Pro with 1536-dimensional embeddings:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Document Count</th>
+<th>Time</th>
+<th>Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Load</td>
+<td>10,000</td>
+<td>245ms</td>
+<td>40.8k docs/sec</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>10,000</td>
+<td>3.2ms</td>
+<td>3.1M docs/sec</td>
+</tr>
+<tr>
+<td>Normalize</td>
+<td>10,000</td>
+<td>12ms</td>
+<td>833k docs/sec</td>
+</tr>
+</tbody>
+</table>
+<p><em>Results may vary based on hardware and document characteristics.</em></p></article>
+    </section>
+
+
+
+
+
+
+</div>
+
+<nav>
+    <h2><a href="index.html">Home</a></h2><h3>Classes</h3><ul><li><a href="VectorStore.html">VectorStore</a></li><li><a href="VectorStoreWrapper.html">VectorStoreWrapper</a></li></ul><h3><a href="global.html">Global</a></h3>
+</nav>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc/jsdoc">JSDoc 4.0.4</a>
+</footer>
+
+<script> prettyPrint(); </script>
+<script src="scripts/linenumber.js"> </script>
+</body>
+</html>
