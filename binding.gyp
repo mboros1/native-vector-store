@@ -2,11 +2,12 @@
   "targets": [
     {
       "target_name": "vector_store",
-      "sources": ["src/binding.cc", "src/vector_store.cpp", "src/vector_store_loader.cpp", "src/vector_store_loader_mmap.cpp", "src/vector_store_loader_adaptive.cpp", "deps/simdjson.cpp"],
+      "sources": ["src/binding.cc", "src/vector_store.cpp", "src/vector_store_loader.cpp", "src/vector_store_loader_mmap.cpp", "src/vector_store_loader_adaptive.cpp", "deps/simdjson/simdjson.cpp"],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
         "src",
-        "deps"
+        "deps/simdjson",
+        "deps/atomic_queue"
       ],
       "dependencies": ["<!(node -p \"require('node-addon-api').gyp\")"],
       "cflags_cc": [

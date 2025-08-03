@@ -14,7 +14,7 @@ CXXFLAGS = -std=c++17 -g -O0 -fno-omit-frame-pointer -DDEBUG
 # OS-specific configuration
 ifeq ($(UNAME_S),Darwin)
     # macOS configuration
-    INCLUDES = -I. -I../deps -I/opt/homebrew/opt/libomp/include
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I/opt/homebrew/opt/libomp/include
     LDFLAGS = -L/opt/homebrew/opt/libomp/lib
     LIBS = -lomp
     # Add flags for better debugging with lldb
@@ -23,7 +23,7 @@ ifeq ($(UNAME_S),Darwin)
     CXXFLAGS += -Xpreprocessor -fopenmp
 else
     # Linux configuration
-    INCLUDES = -I. -I../deps
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue
     LDFLAGS = -L/usr/lib
     LIBS = -lgomp
     # OpenMP flags for Linux
@@ -32,8 +32,8 @@ endif
 
 TARGET = test_vector_store
 STRESS_TARGET = test_stress
-SOURCES = test_main.cpp vector_store.cpp ../deps/simdjson.cpp
-STRESS_SOURCES = test_stress.cpp vector_store.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp vector_store_loader_adaptive.cpp ../deps/simdjson.cpp
+SOURCES = test_main.cpp vector_store.cpp ../deps/simdjson/simdjson.cpp
+STRESS_SOURCES = test_stress.cpp vector_store.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp vector_store_loader_adaptive.cpp ../deps/simdjson/simdjson.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
 
