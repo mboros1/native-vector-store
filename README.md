@@ -116,12 +116,20 @@ export async function handler(event) {
 ```javascript
 const { VectorStore } = require('native-vector-store');
 
-// Load at server startup
-const store = new VectorStore(1536);
-store.loadDir('./context');
+// Load different knowledge domains at startup
+const stores = {
+  products: new VectorStore(1536),
+  support: new VectorStore(1536),
+  general: new VectorStore(1536)
+};
 
-// Serve many requests without reloading
+stores.products.loadDir('./knowledge/products');
+stores.support.loadDir('./knowledge/support');
+stores.general.loadDir('./knowledge/general');
+
+// Route searches to appropriate domain
 server.on('search', (query) => {
+  const store = stores[query.domain] || stores.general;
   const results = store.search(query.embedding, 5);
   return results.filter(r => r.score > 0.7);
 });
@@ -145,7 +153,7 @@ r.context.search = (embedding, k = 5) => store.search(embedding, k);
 
 ### File Organization Best Practices
 
-Structure your documents for optimal organization and performance:
+Structure your documents by category for separate vector stores:
 
 ```
 knowledge-base/
@@ -155,13 +163,30 @@ knowledge-base/
 ├── support/           # Support articles
 │   ├── faq.json
 │   └── troubleshooting.json
-├── context/           # Context-specific docs
-│   ├── company-info.json
-│   └── policies.json
-└── embeddings.json    # Shared embeddings
+└── context/           # Context-specific docs
+    ├── company-info.json
+    └── policies.json
 ```
 
-Each JSON file should contain a document or array of documents:
+Load each category into its own VectorStore:
+
+```javascript
+// Create separate stores for different domains
+const productStore = new VectorStore(1536);
+const supportStore = new VectorStore(1536);
+const contextStore = new VectorStore(1536);
+
+// Load each category independently
+productStore.loadDir('./knowledge-base/products');
+supportStore.loadDir('./knowledge-base/support');
+contextStore.loadDir('./knowledge-base/context');
+
+// Search specific domains
+const productResults = productStore.search(queryEmbedding, 5);
+const supportResults = supportStore.search(queryEmbedding, 5);
+```
+
+Each JSON file contains self-contained documents with embeddings:
 
 ```json
 {

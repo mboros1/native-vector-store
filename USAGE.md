@@ -118,15 +118,20 @@ async function prepareDocuments(inputFile, outputFile) {
 
 ## Loading Strategies
 
-### Strategy 1: Organized Directories
+### Strategy 1: Category-Specific Stores
 
 Best for: Large knowledge bases with natural categories
 
 ```javascript
-const store = new VectorStore(1536);
+// Create separate stores for each domain
+const productStore = new VectorStore(1536);
+const supportStore = new VectorStore(1536);
+const policyStore = new VectorStore(1536);
 
-// Load entire knowledge base
-store.loadDir('./knowledge-base');
+// Load each category independently
+productStore.loadDir('./knowledge-base/products');
+supportStore.loadDir('./knowledge-base/support');
+policyStore.loadDir('./knowledge-base/policies');
 
 // Directory structure:
 // knowledge-base/
@@ -139,6 +144,10 @@ store.loadDir('./knowledge-base');
 // │   └── troubleshooting.json  (1500 docs)
 // └── policies/
 //     └── terms.json            (100 docs)
+
+// Search specific domains
+const productResults = productStore.search(queryEmbedding, 10);
+const supportResults = supportStore.search(queryEmbedding, 5);
 ```
 
 ### Strategy 2: Chunked Large Files
@@ -274,6 +283,39 @@ const productResults = searchWithFilter(
   (metadata) => metadata.category === 'products',
   10
 );
+```
+
+### Multi-Store Search
+
+```javascript
+// Search across multiple domain-specific stores
+function searchAllStores(stores, embedding, k = 10) {
+  const allResults = [];
+  
+  // Search each store
+  for (const [domain, store] of Object.entries(stores)) {
+    const results = store.search(embedding, k);
+    // Tag results with their domain
+    results.forEach(r => {
+      allResults.push({ ...r, domain });
+    });
+  }
+  
+  // Sort by score and return top k
+  return allResults
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+}
+
+// Usage
+const stores = {
+  products: productStore,
+  support: supportStore,
+  policies: policyStore
+};
+
+const bestResults = searchAllStores(stores, queryEmbedding, 10);
+console.log(`Top result from ${bestResults[0].domain}: ${bestResults[0].text}`);
 ```
 
 ## Production Deployments
