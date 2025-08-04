@@ -135,6 +135,14 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                                 if (add_error) {
                                     fprintf(stderr, "Error adding document from %s: %s\n", 
                                            data->filename.c_str(), simdjson::error_message(add_error));
+                                    if (add_error == simdjson::NO_SUCH_FIELD) {
+                                        fprintf(stderr, "  Expected JSON format: {\"id\": string, \"text\": string, \"metadata\": {\"embedding\": [numbers...]}}\n");
+                                        fprintf(stderr, "  Required fields: id, text (or content), metadata.embedding\n");
+                                        fprintf(stderr, "  Note: 'embedding' must be inside 'metadata' object\n");
+                                        fprintf(stderr, "  Note: 'text' and 'content' are interchangeable (Spring AI compatibility)\n");
+                                    } else if (add_error == simdjson::INCORRECT_TYPE) {
+                                        fprintf(stderr, "  Possible causes: wrong embedding dimensions or store already finalized\n");
+                                    }
                                 }
                             }
                         }
@@ -147,6 +155,14 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                             if (add_error) {
                                 fprintf(stderr, "Error adding document from %s: %s\n", 
                                        data->filename.c_str(), simdjson::error_message(add_error));
+                                if (add_error == simdjson::NO_SUCH_FIELD) {
+                                    fprintf(stderr, "  Expected JSON format: {\"id\": string, \"text\": string, \"metadata\": {\"embedding\": [numbers...]}}\n");
+                                    fprintf(stderr, "  Required fields: id, text (or content), metadata.embedding\n");
+                                    fprintf(stderr, "  Note: 'embedding' must be inside 'metadata' object\n");
+                                    fprintf(stderr, "  Note: 'text' and 'content' are interchangeable (Spring AI compatibility)\n");
+                                } else if (add_error == simdjson::INCORRECT_TYPE) {
+                                    fprintf(stderr, "  Possible causes: wrong embedding dimensions or store already finalized\n");
+                                }
                             }
                         }
                     }

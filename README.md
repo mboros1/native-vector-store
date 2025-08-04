@@ -192,14 +192,27 @@ Each JSON file contains self-contained documents with embeddings:
 
 ```json
 {
-  "id": "unique-id",
-  "text": "Document content...",
-  "metadata": {
-    "embedding": [0.1, 0.2, ...],
-    "category": "product",
-    "lastUpdated": "2024-01-01"
+  "id": "unique-id",              // Required: unique document identifier
+  "text": "Document content...",   // Required: searchable text content (or use "content" for Spring AI)
+  "metadata": {                    // Required: metadata object
+    "embedding": [0.1, 0.2, ...],  // Required: array of numbers matching vector dimensions
+    "category": "product",         // Optional: additional metadata
+    "lastUpdated": "2024-01-01"    // Optional: additional metadata
   }
 }
+```
+
+**Spring AI Compatibility**: You can use `"content"` instead of `"text"` for the document field. The library auto-detects which field name you're using from the first document and optimizes subsequent lookups.
+
+**Common Mistakes:**
+- ❌ Putting `embedding` at the root level instead of inside `metadata`
+- ❌ Using string format for embeddings instead of number array
+- ❌ Missing required fields (`id`, `text`, or `metadata`)
+- ❌ Wrong embedding dimensions (must match VectorStore constructor)
+
+**Validate your JSON format:**
+```bash
+node node_modules/native-vector-store/examples/validate-format.js your-file.json
 ```
 
 ### Deployment Strategies

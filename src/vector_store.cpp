@@ -130,10 +130,58 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     // Parse with error handling
     std::string_view id, text;
     auto error = json_doc["id"].get_string().get(id);
-    if (error) return error;
+    if (error) {
+        if (error == simdjson::NO_SUCH_FIELD) {
+            fprintf(stderr, "Missing required field 'id'\n");
+        }
+        return error;
+    }
     
-    error = json_doc["text"].get_string().get(text);
-    if (error) return error;
+    // Auto-detect text field type on first document, then use that for all subsequent documents
+    TextFieldType field_type = text_field_type_.load(std::memory_order_acquire);
+    
+    if (field_type == TextFieldType::UNKNOWN) {
+        // First document - detect field type
+        error = json_doc["text"].get_string().get(text);
+        if (!error) {
+            // Found 'text' field - use it for all documents
+            TextFieldType expected = TextFieldType::UNKNOWN;
+            text_field_type_.compare_exchange_strong(expected, TextFieldType::TEXT, std::memory_order_release);
+        } else if (error == simdjson::NO_SUCH_FIELD) {
+            // Try 'content' field
+            error = json_doc["content"].get_string().get(text);
+            if (!error) {
+                // Found 'content' field - use it for all documents
+                TextFieldType expected = TextFieldType::UNKNOWN;
+                text_field_type_.compare_exchange_strong(expected, TextFieldType::CONTENT, std::memory_order_release);
+            } else {
+                if (error == simdjson::NO_SUCH_FIELD) {
+                    fprintf(stderr, "Missing required field 'text' or 'content'\n");
+                }
+                return error;
+            }
+        } else {
+            return error;
+        }
+    } else if (field_type == TextFieldType::TEXT) {
+        // Use 'text' field directly
+        error = json_doc["text"].get_string().get(text);
+        if (error) {
+            if (error == simdjson::NO_SUCH_FIELD) {
+                fprintf(stderr, "Missing required field 'text' (detected from first document)\n");
+            }
+            return error;
+        }
+    } else { // TextFieldType::CONTENT
+        // Use 'content' field directly
+        error = json_doc["content"].get_string().get(text);
+        if (error) {
+            if (error == simdjson::NO_SUCH_FIELD) {
+                fprintf(stderr, "Missing required field 'content' (detected from first document)\n");
+            }
+            return error;
+        }
+    }
     
     // Calculate sizes
     size_t emb_size = dim_ * sizeof(float);
@@ -147,11 +195,21 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     // Process metadata and embedding first
     simdjson::ondemand::object metadata;
     error = json_doc["metadata"].get_object().get(metadata);
-    if (error) return error;
+    if (error) {
+        if (error == simdjson::NO_SUCH_FIELD) {
+            fprintf(stderr, "Missing required field 'metadata'\n");
+        }
+        return error;
+    }
     
     simdjson::ondemand::array emb_array;
     error = metadata["embedding"].get_array().get(emb_array);
-    if (error) return error;
+    if (error) {
+        if (error == simdjson::NO_SUCH_FIELD) {
+            fprintf(stderr, "Missing required field 'embedding' inside 'metadata'\n");
+        }
+        return error;
+    }
     
     // Consume the array before touching anything else  
     size_t i = 0;

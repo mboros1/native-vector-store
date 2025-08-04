@@ -56,6 +56,12 @@ This codebase is built with **-fno-exceptions** for compatibility with Node.js n
 - **Finalization**: Explicit transition normalizes embeddings and enables searches
 - **No Race Conditions**: Phase separation eliminates all concurrency issues
 
+### Spring AI Compatibility
+- **Auto-Detection**: First document determines field name ('text' or 'content') for entire corpus
+- **Zero Overhead**: After detection, only the correct field is checked
+- **Thread-Safe**: Atomic operations ensure consistent field detection across parallel loaders
+- **Error Messages**: Clear indication of which field type was detected
+
 ### Producer-Consumer Loading Pattern
 - **Sequential Disk I/O**: Single producer thread reads files to avoid I/O contention
 - **Lock-Free Queue**: atomic_queue enables wait-free producer-consumer communication

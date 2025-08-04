@@ -3,7 +3,8 @@ const { VectorStore } = require('node-gyp-build')(__dirname);
 /**
  * @typedef {Object} Document
  * @property {string} id - Unique identifier for the document
- * @property {string} text - The text content of the document
+ * @property {string} [text] - The text content of the document (mutually exclusive with content)
+ * @property {string} [content] - Alternative to text for Spring AI compatibility (mutually exclusive with text)
  * @property {Object} metadata - Document metadata
  * @property {number[]} metadata.embedding - The embedding vector for the document
  * @property {*} [metadata.*] - Additional metadata properties
@@ -60,13 +61,24 @@ class VectorStoreWrapper {
    * // Store is automatically finalized and ready for searches
    * 
    * @example
-   * // Document format in JSON files
+   * // Standard format with 'text' field
    * {
    *   "id": "doc-123",
    *   "text": "Document content...",
    *   "metadata": {
    *     "embedding": [0.1, 0.2, ...],  // Required: embedding vector
    *     "category": "product"           // Optional: additional metadata
+   *   }
+   * }
+   * 
+   * @example
+   * // Spring AI format with 'content' field
+   * {
+   *   "id": "doc-456",
+   *   "content": "Document content...",  // 'content' instead of 'text'
+   *   "metadata": {
+   *     "embedding": [0.1, 0.2, ...],
+   *     "category": "spring-ai"
    *   }
    * }
    */

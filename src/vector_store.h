@@ -74,6 +74,10 @@ private:
     std::atomic<bool> is_finalized_{false};  // Simple flag: false = loading, true = serving
     mutable std::shared_mutex search_mutex_;  // Protects against overlapping OpenMP teams
     
+    // Auto-detect text field name for Spring AI compatibility
+    enum class TextFieldType { UNKNOWN, TEXT, CONTENT };
+    std::atomic<TextFieldType> text_field_type_{TextFieldType::UNKNOWN};
+    
 public:
     explicit VectorStore(size_t dim);
     

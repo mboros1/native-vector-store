@@ -1,6 +1,7 @@
 export interface Document {
   id: string;
-  text: string;
+  text?: string;      // Either text or content is required
+  content?: string;   // Spring AI compatibility
   metadata: {
     embedding?: number[];
     [key: string]: any;
