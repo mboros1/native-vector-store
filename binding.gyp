@@ -13,7 +13,6 @@
       "cflags_cc": [
         "-std=c++17",
         "-O3",
-        "-march=native",
         "-fno-exceptions"
       ],
       "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
@@ -37,7 +36,16 @@
           ]
         }],
         ["OS=='linux'", {
-          "cflags_cc": ["-fopenmp"],
+          "cflags_cc": [
+            "-fopenmp",
+            # AWS Lambda compatibility: target x86-64-v3 (up to AVX2) but no AVX-512
+            "-march=x86-64-v3",
+            "-mno-avx512f",
+            "-mno-avx512cd",
+            "-mno-avx512bw", 
+            "-mno-avx512dq",
+            "-mno-avx512vl"
+          ],
           "libraries": ["-lgomp"]
         }],
         ["OS=='win'", {

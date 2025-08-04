@@ -49,7 +49,7 @@ npm install native-vector-store
   - **Windows**: Included with Visual C++ runtime
 
 Prebuilt binaries are included for:
-- Linux (x64, arm64, musl/Alpine)
+- Linux (x64, arm64, musl/Alpine) - x64 builds are AWS Lambda compatible (no AVX-512)
 - macOS (x64, arm64/Apple Silicon)
 - Windows (x64)
 

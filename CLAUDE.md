@@ -111,6 +111,12 @@ Each entry contains:
 - **Scale**: Designed for <1M embeddings
 - **Throughput**: 178k+ documents/second with producer-consumer loading
 
+### CPU Compatibility
+- **Linux x64 builds**: Target x86-64-v3 (AVX2) without AVX-512 for AWS Lambda compatibility
+- **Build flags**: `-march=x86-64-v3 -mno-avx512f -mno-avx512cd -mno-avx512bw -mno-avx512dq -mno-avx512vl`
+- **Why**: AWS Lambda runs on Skylake/Cascade Lake Xeons without AVX-512 support
+- **Other platforms**: Use default optimizations
+
 ## Key Implementation Details
 
 ### SIMD Operations

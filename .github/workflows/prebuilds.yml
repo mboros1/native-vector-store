@@ -30,7 +30,12 @@ jobs:
       - name: Build for Linux ${{ matrix.arch }}
         run: |
           # Build with dynamic OpenMP linking
-          export CXXFLAGS="-fopenmp"
+          # For x64: Use conservative CPU target for AWS Lambda compatibility (no AVX-512)
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            export CXXFLAGS="-fopenmp -march=x86-64-v3 -mno-avx512f -mno-avx512cd -mno-avx512bw -mno-avx512dq -mno-avx512vl"
+          else
+            export CXXFLAGS="-fopenmp"
+          fi
           npx prebuildify --napi --strip --arch=${{ matrix.arch }}
           
       - name: Verify dynamic dependencies

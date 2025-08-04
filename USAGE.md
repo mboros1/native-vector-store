@@ -322,6 +322,8 @@ console.log(`Top result from ${bestResults[0].domain}: ${bestResults[0].text}`);
 
 ### AWS Lambda
 
+**Important**: The prebuilt Linux x64 binaries are compiled without AVX-512 instructions for AWS Lambda compatibility. They target x86-64-v3 (up to AVX2) which is supported on all Lambda runtime environments.
+
 ```javascript
 // handler.js
 let store;
@@ -367,6 +369,11 @@ exports.handler = async (event) => {
   }
 };
 ```
+
+**Deployment Notes:**
+- The npm package includes Lambda-compatible prebuilds (no AVX-512)
+- Ensure your Lambda has the OpenMP runtime: include `libgomp` in your Lambda layer
+- For Amazon Linux 2 runtime, the library works out of the box
 
 ### Docker Container
 
