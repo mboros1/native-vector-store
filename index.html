@@ -212,14 +212,25 @@ const supportResults = supportStore.search(queryEmbedding, 5);
 </code></pre>
 <p>Each JSON file contains self-contained documents with embeddings:</p>
 <pre class="prettyprint source lang-json"><code>{
-  &quot;id&quot;: &quot;unique-id&quot;,
-  &quot;text&quot;: &quot;Document content...&quot;,
-  &quot;metadata&quot;: {
-    &quot;embedding&quot;: [0.1, 0.2, ...],
-    &quot;category&quot;: &quot;product&quot;,
-    &quot;lastUpdated&quot;: &quot;2024-01-01&quot;
+  &quot;id&quot;: &quot;unique-id&quot;,              // Required: unique document identifier
+  &quot;text&quot;: &quot;Document content...&quot;,   // Required: searchable text content (or use &quot;content&quot; for Spring AI)
+  &quot;metadata&quot;: {                    // Required: metadata object
+    &quot;embedding&quot;: [0.1, 0.2, ...],  // Required: array of numbers matching vector dimensions
+    &quot;category&quot;: &quot;product&quot;,         // Optional: additional metadata
+    &quot;lastUpdated&quot;: &quot;2024-01-01&quot;    // Optional: additional metadata
   }
 }
+</code></pre>
+<p><strong>Spring AI Compatibility</strong>: You can use <code>&quot;content&quot;</code> instead of <code>&quot;text&quot;</code> for the document field. The library auto-detects which field name you're using from the first document and optimizes subsequent lookups.</p>
+<p><strong>Common Mistakes:</strong></p>
+<ul>
+<li>❌ Putting <code>embedding</code> at the root level instead of inside <code>metadata</code></li>
+<li>❌ Using string format for embeddings instead of number array</li>
+<li>❌ Missing required fields (<code>id</code>, <code>text</code>, or <code>metadata</code>)</li>
+<li>❌ Wrong embedding dimensions (must match VectorStore constructor)</li>
+</ul>
+<p><strong>Validate your JSON format:</strong></p>
+<pre class="prettyprint source lang-bash"><code>node node_modules/native-vector-store/examples/validate-format.js your-file.json
 </code></pre>
 <h3 id="deployment-strategies">Deployment Strategies</h3>
 <h4 id="blue-green-deployment">Blue-Green Deployment</h4>

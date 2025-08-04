@@ -815,13 +815,23 @@ Supports both single documents and arrays of documents per file.</p>
 store.loadDir('./knowledge-base');
 // Store is automatically finalized and ready for searches</code></pre>
 
-    <pre class="prettyprint"><code>// Document format in JSON files
+    <pre class="prettyprint"><code>// Standard format with 'text' field
 {
   "id": "doc-123",
   "text": "Document content...",
   "metadata": {
     "embedding": [0.1, 0.2, ...],  // Required: embedding vector
     "category": "product"           // Optional: additional metadata
+  }
+}</code></pre>
+
+    <pre class="prettyprint"><code>// Spring AI format with 'content' field
+{
+  "id": "doc-456",
+  "content": "Document content...",  // 'content' instead of 'text'
+  "metadata": {
+    "embedding": [0.1, 0.2, ...],
+    "category": "spring-ai"
   }
 }</code></pre>
 
