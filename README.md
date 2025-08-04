@@ -33,6 +33,8 @@ This design eliminates complex state management, ensures consistent performance,
 - **Scalability**: Designed for focused corpora (<100k documents optimal, <1M maximum)
 - **Throughput**: 178k+ documents per second with parallel loading
 
+📊 **[Production Case Study](docs/PRODUCTION_CASE_STUDY.md)**: Real-world deployment with 65k documents (1.5GB) on AWS Lambda achieving 15-20s cold start and 40-45ms search latency.
+
 ## Installation
 
 ```bash
@@ -389,7 +391,9 @@ Performance on typical hardware (M1 MacBook Pro):
 | Operation | Documents | Time | Throughput |
 |-----------|-----------|------|------------|
 | Loading (from disk) | 100,000 | ~560ms | 178k docs/sec |
+| Loading (production) | 65,000 | 15-20s | 3.2-4.3k docs/sec |
 | Search (k=10) | 10,000 corpus | 1-2ms | 500-1000 queries/sec |
+| Search (k=10) | 65,000 corpus | 40-45ms | 20-25 queries/sec |
 | Search (k=100) | 100,000 corpus | 8-12ms | 80-125 queries/sec |
 | Normalization | 100,000 | <100ms | 1M+ docs/sec |
 
