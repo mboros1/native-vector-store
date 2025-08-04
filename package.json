@@ -1,6 +1,6 @@
 {
   "name": "native-vector-store",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "High-performance local vector store with SIMD optimization for MCP servers",
   "main": "index.js",
   "types": "lib/index.d.ts",
@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/mboros1/native-vector-store/issues"
   },
-  "homepage": "https://github.com/mboros1/native-vector-store#readme",
+  "homepage": "https://mboros1.github.io/native-vector-store/",
   "scripts": {
     "build": "node-gyp rebuild",
     "clean": "node-gyp clean",
