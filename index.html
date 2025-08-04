@@ -73,6 +73,7 @@
 <li><strong>Scalability</strong>: Designed for focused corpora (&lt;100k documents optimal, &lt;1M maximum)</li>
 <li><strong>Throughput</strong>: 178k+ documents per second with parallel loading</li>
 </ul>
+<p>📊 <strong><a href="docs/PRODUCTION_CASE_STUDY.md">Production Case Study</a></strong>: Real-world deployment with 65k documents (1.5GB) on AWS Lambda achieving 15-20s cold start and 40-45ms search latency.</p>
 <h2 id="installation">Installation</h2>
 <pre class="prettyprint source lang-bash"><code>npm install native-vector-store
 </code></pre>
@@ -126,7 +127,23 @@ store.finalize(); // Must call before searching!
 const queryEmbedding = new Float32Array(1536);
 const results = store.search(queryEmbedding, 5); // Top 5 results
 
-console.log(results[0]); // { score: 0.95, id: 'doc-1', text: '...', metadata_json: '...' }
+// Results format - array of SearchResult objects, sorted by score (highest first):
+console.log(results);
+// [
+//   {
+//     score: 0.987654,            // Similarity score (0-1, higher = more similar)
+//     id: &quot;doc-1&quot;,                // Your document ID
+//     text: &quot;Example document...&quot;, // Full document text
+//     metadata_json: &quot;{\&quot;embedding\&quot;:[0.1,0.2,...],\&quot;category\&quot;:\&quot;example\&quot;}&quot;  // JSON string
+//   },
+//   { score: 0.943210, id: &quot;doc-7&quot;, text: &quot;Another doc...&quot;, metadata_json: &quot;...&quot; },
+//   // ... up to 5 results
+// ]
+
+// Parse metadata from the top result
+const topResult = results[0];
+const metadata = JSON.parse(topResult.metadata_json);
+console.log(metadata.category); // &quot;example&quot;
 </code></pre>
 <h2 id="usage-patterns">Usage Patterns</h2>
 <h3 id="serverless-deployment-(aws-lambda%2C-vercel)">Serverless Deployment (AWS Lambda, Vercel)</h3>
@@ -309,13 +326,30 @@ const response = await server.handleMCPRequest('vector_search', {
 }
 </code></pre>
 <h5 id="search(query%3A-float32array%2C-k%3A-number%2C-normalizequery%3F%3A-boolean)%3A-searchresult%5B%5D"><code>search(query: Float32Array, k: number, normalizeQuery?: boolean): SearchResult[]</code></h5>
-<p>Search for k most similar documents.</p>
+<p>Search for k most similar documents. Returns an array sorted by score (highest first).</p>
 <pre class="prettyprint source lang-typescript"><code>interface SearchResult {
-  score: number;
-  id: string;
-  text: string;
-  metadata_json: string;
+  score: number;        // Cosine similarity (0-1, higher = more similar)
+  id: string;           // Document ID
+  text: string;         // Document text content
+  metadata_json: string; // JSON string with all metadata including embedding
 }
+
+// Example return value:
+[
+  {
+    score: 0.98765,
+    id: &quot;doc-123&quot;, 
+    text: &quot;Introduction to machine learning...&quot;,
+    metadata_json: &quot;{\&quot;embedding\&quot;:[0.1,0.2,...],\&quot;author\&quot;:\&quot;Jane Doe\&quot;,\&quot;tags\&quot;:[\&quot;ML\&quot;,\&quot;intro\&quot;]}&quot;
+  },
+  {
+    score: 0.94321,
+    id: &quot;doc-456&quot;,
+    text: &quot;Deep learning fundamentals...&quot;, 
+    metadata_json: &quot;{\&quot;embedding\&quot;:[0.3,0.4,...],\&quot;difficulty\&quot;:\&quot;intermediate\&quot;}&quot;
+  }
+  // ... more results
+]
 </code></pre>
 <h5 id="finalize()%3A-void"><code>finalize(): void</code></h5>
 <p>Finalize the store: normalize all embeddings and switch to serving mode. After this, no more documents can be added but searches become available. This is automatically called by <code>loadDir()</code>.</p>
@@ -354,10 +388,22 @@ const response = await server.handleMCPRequest('vector_search', {
 <td>178k docs/sec</td>
 </tr>
 <tr>
+<td>Loading (production)</td>
+<td>65,000</td>
+<td>15-20s</td>
+<td>3.2-4.3k docs/sec</td>
+</tr>
+<tr>
 <td>Search (k=10)</td>
 <td>10,000 corpus</td>
 <td>1-2ms</td>
 <td>500-1000 queries/sec</td>
+</tr>
+<tr>
+<td>Search (k=10)</td>
+<td>65,000 corpus</td>
+<td>40-45ms</td>
+<td>20-25 queries/sec</td>
 </tr>
 <tr>
 <td>Search (k=100)</td>
