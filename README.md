@@ -86,7 +86,23 @@ store.finalize(); // Must call before searching!
 const queryEmbedding = new Float32Array(1536);
 const results = store.search(queryEmbedding, 5); // Top 5 results
 
-console.log(results[0]); // { score: 0.95, id: 'doc-1', text: '...', metadata_json: '...' }
+// Results format - array of SearchResult objects, sorted by score (highest first):
+console.log(results);
+// [
+//   {
+//     score: 0.987654,            // Similarity score (0-1, higher = more similar)
+//     id: "doc-1",                // Your document ID
+//     text: "Example document...", // Full document text
+//     metadata_json: "{\"embedding\":[0.1,0.2,...],\"category\":\"example\"}"  // JSON string
+//   },
+//   { score: 0.943210, id: "doc-7", text: "Another doc...", metadata_json: "..." },
+//   // ... up to 5 results
+// ]
+
+// Parse metadata from the top result
+const topResult = results[0];
+const metadata = JSON.parse(topResult.metadata_json);
+console.log(metadata.category); // "example"
 ```
 
 ## Usage Patterns
@@ -314,15 +330,32 @@ interface Document {
 ```
 
 ##### `search(query: Float32Array, k: number, normalizeQuery?: boolean): SearchResult[]`
-Search for k most similar documents.
+Search for k most similar documents. Returns an array sorted by score (highest first).
 
 ```typescript
 interface SearchResult {
-  score: number;
-  id: string;
-  text: string;
-  metadata_json: string;
+  score: number;        // Cosine similarity (0-1, higher = more similar)
+  id: string;           // Document ID
+  text: string;         // Document text content
+  metadata_json: string; // JSON string with all metadata including embedding
 }
+
+// Example return value:
+[
+  {
+    score: 0.98765,
+    id: "doc-123", 
+    text: "Introduction to machine learning...",
+    metadata_json: "{\"embedding\":[0.1,0.2,...],\"author\":\"Jane Doe\",\"tags\":[\"ML\",\"intro\"]}"
+  },
+  {
+    score: 0.94321,
+    id: "doc-456",
+    text: "Deep learning fundamentals...", 
+    metadata_json: "{\"embedding\":[0.3,0.4,...],\"difficulty\":\"intermediate\"}"
+  }
+  // ... more results
+]
 ```
 
 ##### `finalize(): void`
