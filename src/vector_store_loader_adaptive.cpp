@@ -132,8 +132,8 @@ void VectorStoreLoader::loadDirectoryAdaptive(VectorStore* store, const std::str
     
     for (size_t w = 0; w < num_workers; ++w) {
         consumers.emplace_back([&]() {
-            // Each thread needs its own parser
-            simdjson::ondemand::parser doc_parser;
+            // Each thread needs its own parser with large capacity for big files
+            simdjson::ondemand::parser doc_parser(16 * 1024 * 1024); // 16MB capacity
             MixedFileData* data = nullptr;
             
             while (true) {
@@ -176,9 +176,9 @@ void VectorStoreLoader::loadDirectoryAdaptive(VectorStore* store, const std::str
                             error = doc_element.get_object().get(obj);
                             if (!error) {
                                 auto add_error = store->add_document(obj);
-                                if (add_error) {
+                                if (add_error != VectorStoreError::SUCCESS) {
                                     fprintf(stderr, "Error adding document from %s: %s\n", 
-                                           data->filename.c_str(), simdjson::error_message(add_error));
+                                           data->filename.c_str(), vector_store_error_message(add_error));
                                 }
                             }
                         }
@@ -188,9 +188,9 @@ void VectorStoreLoader::loadDirectoryAdaptive(VectorStore* store, const std::str
                         error = doc.get_object().get(obj);
                         if (!error) {
                             auto add_error = store->add_document(obj);
-                            if (add_error) {
+                            if (add_error != VectorStoreError::SUCCESS) {
                                 fprintf(stderr, "Error adding document from %s: %s\n", 
-                                       data->filename.c_str(), simdjson::error_message(add_error));
+                                       data->filename.c_str(), vector_store_error_message(add_error));
                             }
                         }
                     }

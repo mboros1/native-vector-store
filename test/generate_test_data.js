@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Configuration
-const NUM_FILES = 100;
+const NUM_FILES = 1000;
 const DOCS_PER_FILE = 10;
 const DIM = 1536; // OpenAI embedding dimension
 const OUTPUT_DIR = path.join(__dirname, '../test_data');

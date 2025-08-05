@@ -79,9 +79,9 @@ public:
         }
         
         auto add_error = store_->add_document(json_doc);
-        if (add_error) {
+        if (add_error != VectorStoreError::SUCCESS) {
             Napi::Error::New(info.Env(), 
-                std::string("Document add error: ") + simdjson::error_message(add_error))
+                std::string("Document add error: ") + vector_store_error_message(add_error))
                 .ThrowAsJavaScriptException();
             return;
         }

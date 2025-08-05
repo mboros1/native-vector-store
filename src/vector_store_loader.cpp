@@ -92,8 +92,8 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
     
     for (size_t w = 0; w < num_workers; ++w) {
         consumers.emplace_back([&]() {
-            // Each thread needs its own parser
-            simdjson::ondemand::parser doc_parser;
+            // Each thread needs its own parser with large capacity for big files
+            simdjson::ondemand::parser doc_parser(16 * 1024 * 1024); // 16MB capacity
             FileData* data = nullptr;
             
             while (true) {
@@ -132,16 +132,18 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                             error = doc_element.get_object().get(obj);
                             if (!error) {
                                 auto add_error = store->add_document(obj);
-                                if (add_error) {
+                                if (add_error != VectorStoreError::SUCCESS) {
                                     fprintf(stderr, "Error adding document from %s: %s\n", 
-                                           data->filename.c_str(), simdjson::error_message(add_error));
-                                    if (add_error == simdjson::NO_SUCH_FIELD) {
+                                           data->filename.c_str(), vector_store_error_message(add_error));
+                                    if (add_error == VectorStoreError::JSON_NO_SUCH_FIELD || add_error == VectorStoreError::MISSING_FIELD) {
                                         fprintf(stderr, "  Expected JSON format: {\"id\": string, \"text\": string, \"metadata\": {\"embedding\": [numbers...]}}\n");
                                         fprintf(stderr, "  Required fields: id, text (or content), metadata.embedding\n");
                                         fprintf(stderr, "  Note: 'embedding' must be inside 'metadata' object\n");
                                         fprintf(stderr, "  Note: 'text' and 'content' are interchangeable (Spring AI compatibility)\n");
-                                    } else if (add_error == simdjson::INCORRECT_TYPE) {
-                                        fprintf(stderr, "  Possible causes: wrong embedding dimensions or store already finalized\n");
+                                    } else if (add_error == VectorStoreError::DIMENSION_MISMATCH) {
+                                        fprintf(stderr, "  Check that all embeddings have the same dimensions\n");
+                                    } else if (add_error == VectorStoreError::STORE_ALREADY_FINALIZED) {
+                                        fprintf(stderr, "  Store has been finalized and cannot accept new documents\n");
                                     }
                                 }
                             }
@@ -152,16 +154,18 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
                         error = doc.get_object().get(obj);
                         if (!error) {
                             auto add_error = store->add_document(obj);
-                            if (add_error) {
+                            if (add_error != VectorStoreError::SUCCESS) {
                                 fprintf(stderr, "Error adding document from %s: %s\n", 
-                                       data->filename.c_str(), simdjson::error_message(add_error));
-                                if (add_error == simdjson::NO_SUCH_FIELD) {
+                                       data->filename.c_str(), vector_store_error_message(add_error));
+                                if (add_error == VectorStoreError::JSON_NO_SUCH_FIELD || add_error == VectorStoreError::MISSING_FIELD) {
                                     fprintf(stderr, "  Expected JSON format: {\"id\": string, \"text\": string, \"metadata\": {\"embedding\": [numbers...]}}\n");
                                     fprintf(stderr, "  Required fields: id, text (or content), metadata.embedding\n");
                                     fprintf(stderr, "  Note: 'embedding' must be inside 'metadata' object\n");
                                     fprintf(stderr, "  Note: 'text' and 'content' are interchangeable (Spring AI compatibility)\n");
-                                } else if (add_error == simdjson::INCORRECT_TYPE) {
-                                    fprintf(stderr, "  Possible causes: wrong embedding dimensions or store already finalized\n");
+                                } else if (add_error == VectorStoreError::DIMENSION_MISMATCH) {
+                                    fprintf(stderr, "  Check that all embeddings have the same dimensions\n");
+                                } else if (add_error == VectorStoreError::STORE_ALREADY_FINALIZED) {
+                                    fprintf(stderr, "  Store has been finalized and cannot accept new documents\n");
                                 }
                             }
                         }

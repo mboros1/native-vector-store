@@ -6,11 +6,11 @@ async function runBenchmark() {
     console.log('🚀 Native Vector Store Parallel Loading Benchmark');
     console.log('==============================================\n');
     
-    const dataDir = path.join(__dirname, 'benchmark_data');
+    const dataDir = path.join(__dirname, '..', 'test_data');
     
     // Check if benchmark data exists
     if (!fs.existsSync(dataDir)) {
-        console.log('❌ Benchmark data not found. Please run: node test/create_benchmark_data.js');
+        console.log('❌ Benchmark data not found. Please run: node test/generate_test_data.js');
         process.exit(1);
     }
     
@@ -18,8 +18,8 @@ async function runBenchmark() {
     const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.json'));
     console.log(`📁 Found ${files.length} JSON files in benchmark directory\n`);
     
-    // Create vector store
-    const store = new VectorStore(20);
+    // Create vector store (1536 dimensions for OpenAI embeddings)
+    const store = new VectorStore(1536);
     
     // Benchmark loading
     console.log('📚 Loading documents from files...');
@@ -37,7 +37,7 @@ async function runBenchmark() {
     
     // Benchmark search
     console.log('🔍 Testing search performance...');
-    const query = new Float32Array(20).fill(0.5);
+    const query = new Float32Array(1536).fill(0.5);
     
     const searchStart = Date.now();
     const results = store.search(query, 10);

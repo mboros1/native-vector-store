@@ -71,6 +71,7 @@ ArenaAllocator::~ArenaAllocator() {
     }
 }
 
+
 // TopK implementation
 
 TopK::TopK(size_t k) : k(k) { 
@@ -110,21 +111,33 @@ void TopK::merge(const TopK& other) {
 
 VectorStore::VectorStore(size_t dim) : dim_(dim) {
     entries_.resize(1'000'000);  // Pre-size with default-constructed entries
+    
+    // Prepare per-thread arena allocators for zero-contention parallel loading
+    int max_threads = omp_get_max_threads();
+    thread_arenas_.reserve(max_threads);
+    for (int i = 0; i < max_threads; ++i) {
+        thread_arenas_.emplace_back(std::make_unique<ArenaAllocator>());
+    }
 }
 
-simdjson::error_code VectorStore::add_document(simdjson::ondemand::document& json_doc) {
+VectorStore::BatchState& VectorStore::get_batch_state() {
+    thread_local BatchState state;
+    return state;
+}
+
+VectorStoreError VectorStore::add_document(simdjson::ondemand::document& json_doc) {
     simdjson::ondemand::object obj;
     auto error = json_doc.get_object().get(obj);
     if (error) {
-        return error;
+        return map_simdjson_error(error);
     }
     return add_document(obj);
 }
 
-simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_doc) {
+VectorStoreError VectorStore::add_document(simdjson::ondemand::object& json_doc) {
     // Cannot add documents after finalization
     if (is_finalized_.load(std::memory_order_acquire)) {
-        return simdjson::INCORRECT_TYPE;
+        return VectorStoreError::STORE_ALREADY_FINALIZED;
     }
     
     // Parse with error handling
@@ -134,7 +147,7 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
         if (error == simdjson::NO_SUCH_FIELD) {
             fprintf(stderr, "Missing required field 'id'\n");
         }
-        return error;
+        return map_simdjson_error(error);
     }
     
     // Auto-detect text field type on first document, then use that for all subsequent documents
@@ -158,10 +171,10 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
                 if (error == simdjson::NO_SUCH_FIELD) {
                     fprintf(stderr, "Missing required field 'text' or 'content'\n");
                 }
-                return error;
+                return map_simdjson_error(error);
             }
         } else {
-            return error;
+            return map_simdjson_error(error);
         }
     } else if (field_type == TextFieldType::TEXT) {
         // Use 'text' field directly
@@ -170,7 +183,7 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
             if (error == simdjson::NO_SUCH_FIELD) {
                 fprintf(stderr, "Missing required field 'text' (detected from first document)\n");
             }
-            return error;
+            return map_simdjson_error(error);
         }
     } else { // TextFieldType::CONTENT
         // Use 'content' field directly
@@ -179,27 +192,18 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
             if (error == simdjson::NO_SUCH_FIELD) {
                 fprintf(stderr, "Missing required field 'content' (detected from first document)\n");
             }
-            return error;
+            return map_simdjson_error(error);
         }
     }
     
-    // Calculate sizes
-    size_t emb_size = dim_ * sizeof(float);
-    size_t id_size = id.size() + 1;
-    size_t text_size = text.size() + 1;
-    
-    // Allocate temporary buffer for embedding
-    std::vector<float> temp_embedding;
-    temp_embedding.reserve(dim_);
-    
-    // Process metadata and embedding first
+    // Process metadata and embedding first to get raw JSON before allocation
     simdjson::ondemand::object metadata;
     error = json_doc["metadata"].get_object().get(metadata);
     if (error) {
         if (error == simdjson::NO_SUCH_FIELD) {
             fprintf(stderr, "Missing required field 'metadata'\n");
         }
-        return error;
+        return map_simdjson_error(error);
     }
     
     simdjson::ondemand::array emb_array;
@@ -208,21 +212,27 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
         if (error == simdjson::NO_SUCH_FIELD) {
             fprintf(stderr, "Missing required field 'embedding' inside 'metadata'\n");
         }
-        return error;
+        return map_simdjson_error(error);
     }
     
-    // Consume the array before touching anything else  
+    // Use thread-local temporary buffer for embedding to avoid allocation/free per document
+    thread_local std::vector<float> temp_embedding;
+    temp_embedding.clear();
+    temp_embedding.reserve(dim_);
+    
+    // Fill embedding into temporary buffer
     size_t i = 0;
     for (auto value_result : emb_array) {
         simdjson::ondemand::value v;
         error = value_result.get(v);
-        if (error) return error;
+        if (error) return map_simdjson_error(error);
         double val;
         error = v.get_double().get(val);
-        if (error) return error;
+        if (error) return map_simdjson_error(error);
         
         if (i >= dim_) {
-            return simdjson::CAPACITY; // Too many embedding values
+            fprintf(stderr, "Too many embedding values: expected %zu, got at least %zu\n", dim_, i+1);
+            return VectorStoreError::DIMENSION_MISMATCH;
         }
         temp_embedding.push_back(float(val));
         i++;
@@ -230,19 +240,39 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     
     // Verify we got the expected number of embedding values
     if (i != dim_) {
-        return simdjson::INCORRECT_TYPE; // Wrong embedding dimension
+        fprintf(stderr, "Wrong embedding dimension: expected %zu, got %zu\n", dim_, i);
+        return VectorStoreError::DIMENSION_MISMATCH;
     }
     
     // Now it is safe to take the raw metadata JSON
     std::string_view raw_json;
     error = metadata.raw_json().get(raw_json);
-    if (error) return error;
+    if (error) return map_simdjson_error(error);
+    
+    // Calculate sizes
+    size_t emb_size = dim_ * sizeof(float);
+    size_t id_size = id.size() + 1;
+    size_t text_size = text.size() + 1;
     size_t meta_size = raw_json.size() + 1;
     
-    // Single arena allocation
-    char* base = (char*)arena_.allocate(emb_size + id_size + text_size + meta_size);
+    // Use per-thread arena allocator for zero-contention allocation
+    // Get thread ID and dispatch to appropriate arena
+#ifdef _OPENMP
+    int tid = omp_get_thread_num();
+#else
+    // For non-OpenMP builds, assign each std::thread a small integer ID
+    static std::atomic<size_t> counter{0};
+    static thread_local size_t tid = counter++;
+#endif
+    
+    // Ensure thread ID is within bounds
+    if (tid >= static_cast<int>(thread_arenas_.size())) {
+        tid = 0; // Fallback to first arena
+    }
+    
+    char* base = (char*)thread_arenas_[tid]->allocate(emb_size + id_size + text_size + meta_size);
     if (!base) {
-        return simdjson::MEMALLOC;  // Allocation failed
+        return VectorStoreError::MEMORY_ALLOCATION_FAILED;
     }
     
     // Layout: [embedding][id][text][metadata_json]
@@ -251,7 +281,7 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     char* text_ptr = id_ptr + id_size;
     char* meta_ptr = text_ptr + text_size;
     
-    // Copy embedding from temporary buffer
+    // Copy embedding from thread-local buffer (no heap allocation per call)
     std::memcpy(emb_ptr, temp_embedding.data(), emb_size);
     
     // Copy strings (adding null terminator)
@@ -270,7 +300,7 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     // Bounds check
     if (idx >= entries_.size()) {
         count_.fetch_sub(1, std::memory_order_relaxed);
-        return simdjson::CAPACITY;
+        return VectorStoreError::CAPACITY_EXCEEDED;
     }
     
     // Construct entry directly - no synchronization needed
@@ -286,7 +316,7 @@ simdjson::error_code VectorStore::add_document(simdjson::ondemand::object& json_
     
     entries_[idx] = entry;
     
-    return simdjson::SUCCESS;
+    return VectorStoreError::SUCCESS;
 }
 
 void VectorStore::finalize() {
