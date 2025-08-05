@@ -6,20 +6,46 @@ async function runBenchmark() {
     console.log('🚀 Native Vector Store Parallel Loading Benchmark');
     console.log('==============================================\n');
     
-    const dataDir = path.join(__dirname, '..', 'test_data');
+    // Try different possible data directories
+    const possibleDirs = [
+        path.join(__dirname, '..', 'test_data'),      // generate_test_data.js output
+        path.join(__dirname, 'benchmark_data')        // create_benchmark_data.js output
+    ];
+    
+    let dataDir = null;
+    let files = [];
+    
+    for (const dir of possibleDirs) {
+        if (fs.existsSync(dir)) {
+            const dirFiles = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+            if (dirFiles.length > 0) {
+                dataDir = dir;
+                files = dirFiles;
+                break;
+            }
+        }
+    }
     
     // Check if benchmark data exists
-    if (!fs.existsSync(dataDir)) {
-        console.log('❌ Benchmark data not found. Please run: node test/generate_test_data.js');
+    if (!dataDir || files.length === 0) {
+        console.log('❌ Benchmark data not found. Please run one of:');
+        console.log('   node test/generate_test_data.js (for large dataset)');
+        console.log('   node test/create_benchmark_data.js (for smaller dataset)');
         process.exit(1);
     }
     
-    // Count JSON files
-    const files = fs.readdirSync(dataDir).filter(f => f.endsWith('.json'));
-    console.log(`📁 Found ${files.length} JSON files in benchmark directory\n`);
+    console.log(`📁 Found ${files.length} JSON files in ${path.relative(process.cwd(), dataDir)}\n`);
     
-    // Create vector store (1536 dimensions for OpenAI embeddings)
-    const store = new VectorStore(1536);
+    // Auto-detect embedding dimensions from first document
+    const firstFilePath = path.join(dataDir, files[0]);
+    const firstFileData = JSON.parse(fs.readFileSync(firstFilePath, 'utf-8'));
+    const firstDoc = Array.isArray(firstFileData) ? firstFileData[0] : firstFileData;
+    const embeddingDim = firstDoc.metadata.embedding.length;
+    
+    console.log(`🔍 Auto-detected embedding dimensions: ${embeddingDim}`);
+    
+    // Create vector store with detected dimensions
+    const store = new VectorStore(embeddingDim);
     
     // Benchmark loading
     console.log('📚 Loading documents from files...');
@@ -37,7 +63,7 @@ async function runBenchmark() {
     
     // Benchmark search
     console.log('🔍 Testing search performance...');
-    const query = new Float32Array(1536).fill(0.5);
+    const query = new Float32Array(embeddingDim).fill(0.5);
     
     const searchStart = Date.now();
     const results = store.search(query, 10);
