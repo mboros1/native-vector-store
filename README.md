@@ -390,9 +390,10 @@ Performance on typical hardware (M1 MacBook Pro):
 
 | Operation | Documents | Time | Throughput |
 |-----------|-----------|------|------------|
+| Loading (from disk) | 10,000 | 153ms | 65k docs/sec |
 | Loading (from disk) | 100,000 | ~560ms | 178k docs/sec |
 | Loading (production) | 65,000 | 15-20s | 3.2-4.3k docs/sec |
-| Search (k=10) | 10,000 corpus | 1-2ms | 500-1000 queries/sec |
+| Search (k=10) | 10,000 corpus | 2ms | 500 queries/sec |
 | Search (k=10) | 65,000 corpus | 40-45ms | 20-25 queries/sec |
 | Search (k=100) | 100,000 corpus | 8-12ms | 80-125 queries/sec |
 | Normalization | 100,000 | <100ms | 1M+ docs/sec |
@@ -503,8 +504,8 @@ Performance on M1 MacBook Pro with 1536-dimensional embeddings:
 
 | Operation | Document Count | Time | Rate |
 |-----------|---------------|------|------|
-| Load | 10,000 | 245ms | 40.8k docs/sec |
-| Search | 10,000 | 3.2ms | 3.1M docs/sec |
+| Load | 10,000 | 153ms | 65.4k docs/sec |
+| Search | 10,000 | 2ms | 5M docs/sec |
 | Normalize | 10,000 | 12ms | 833k docs/sec |
 
 *Results may vary based on hardware and document characteristics.*
