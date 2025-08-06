@@ -383,6 +383,12 @@ const response = await server.handleMCPRequest('vector_search', {
 <tbody>
 <tr>
 <td>Loading (from disk)</td>
+<td>10,000</td>
+<td>153ms</td>
+<td>65k docs/sec</td>
+</tr>
+<tr>
+<td>Loading (from disk)</td>
 <td>100,000</td>
 <td>~560ms</td>
 <td>178k docs/sec</td>
@@ -396,8 +402,8 @@ const response = await server.handleMCPRequest('vector_search', {
 <tr>
 <td>Search (k=10)</td>
 <td>10,000 corpus</td>
-<td>1-2ms</td>
-<td>500-1000 queries/sec</td>
+<td>2ms</td>
+<td>500 queries/sec</td>
 </tr>
 <tr>
 <td>Search (k=10)</td>
@@ -591,14 +597,14 @@ npm run example
 <tr>
 <td>Load</td>
 <td>10,000</td>
-<td>245ms</td>
-<td>40.8k docs/sec</td>
+<td>153ms</td>
+<td>65.4k docs/sec</td>
 </tr>
 <tr>
 <td>Search</td>
 <td>10,000</td>
-<td>3.2ms</td>
-<td>3.1M docs/sec</td>
+<td>2ms</td>
+<td>5M docs/sec</td>
 </tr>
 <tr>
 <td>Normalize</td>
