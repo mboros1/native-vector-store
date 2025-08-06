@@ -93,7 +93,7 @@ void VectorStoreLoader::loadDirectory(VectorStore* store, const std::string& pat
     for (size_t w = 0; w < num_workers; ++w) {
         consumers.emplace_back([&]() {
             // Each thread needs its own parser with initial capacity
-            simdjson::ondemand::parser doc_parser(16 * 1024 * 1024); // 16MB initial capacity
+            simdjson::ondemand::parser doc_parser(1 * 1024 * 1024 * 1024); // 16MB initial capacity
             // Set a larger maximum capacity for very large files (up to 512MB)
             doc_parser.allocate(512 * 1024 * 1024);
             FileData* data = nullptr;
