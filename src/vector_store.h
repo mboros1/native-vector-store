@@ -12,6 +12,8 @@
 #include <cassert>
 #include <algorithm>
 #include <functional>
+#include <unordered_map>
+#include <string>
 
 // Custom error codes for VectorStore
 enum class VectorStoreError {
@@ -196,6 +198,10 @@ public:
     struct Entry {
         Document doc;
         float* embedding;  // Extracted pointer for fast access
+        
+        // BM25 fields
+        size_t length;  // Total number of tokens in doc.text
+        std::unordered_map<std::string, int> tf;  // Term frequencies
     };
 
 private:
@@ -213,6 +219,17 @@ private:
     // Auto-detect text field name for Spring AI compatibility
     enum class TextFieldType { UNKNOWN, TEXT, CONTENT };
     std::atomic<TextFieldType> text_field_type_{TextFieldType::UNKNOWN};
+    
+    // BM25 index structures
+    std::unordered_map<std::string, std::vector<size_t>> postings_;  // term -> list of doc indices
+    std::unordered_map<std::string, int> doc_freq_;  // document frequencies
+    size_t total_length_ = 0;  // sum of all document lengths
+    mutable std::mutex bm25_index_mutex_;  // Protects BM25 index structures during document addition
+    
+    // BM25 parameters
+    double k1_ = 1.2;
+    double b_ = 0.75; 
+    double delta_ = 1.0;
     
 public:
     explicit VectorStore(size_t dim);
@@ -253,9 +270,24 @@ public:
     std::vector<std::pair<float, size_t>> 
     search(const float* query, size_t k) const;
     
+    // BM25 search
+    std::vector<std::pair<size_t, double>> 
+    search_bm25(const std::vector<std::string>& query_terms) const;
+    
+    // Hybrid search combining vector similarity and BM25
+    std::vector<std::pair<size_t, double>>
+    search_hybrid(const float* query_vector, const std::vector<std::string>& query_terms, 
+                  double vector_weight = 0.7, double bm25_weight = 0.3, size_t k = 10) const;
+    
+    // BM25 parameter setters
+    void set_bm25_parameters(double k1, double b, double delta);
+    
     const Entry& get_entry(size_t idx) const;
     
     size_t size() const;
     
     bool is_finalized() const;
+    
+    // Get average document length for BM25
+    double avg_doc_length() const;
 };

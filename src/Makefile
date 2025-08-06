@@ -32,8 +32,8 @@ endif
 
 TARGET = test_vector_store
 STRESS_TARGET = test_stress
-SOURCES = test_main.cpp vector_store.cpp ../deps/simdjson/simdjson.cpp
-STRESS_SOURCES = test_stress.cpp vector_store.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp vector_store_loader_adaptive.cpp ../deps/simdjson/simdjson.cpp
+SOURCES = test_main.cpp vector_store.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
+STRESS_SOURCES = test_stress.cpp vector_store.cpp simple_tokenizer.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp vector_store_loader_adaptive.cpp ../deps/simdjson/simdjson.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
 

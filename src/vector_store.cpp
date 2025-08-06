@@ -1,4 +1,7 @@
 #include "vector_store.h"
+#include "simple_tokenizer.h"
+#include <cctype>
+#include <algorithm>
 
 // ArenaAllocator implementation
 
@@ -314,6 +317,38 @@ VectorStoreError VectorStore::add_document(simdjson::ondemand::object& json_doc)
     entry.doc = doc;
     entry.embedding = emb_ptr;
     
+    // Process text for BM25 - tokenize and build term frequencies
+    SimpleTokenizer tokenizer;
+    std::vector<std::string> tokens = tokenizer.split(std::string(text));
+    
+    // Build term frequency map
+    entry.tf.clear();
+    for (const std::string& token : tokens) {
+        // Convert to lowercase for case-insensitive matching
+        std::string lower_token = token;
+        std::transform(lower_token.begin(), lower_token.end(), lower_token.begin(), ::tolower);
+        entry.tf[lower_token]++;
+    }
+    
+    entry.length = tokens.size();
+    
+    // Update BM25 index structures (protected by mutex for thread safety)
+    {
+        std::lock_guard<std::mutex> lock(bm25_index_mutex_);
+        total_length_ += entry.length;
+        
+        // Update postings and document frequencies
+        for (const auto& tf_pair : entry.tf) {
+            const std::string& term = tf_pair.first;
+            
+            // Update postings list
+            postings_[term].push_back(idx);
+            
+            // Update document frequency (count this document once per term)
+            doc_freq_[term]++;
+        }
+    }
+    
     entries_[idx] = entry;
     
     return VectorStoreError::SUCCESS;
@@ -429,4 +464,135 @@ size_t VectorStore::size() const {
 
 bool VectorStore::is_finalized() const {
     return is_finalized_.load(std::memory_order_acquire);
+}
+
+double VectorStore::avg_doc_length() const {
+    size_t n = size();
+    return n > 0 ? static_cast<double>(total_length_) / n : 0.0;
+}
+
+void VectorStore::set_bm25_parameters(double k1, double b, double delta) {
+    k1_ = k1;
+    b_ = b; 
+    delta_ = delta;
+}
+
+std::vector<std::pair<size_t, double>> 
+VectorStore::search_bm25(const std::vector<std::string>& query_terms) const {
+    if (!is_finalized()) {
+        return {}; // Store must be finalized
+    }
+    
+    std::unordered_map<size_t, double> scores;
+    size_t N = size();
+    double avg_len = avg_doc_length();
+    
+    // Precompute IDF for each unique query term
+    std::unordered_map<std::string, double> idf_cache;
+    for (const auto& term : query_terms) {
+        if (idf_cache.find(term) == idf_cache.end()) {
+            auto df_it = doc_freq_.find(term);
+            int df = (df_it != doc_freq_.end()) ? df_it->second : 0;
+            idf_cache[term] = std::log((N - df + 0.5) / (df + 0.5) + 1.0);
+        }
+    }
+    
+    // For each unique term in the query:
+    for (const auto& term : query_terms) {
+        auto postings_it = postings_.find(term);
+        if (postings_it == postings_.end()) {
+            continue; // Term not found in corpus
+        }
+        
+        double idf_t = idf_cache[term];
+        for (size_t doc_id : postings_it->second) {
+            const Entry& entry = entries_[doc_id];
+            auto tf_it = entry.tf.find(term);
+            if (tf_it == entry.tf.end()) {
+                continue; // Should not happen if postings are consistent
+            }
+            
+            int tf = tf_it->second;
+            double norm = 1.0 - b_ + b_ * (entry.length / avg_len);
+            double tf_weight = (k1_ + 1) * tf / (tf + k1_ * norm);
+            scores[doc_id] += (tf_weight + delta_) * idf_t;
+        }
+    }
+    
+    // Collect and sort results
+    std::vector<std::pair<size_t, double>> results(scores.begin(), scores.end());
+    std::sort(results.begin(), results.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    
+    return results;
+}
+
+std::vector<std::pair<size_t, double>>
+VectorStore::search_hybrid(const float* query_vector, const std::vector<std::string>& query_terms, 
+                          double vector_weight, double bm25_weight, size_t k) const {
+    if (!is_finalized()) {
+        return {}; // Store must be finalized
+    }
+    
+    // Get vector similarity scores
+    auto vector_results = search(query_vector, size()); // Get all for hybrid scoring
+    
+    // Get BM25 scores
+    auto bm25_results = search_bm25(query_terms);
+    
+    // Convert vector results to map for easy lookup
+    std::unordered_map<size_t, double> vector_scores;
+    for (const auto& result : vector_results) {
+        vector_scores[result.second] = static_cast<double>(result.first);
+    }
+    
+    // Convert BM25 results to map
+    std::unordered_map<size_t, double> bm25_scores;
+    for (const auto& result : bm25_results) {
+        bm25_scores[result.first] = result.second;
+    }
+    
+    // Normalize scores to [0, 1] range
+    // Find max scores for normalization
+    double max_vector_score = 0.0;
+    double max_bm25_score = 0.0;
+    
+    for (const auto& pair : vector_scores) {
+        max_vector_score = std::max(max_vector_score, pair.second);
+    }
+    
+    for (const auto& pair : bm25_scores) {
+        max_bm25_score = std::max(max_bm25_score, pair.second);
+    }
+    
+    // Combine scores
+    std::unordered_map<size_t, double> hybrid_scores;
+    
+    // Add vector contributions
+    if (max_vector_score > 0.0) {
+        for (const auto& pair : vector_scores) {
+            double normalized_score = pair.second / max_vector_score;
+            hybrid_scores[pair.first] += vector_weight * normalized_score;
+        }
+    }
+    
+    // Add BM25 contributions
+    if (max_bm25_score > 0.0) {
+        for (const auto& pair : bm25_scores) {
+            double normalized_score = pair.second / max_bm25_score;
+            hybrid_scores[pair.first] += bm25_weight * normalized_score;
+        }
+    }
+    
+    // Collect and sort results
+    std::vector<std::pair<size_t, double>> results(hybrid_scores.begin(), hybrid_scores.end());
+    std::sort(results.begin(), results.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    
+    // Return top k results
+    if (results.size() > k) {
+        results.resize(k);
+    }
+    
+    return results;
 }
