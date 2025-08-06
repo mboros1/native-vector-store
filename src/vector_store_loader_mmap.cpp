@@ -76,18 +76,6 @@ void VectorStoreLoader::loadDirectoryMMap(VectorStore* store, const std::string&
             while (true) {
                 // Try to get work from queue
                 if (queue.try_pop(data)) {
-                    // Check file size before parsing
-                    size_t file_size = data->mmap->size();
-                    size_t max_parser_capacity = doc_parser.max_capacity();
-                    
-                    if (file_size > max_parser_capacity) {
-                        fprintf(stderr, "Error: File %s is too large (%zu bytes) for parser (max capacity: %zu bytes)\n", 
-                                data->filename.c_str(), file_size, max_parser_capacity);
-                        fprintf(stderr, "  Consider splitting large files into smaller chunks or increasing parser capacity\n");
-                        fprintf(stderr, "  Current maximum supported file size: %zu MB\n", max_parser_capacity / (1024 * 1024));
-                        delete data;
-                        continue;
-                    }
                     
                     // Process the memory-mapped file
                     // For mmap, we need to copy to ensure padding
@@ -103,19 +91,8 @@ void VectorStoreLoader::loadDirectoryMMap(VectorStore* store, const std::string&
                     simdjson::ondemand::document doc;
                     auto error = doc_parser.iterate(json).get(doc);
                     if (error) {
-                        // Check if it's a capacity error and provide helpful guidance
-                        if (error == simdjson::CAPACITY) {
-                            fprintf(stderr, "Error parsing %s: %s (%zu bytes)\n", 
-                                    data->filename.c_str(), simdjson::error_message(error), file_size);
-                            fprintf(stderr, "  Parser capacity: %zu bytes (%.1f MB)\n", 
-                                    doc_parser.capacity(), doc_parser.capacity() / (1024.0 * 1024.0));
-                            fprintf(stderr, "  File size: %zu bytes (%.1f MB)\n", 
-                                    file_size, file_size / (1024.0 * 1024.0));
-                            fprintf(stderr, "  Consider splitting this file into smaller chunks\n");
-                        } else {
-                            fprintf(stderr, "Error parsing %s: %s\n", 
-                                    data->filename.c_str(), simdjson::error_message(error));
-                        }
+                        fprintf(stderr, "Error parsing %s: %s\n", 
+                                data->filename.c_str(), simdjson::error_message(error));
                         delete data;
                         continue;
                     }
