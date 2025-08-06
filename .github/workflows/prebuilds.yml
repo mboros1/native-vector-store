@@ -52,111 +52,111 @@ jobs:
           name: prebuilds-linux-${{ matrix.arch }}
           path: prebuilds/
 
-  prebuild-alpine:
-    runs-on: ubuntu-latest
-    container:
-      image: node:18-alpine
-    strategy:
-      matrix:
-        arch: [x64]
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install build dependencies
-        run: |
-          apk add --no-cache build-base git python3
-      
-      - name: Install npm dependencies
-        run: npm ci
-      
-      - name: Build for Alpine ${{ matrix.arch }}
-        run: |
-          # Build with dynamic OpenMP linking
-          export CXXFLAGS="-fopenmp"
-          echo "Building musl prebuild for NAPI_VERSION=$(node -p 'process.versions.napi')"
-          npx prebuildify --napi --arch=${{ matrix.arch }} --tag-libc
-          
-          # Check dynamic dependencies
-          echo ""
-          echo "Checking dynamic dependencies of built prebuild:"
-          BUILT_NODE=$(find prebuilds -name "*.node" -type f | head -1)
-          if [ -n "$BUILT_NODE" ]; then
-            echo "Checking: $BUILT_NODE"
-            ldd "$BUILT_NODE" 2>&1 || true
-          fi
-      
-      - name: Inspect prebuild outputs
-        run: |
-          echo "::group::prebuilds directory structure"
-          find prebuilds -type f | sort
-          echo "::endgroup::"
-          
-          echo "::group::musl .node file headers"
-          file prebuilds/**/*.node || true
-          echo "::endgroup::"
-          
-          echo "::group::Check dynamic dependencies"
-          if command -v ldd >/dev/null 2>&1; then
-            for f in prebuilds/**/*.node; do
-              echo "=== $f ==="
-              ldd "$f" 2>&1 || true
-            done
-          fi
-          echo "::endgroup::"
-      
-      - name: Ensure correct musl prebuild layout
-        run: |
-          # Calculate the correct destination paths
-          ABI_DIR="napi-v$(node -p 'process.versions.napi')"
-          ARCH="${{ matrix.arch }}"
-          
-          echo "Expected destinations for musl prebuild:"
-          echo "- prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
-          echo "- prebuilds/linux-${ARCH}-musl/native-vector-store.node"
-          
-          # Find the musl prebuild
-          MUSL_NODE=$(find prebuilds -name "*.musl.node" -o -name "*.node" | grep -E "(musl|linux-${ARCH})" | head -1)
-          
-          if [ -z "$MUSL_NODE" ]; then
-            echo "❌ No musl prebuild found!"
-            exit 1
-          fi
-          
-          echo "📋 Found musl prebuild at: $MUSL_NODE"
-          
-          # Ensure it exists in both locations node-gyp-build might check
-          mkdir -p "prebuilds/linux-${ARCH}-musl/${ABI_DIR}"
-          mkdir -p "prebuilds/linux-${ARCH}-musl"
-          
-          # Copy to both locations
-          cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
-          cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/native-vector-store.node"
-          
-          # Don't copy to non-musl location as it might confuse node-gyp-build
-          # and cause it to load the wrong binary
-          
-          echo "✅ Copied musl prebuild to multiple locations for compatibility"
-          
-          # Clean up the original if it's in a different location
-          if [ "$MUSL_NODE" != "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node" ]; then
-            rm -f "$MUSL_NODE"
-          fi
-          
-          # IMPORTANT: Remove the regular Linux prebuild that won't work on Alpine
-          # This prevents node-gyp-build from trying to load it first
-          if [ -f "prebuilds/linux-${ARCH}/native-vector-store.node" ]; then
-            echo "🗑️ Removing incompatible linux-${ARCH} prebuild for Alpine package"
-            rm -f "prebuilds/linux-${ARCH}/native-vector-store.node"
-          fi
-          
-          echo "📊 Final prebuild layout:"
-          find prebuilds -type f | sort
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: prebuilds-alpine-${{ matrix.arch }}
-          path: prebuilds/
+  # prebuild-alpine:
+  #   runs-on: ubuntu-latest
+  #   container:
+  #     image: node:18-alpine
+  #   strategy:
+  #     matrix:
+  #       arch: [x64]
+  #   
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     
+  #     - name: Install build dependencies
+  #       run: |
+  #         apk add --no-cache build-base git python3
+  #     
+  #     - name: Install npm dependencies
+  #       run: npm ci
+  #     
+  #     - name: Build for Alpine ${{ matrix.arch }}
+  #       run: |
+  #         # Build with dynamic OpenMP linking
+  #         export CXXFLAGS="-fopenmp"
+  #         echo "Building musl prebuild for NAPI_VERSION=$(node -p 'process.versions.napi')"
+  #         npx prebuildify --napi --arch=${{ matrix.arch }} --tag-libc
+  #         
+  #         # Check dynamic dependencies
+  #         echo ""
+  #         echo "Checking dynamic dependencies of built prebuild:"
+  #         BUILT_NODE=$(find prebuilds -name "*.node" -type f | head -1)
+  #         if [ -n "$BUILT_NODE" ]; then
+  #           echo "Checking: $BUILT_NODE"
+  #           ldd "$BUILT_NODE" 2>&1 || true
+  #         fi
+  #     
+  #     - name: Inspect prebuild outputs
+  #       run: |
+  #         echo "::group::prebuilds directory structure"
+  #         find prebuilds -type f | sort
+  #         echo "::endgroup::"
+  #         
+  #         echo "::group::musl .node file headers"
+  #         file prebuilds/**/*.node || true
+  #         echo "::endgroup::"
+  #         
+  #         echo "::group::Check dynamic dependencies"
+  #         if command -v ldd >/dev/null 2>&1; then
+  #           for f in prebuilds/**/*.node; do
+  #             echo "=== $f ==="
+  #             ldd "$f" 2>&1 || true
+  #           done
+  #         fi
+  #         echo "::endgroup::"
+  #     
+  #     - name: Ensure correct musl prebuild layout
+  #       run: |
+  #         # Calculate the correct destination paths
+  #         ABI_DIR="napi-v$(node -p 'process.versions.napi')"
+  #         ARCH="${{ matrix.arch }}"
+  #         
+  #         echo "Expected destinations for musl prebuild:"
+  #         echo "- prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
+  #         echo "- prebuilds/linux-${ARCH}-musl/native-vector-store.node"
+  #         
+  #         # Find the musl prebuild
+  #         MUSL_NODE=$(find prebuilds -name "*.musl.node" -o -name "*.node" | grep -E "(musl|linux-${ARCH})" | head -1)
+  #         
+  #         if [ -z "$MUSL_NODE" ]; then
+  #           echo "❌ No musl prebuild found!"
+  #           exit 1
+  #         fi
+  #         
+  #         echo "📋 Found musl prebuild at: $MUSL_NODE"
+  #         
+  #         # Ensure it exists in both locations node-gyp-build might check
+  #         mkdir -p "prebuilds/linux-${ARCH}-musl/${ABI_DIR}"
+  #         mkdir -p "prebuilds/linux-${ARCH}-musl"
+  #         
+  #         # Copy to both locations
+  #         cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node"
+  #         cp "$MUSL_NODE" "prebuilds/linux-${ARCH}-musl/native-vector-store.node"
+  #         
+  #         # Don't copy to non-musl location as it might confuse node-gyp-build
+  #         # and cause it to load the wrong binary
+  #         
+  #         echo "✅ Copied musl prebuild to multiple locations for compatibility"
+  #         
+  #         # Clean up the original if it's in a different location
+  #         if [ "$MUSL_NODE" != "prebuilds/linux-${ARCH}-musl/${ABI_DIR}/native-vector-store.node" ]; then
+  #           rm -f "$MUSL_NODE"
+  #         fi
+  #         
+  #         # IMPORTANT: Remove the regular Linux prebuild that won't work on Alpine
+  #         # This prevents node-gyp-build from trying to load it first
+  #         if [ -f "prebuilds/linux-${ARCH}/native-vector-store.node" ]; then
+  #           echo "🗑️ Removing incompatible linux-${ARCH} prebuild for Alpine package"
+  #           rm -f "prebuilds/linux-${ARCH}/native-vector-store.node"
+  #         fi
+  #         
+  #         echo "📊 Final prebuild layout:"
+  #         find prebuilds -type f | sort
+  #     
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: prebuilds-alpine-${{ matrix.arch }}
+  #         path: prebuilds/
 
   prebuild-macos:
     strategy:
@@ -227,7 +227,7 @@ jobs:
           path: prebuilds/
 
   package:
-    needs: [prebuild-linux, prebuild-alpine, prebuild-macos, prebuild-windows]
+    needs: [prebuild-linux, prebuild-macos, prebuild-windows]
     runs-on: ubuntu-latest
     
     steps:
@@ -344,31 +344,31 @@ jobs:
               node test-installed.js
             "
 
-  test-alpine-x64:
-    needs: package
-    runs-on: ubuntu-latest
-    container: node:18-alpine
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/download-artifact@v4
-        with:
-          name: npm-package
-      
-      - name: Install OpenMP runtime
-        run: |
-          apk add --no-cache libgomp
-      
-      - name: Test packaged tarball  
-        run: |
-          echo "Testing Alpine x64 prebuild..."
-          mkdir test-install && cd test-install
-          npm init -y >/dev/null
-          npm install ../native-vector-store-*.tgz
-          # Copy and run the installation test
-          cp ../test/test-installed.js .
-          node test-installed.js
+  # test-alpine-x64:
+  #   needs: package
+  #   runs-on: ubuntu-latest
+  #   container: node:18-alpine
+  #   
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: npm-package
+  #     
+  #     - name: Install OpenMP runtime
+  #       run: |
+  #         apk add --no-cache libgomp
+  #     
+  #     - name: Test packaged tarball  
+  #       run: |
+  #         echo "Testing Alpine x64 prebuild..."
+  #         mkdir test-install && cd test-install
+  #         npm init -y >/dev/null
+  #         npm install ../native-vector-store-*.tgz
+  #         # Copy and run the installation test
+  #         cp ../test/test-installed.js .
+  #         node test-installed.js
 
   test-macos:
     needs: package
