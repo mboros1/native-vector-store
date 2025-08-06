@@ -33,8 +33,8 @@ void test_single_document() {
         
         std::cout << "Adding document..." << std::endl;
         auto add_error = store.add_document(doc);
-        if (add_error) {
-            std::cerr << "Document add error: " << simdjson::error_message(add_error) << std::endl;
+        if (add_error != VectorStoreError::SUCCESS) {
+            std::cerr << "Document add error: " << vector_store_error_message(add_error) << std::endl;
             return;
         }
         std::cout << "Document added successfully. Store size: " << store.size() << std::endl;
@@ -115,8 +115,8 @@ void test_load_directory(const std::string& path) {
                         }
                         
                         auto add_error = store.add_document(doc_obj);
-                        if (add_error) {
-                            std::cerr << "  Error adding document: " << simdjson::error_message(add_error) << std::endl;
+                        if (add_error != VectorStoreError::SUCCESS) {
+                            std::cerr << "  Error adding document: " << vector_store_error_message(add_error) << std::endl;
                             error_count++;
                         } else {
                             doc_count++;
@@ -132,8 +132,8 @@ void test_load_directory(const std::string& path) {
                     std::cout << "  Detected single document" << std::endl;
                     std::cout << "  Adding to store..." << std::endl;
                     auto add_error = store.add_document(json_doc);
-                    if (add_error) {
-                        std::cerr << "  Error adding document: " << simdjson::error_message(add_error) << std::endl;
+                    if (add_error != VectorStoreError::SUCCESS) {
+                        std::cerr << "  Error adding document: " << vector_store_error_message(add_error) << std::endl;
                     } else {
                         std::cout << "  Document added successfully";
                     }

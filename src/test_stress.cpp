@@ -107,7 +107,7 @@ void test_phase_enforcement() {
         simdjson::ondemand::document doc;
         if (!parser.iterate(padded).get(doc)) {
             auto error = store.add_document(doc);
-            assert(error == simdjson::SUCCESS);
+            assert(error == VectorStoreError::SUCCESS);
         }
     }
     
@@ -127,7 +127,7 @@ void test_phase_enforcement() {
     simdjson::ondemand::document doc;
     parser.iterate(padded).get(doc);
     auto error = store.add_document(doc);
-    assert(error == simdjson::INCORRECT_TYPE);
+    assert(error == VectorStoreError::STORE_ALREADY_FINALIZED);
     std::cout << "   ✅ Document addition correctly blocked after finalization\n";
 }
 
@@ -159,11 +159,11 @@ void test_oversize_allocation() {
     auto error = parser.iterate(padded).get(doc);
     if (!error) {
         // This should fail in the allocator
-        error = store.add_document(doc);
-        if (error == simdjson::MEMALLOC) {
+        auto error = store.add_document(doc);
+        if (error == VectorStoreError::MEMORY_ALLOCATION_FAILED) {
             std::cout << "✅ Correctly rejected oversize allocation\n";
         } else {
-            std::cout << "❌ Should have failed with MEMALLOC error, got: " << simdjson::error_message(error) << "\n";
+            std::cout << "❌ Should have failed with MEMALLOC error, got: " << vector_store_error_message(error) << "\n";
             std::exit(1);
         }
     } else {
@@ -231,7 +231,7 @@ void test_phase_separation() {
         simdjson::ondemand::document doc;
         if (!parser.iterate(padded).get(doc)) {
             auto error = store.add_document(doc);
-            if (!error) {
+            if (error == VectorStoreError::SUCCESS) {
                 docs_loaded++;
             }
         }
@@ -260,7 +260,7 @@ void test_phase_separation() {
         simdjson::ondemand::document doc;
         parser.iterate(padded).get(doc);
         auto error = store.add_document(doc);
-        assert(error == simdjson::INCORRECT_TYPE);
+        assert(error == VectorStoreError::STORE_ALREADY_FINALIZED);
         std::cout << "   ✅ Document additions correctly blocked after finalization\n";
     }
     
