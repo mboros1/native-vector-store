@@ -32,12 +32,15 @@ endif
 
 TARGET = test_vector_store
 STRESS_TARGET = test_stress
+BM25_TARGET = test_bm25
 SOURCES = test_main.cpp vector_store.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 STRESS_SOURCES = test_stress.cpp vector_store.cpp simple_tokenizer.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp vector_store_loader_adaptive.cpp ../deps/simdjson/simdjson.cpp
+BM25_SOURCES = test_bm25.cpp vector_store.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
+BM25_OBJECTS = $(BM25_SOURCES:.cpp=.o)
 
-all: $(TARGET) $(STRESS_TARGET)
+all: $(TARGET) $(STRESS_TARGET) $(BM25_TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $(TARGET) $(LDFLAGS) $(LIBS)
@@ -45,11 +48,18 @@ $(TARGET): $(OBJECTS)
 $(STRESS_TARGET): $(STRESS_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(STRESS_OBJECTS) -o $(STRESS_TARGET) $(LDFLAGS) $(LIBS)
 
+$(BM25_TARGET): $(BM25_OBJECTS)
+	$(CXX) $(CXXFLAGS) $(BM25_OBJECTS) -o $(BM25_TARGET) $(LDFLAGS) $(LIBS)
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -f $(OBJECTS) $(STRESS_OBJECTS) $(TARGET) $(STRESS_TARGET)
+	rm -f $(OBJECTS) $(STRESS_OBJECTS) $(BM25_OBJECTS) $(TARGET) $(STRESS_TARGET) $(BM25_TARGET)
+
+# BM25 test
+bm25: $(BM25_TARGET)
+	./$(BM25_TARGET)
 
 # Force rebuild (useful for CI)
 rebuild: clean all
