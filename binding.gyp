@@ -7,7 +7,8 @@
         "<!@(node -p \"require('node-addon-api').include\")",
         "src",
         "deps/simdjson",
-        "deps/atomic_queue"
+        "deps/atomic_queue",
+        "deps"
       ],
       "dependencies": ["<!(node -p \"require('node-addon-api').gyp\")"],
       "cflags_cc": [

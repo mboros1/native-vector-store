@@ -14,6 +14,7 @@
 #include <functional>
 #include <unordered_map>
 #include <string>
+#include <parallel_hashmap/phmap.h>
 
 // Custom error codes for VectorStore
 enum class VectorStoreError {
@@ -201,7 +202,7 @@ public:
         
         // BM25 fields
         size_t length;  // Total number of tokens in doc.text
-        std::unordered_map<std::string, int> tf;  // Term frequencies
+        phmap::flat_hash_map<std::string, int> tf;  // Term frequencies - better cache locality
     };
 
 private:
@@ -220,11 +221,29 @@ private:
     enum class TextFieldType { UNKNOWN, TEXT, CONTENT };
     std::atomic<TextFieldType> text_field_type_{TextFieldType::UNKNOWN};
     
-    // BM25 index structures
-    std::unordered_map<std::string, std::vector<size_t>> postings_;  // term -> list of doc indices
-    std::unordered_map<std::string, int> doc_freq_;  // document frequencies
-    size_t total_length_ = 0;  // sum of all document lengths
-    mutable std::mutex bm25_index_mutex_;  // Protects BM25 index structures during document addition
+    // BM25 index structures - using parallel hashmap for lock-free concurrent updates
+    phmap::parallel_flat_hash_map<
+        std::string, 
+        std::vector<size_t>,
+        phmap::priv::hash_default_hash<std::string>,
+        phmap::priv::hash_default_eq<std::string>,
+        std::allocator<std::pair<const std::string, std::vector<size_t>>>,
+        4,  // 2^4 = 16 submaps for parallelism
+        std::mutex  // Use std::mutex for each submap
+    > postings_;  // term -> list of doc indices
+    
+    phmap::parallel_flat_hash_map<
+        std::string,
+        int,  // Regular int - parallel hashmap provides synchronization
+        phmap::priv::hash_default_hash<std::string>,
+        phmap::priv::hash_default_eq<std::string>,
+        std::allocator<std::pair<const std::string, int>>,
+        4,  // 16 submaps
+        std::mutex
+    > doc_freq_;  // document frequencies
+    
+    std::atomic<size_t> total_length_{0};  // sum of all document lengths - now atomic
+    // Note: bm25_index_mutex_ removed - no longer needed with parallel hashmap!
     
     // BM25 parameters
     double k1_ = 1.2;
@@ -268,7 +287,7 @@ public:
     void normalize_all();
     
     std::vector<std::pair<float, size_t>> 
-    search(const float* query, size_t k) const;
+    search(const float* __restrict__ query, size_t k) const;
     
     // BM25 search
     std::vector<std::pair<size_t, double>> 
@@ -276,7 +295,7 @@ public:
     
     // Hybrid search combining vector similarity and BM25
     std::vector<std::pair<size_t, double>>
-    search_hybrid(const float* query_vector, const std::vector<std::string>& query_terms, 
+    search_hybrid(const float* __restrict__ query_vector, const std::vector<std::string>& query_terms, 
                   double vector_weight = 0.7, double bm25_weight = 0.3, size_t k = 10) const;
     
     // BM25 parameter setters
