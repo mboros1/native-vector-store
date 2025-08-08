@@ -14,7 +14,7 @@ CXXFLAGS = -std=c++17 -g -O0 -fno-omit-frame-pointer -DDEBUG
 # OS-specific configuration
 ifeq ($(UNAME_S),Darwin)
     # macOS configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I/opt/homebrew/opt/libomp/include
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I/opt/homebrew/opt/libomp/include
     LDFLAGS = -L/opt/homebrew/opt/libomp/lib
     LIBS = -lomp
     # Add flags for better debugging with lldb
@@ -23,7 +23,7 @@ ifeq ($(UNAME_S),Darwin)
     CXXFLAGS += -Xpreprocessor -fopenmp
 else
     # Linux configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps
     LDFLAGS = -L/usr/lib
     LIBS = -lgomp
     # OpenMP flags for Linux
@@ -33,14 +33,17 @@ endif
 TARGET = test_vector_store
 STRESS_TARGET = test_stress
 BM25_TARGET = test_bm25
+HYBRID_TARGET = test_hybrid_search
 SOURCES = test_main.cpp vector_store.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 STRESS_SOURCES = test_stress.cpp vector_store.cpp simple_tokenizer.cpp vector_store_loader.cpp vector_store_loader_mmap.cpp vector_store_loader_adaptive.cpp ../deps/simdjson/simdjson.cpp
 BM25_SOURCES = test_bm25.cpp vector_store.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
+HYBRID_SOURCES = test_hybrid_search.cpp vector_store.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 STRESS_OBJECTS = $(STRESS_SOURCES:.cpp=.o)
 BM25_OBJECTS = $(BM25_SOURCES:.cpp=.o)
+HYBRID_OBJECTS = $(HYBRID_SOURCES:.cpp=.o)
 
-all: $(TARGET) $(STRESS_TARGET) $(BM25_TARGET)
+all: $(TARGET) $(STRESS_TARGET) $(BM25_TARGET) $(HYBRID_TARGET)
 
 $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $(TARGET) $(LDFLAGS) $(LIBS)
@@ -51,15 +54,22 @@ $(STRESS_TARGET): $(STRESS_OBJECTS)
 $(BM25_TARGET): $(BM25_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(BM25_OBJECTS) -o $(BM25_TARGET) $(LDFLAGS) $(LIBS)
 
+$(HYBRID_TARGET): $(HYBRID_OBJECTS)
+	$(CXX) $(CXXFLAGS) $(HYBRID_OBJECTS) -o $(HYBRID_TARGET) $(LDFLAGS) $(LIBS)
+
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -f $(OBJECTS) $(STRESS_OBJECTS) $(BM25_OBJECTS) $(TARGET) $(STRESS_TARGET) $(BM25_TARGET)
+	rm -f $(OBJECTS) $(STRESS_OBJECTS) $(BM25_OBJECTS) $(HYBRID_OBJECTS) $(TARGET) $(STRESS_TARGET) $(BM25_TARGET) $(HYBRID_TARGET)
 
 # BM25 test
 bm25: $(BM25_TARGET)
 	./$(BM25_TARGET)
+
+# Hybrid search test
+hybrid: $(HYBRID_TARGET)
+	./$(HYBRID_TARGET)
 
 # Force rebuild (useful for CI)
 rebuild: clean all

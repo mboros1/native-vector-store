@@ -112,7 +112,7 @@ void TopK::merge(const TopK& other) {
 
 // VectorStore implementation
 
-VectorStore::VectorStore(size_t dim) : dim_(dim) {
+VectorStore::VectorStore(size_t dim) : dim_(dim), postings_(), doc_freq_() {
     entries_.resize(1'000'000);  // Pre-size with default-constructed entries
     
     // Prepare per-thread arena allocators for zero-contention parallel loading
@@ -332,21 +332,28 @@ VectorStoreError VectorStore::add_document(simdjson::ondemand::object& json_doc)
     
     entry.length = tokens.size();
     
-    // Update BM25 index structures (protected by mutex for thread safety)
-    {
-        std::lock_guard<std::mutex> lock(bm25_index_mutex_);
-        total_length_ += entry.length;
+    // Update BM25 index structures using lock-free parallel hashmap operations
+    total_length_.fetch_add(entry.length, std::memory_order_relaxed);
+    
+    // Update postings and document frequencies
+    for (const auto& tf_pair : entry.tf) {
+        const std::string& term = tf_pair.first;
         
-        // Update postings and document frequencies
-        for (const auto& tf_pair : entry.tf) {
-            const std::string& term = tf_pair.first;
-            
-            // Update postings list
-            postings_[term].push_back(idx);
-            
-            // Update document frequency (count this document once per term)
-            doc_freq_[term]++;
-        }
+        // Update postings list using parallel hashmap's thread-safe lazy_emplace_l
+        postings_.lazy_emplace_l(term,
+            // If key exists, append to the vector
+            [&idx](auto& p) { p.second.push_back(idx); },
+            // If key doesn't exist, create new vector with this idx
+            [&term, &idx](const auto& ctor) { ctor(term, std::vector<size_t>{idx}); }
+        );
+        
+        // Update document frequency - parallel hashmap provides thread safety
+        doc_freq_.lazy_emplace_l(term,
+            // If key exists, increment the count
+            [](auto& p) { p.second++; },
+            // If key doesn't exist, create with value 1
+            [&term](const auto& ctor) { ctor(term, 1); }
+        );
     }
     
     entries_[idx] = entry;
@@ -395,7 +402,7 @@ void VectorStore::normalize_all() {
 }
 
 std::vector<std::pair<float, size_t>> 
-VectorStore::search(const float* query, size_t k) const {
+VectorStore::search(const float* __restrict__ query, size_t k) const {
     // Exclusive lock: prevent overlapping OpenMP teams
     // Since each search uses all threads via OpenMP, concurrent searches provide no benefit
     std::unique_lock<std::shared_mutex> lock(search_mutex_);
@@ -429,7 +436,7 @@ VectorStore::search(const float* query, size_t k) const {
         #pragma omp for  // default barrier kept - ensures all threads finish before merge
         for (int i = 0; i < static_cast<int>(n); ++i) {
             float score = 0.0f;
-            const float* emb = entries_[i].embedding;
+            const float* __restrict__ emb = entries_[i].embedding;
             
             #pragma omp simd reduction(+:score)
             for (size_t j = 0; j < dim_; ++j) {
@@ -468,7 +475,7 @@ bool VectorStore::is_finalized() const {
 
 double VectorStore::avg_doc_length() const {
     size_t n = size();
-    return n > 0 ? static_cast<double>(total_length_) / n : 0.0;
+    return n > 0 ? static_cast<double>(total_length_.load(std::memory_order_relaxed)) / n : 0.0;
 }
 
 void VectorStore::set_bm25_parameters(double k1, double b, double delta) {
@@ -528,68 +535,131 @@ VectorStore::search_bm25(const std::vector<std::string>& query_terms) const {
 }
 
 std::vector<std::pair<size_t, double>>
-VectorStore::search_hybrid(const float* query_vector, const std::vector<std::string>& query_terms, 
+VectorStore::search_hybrid(const float* __restrict__ query_vector, const std::vector<std::string>& query_terms, 
                           double vector_weight, double bm25_weight, size_t k) const {
+    // Exclusive lock: prevent overlapping OpenMP teams
+    std::unique_lock<std::shared_mutex> lock(search_mutex_);
+    
     if (!is_finalized()) {
         return {}; // Store must be finalized
     }
     
-    // Get vector similarity scores
-    auto vector_results = search(query_vector, size()); // Get all for hybrid scoring
+    size_t n = count_.load(std::memory_order_acquire);
+    if (n == 0 || k == 0) return {};
+    k = std::min(k, n);
     
-    // Get BM25 scores
-    auto bm25_results = search_bm25(query_terms);
+    // Precompute BM25 IDF scores for query terms
+    std::unordered_map<std::string, double> idf_cache;
+    double avg_len = avg_doc_length();
     
-    // Convert vector results to map for easy lookup
-    std::unordered_map<size_t, double> vector_scores;
-    for (const auto& result : vector_results) {
-        vector_scores[result.second] = static_cast<double>(result.first);
+    for (const auto& term : query_terms) {
+        auto df_it = doc_freq_.find(term);
+        int df = (df_it != doc_freq_.end()) ? df_it->second : 0;
+        idf_cache[term] = std::log((n - df + 0.5) / (df + 0.5) + 1.0);
     }
     
-    // Convert BM25 results to map
-    std::unordered_map<size_t, double> bm25_scores;
-    for (const auto& result : bm25_results) {
-        bm25_scores[result.first] = result.second;
+    const int num_threads = omp_get_max_threads();
+    
+    // Each thread maintains TWO heaps - one for vector, one for BM25
+    struct DualTopK {
+        TopK vector_heap;
+        TopK bm25_heap;
+        DualTopK(size_t k) : vector_heap(k), bm25_heap(k) {}
+        
+        // Make DualTopK move-only like TopK
+        DualTopK(const DualTopK&) = delete;
+        DualTopK& operator=(const DualTopK&) = delete;
+        DualTopK(DualTopK&&) = default;
+        DualTopK& operator=(DualTopK&&) = default;
+    };
+    
+    std::vector<DualTopK> thread_heaps;
+    thread_heaps.reserve(num_threads);
+    for (int i = 0; i < num_threads; ++i) {
+        thread_heaps.emplace_back(k);
     }
     
-    // Normalize scores to [0, 1] range
-    // Find max scores for normalization
-    double max_vector_score = 0.0;
-    double max_bm25_score = 0.0;
-    
-    for (const auto& pair : vector_scores) {
-        max_vector_score = std::max(max_vector_score, pair.second);
-    }
-    
-    for (const auto& pair : bm25_scores) {
-        max_bm25_score = std::max(max_bm25_score, pair.second);
-    }
-    
-    // Combine scores
-    std::unordered_map<size_t, double> hybrid_scores;
-    
-    // Add vector contributions
-    if (max_vector_score > 0.0) {
-        for (const auto& pair : vector_scores) {
-            double normalized_score = pair.second / max_vector_score;
-            hybrid_scores[pair.first] += vector_weight * normalized_score;
+    #pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        DualTopK& local = thread_heaps[tid];
+        
+        #pragma omp for
+        for (int i = 0; i < static_cast<int>(n); ++i) {
+            // 1. Compute vector similarity score
+            float vector_score = 0.0f;
+            const float* __restrict__ emb = entries_[i].embedding;
+            
+            #pragma omp simd reduction(+:vector_score)
+            for (size_t j = 0; j < dim_; ++j) {
+                vector_score += emb[j] * query_vector[j];
+            }
+            
+            // 2. Compute BM25 score for this document
+            double bm25_score = 0.0;
+            const Entry& entry = entries_[i];
+            
+            for (const auto& term : query_terms) {
+                auto tf_it = entry.tf.find(term);
+                if (tf_it != entry.tf.end()) {
+                    int tf = tf_it->second;
+                    double norm = 1.0 - b_ + b_ * (entry.length / avg_len);
+                    double tf_weight = (k1_ + 1) * tf / (tf + k1_ * norm);
+                    bm25_score += (tf_weight + delta_) * idf_cache.at(term);
+                }
+            }
+            
+            // 3. Push to both heaps
+            local.vector_heap.push(vector_score, i);
+            local.bm25_heap.push(static_cast<float>(bm25_score), i);
         }
+        
+        #pragma omp barrier
     }
     
-    // Add BM25 contributions
-    if (max_bm25_score > 0.0) {
-        for (const auto& pair : bm25_scores) {
-            double normalized_score = pair.second / max_bm25_score;
-            hybrid_scores[pair.first] += bm25_weight * normalized_score;
-        }
+    // Merge thread-local heaps to get global top-k for each score type
+    TopK global_vector_heap(k);
+    TopK global_bm25_heap(k);
+    
+    for (auto& th : thread_heaps) {
+        global_vector_heap.merge(th.vector_heap);
+        global_bm25_heap.merge(th.bm25_heap);
     }
     
-    // Collect and sort results
-    std::vector<std::pair<size_t, double>> results(hybrid_scores.begin(), hybrid_scores.end());
+    // Sort heaps to get ranking order
+    std::sort(global_vector_heap.heap.begin(), global_vector_heap.heap.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::sort(global_bm25_heap.heap.begin(), global_bm25_heap.heap.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    
+    // Apply Reciprocal Rank Fusion (RRF) with constant k=60 (typical value)
+    const double rrf_k = 60.0;
+    std::unordered_map<size_t, double> rrf_scores;
+    
+    // Add vector search rankings
+    for (size_t rank = 0; rank < global_vector_heap.heap.size(); ++rank) {
+        size_t doc_id = global_vector_heap.heap[rank].second;
+        // Weight the RRF contribution
+        rrf_scores[doc_id] += vector_weight * (1.0 / (rrf_k + rank + 1));
+    }
+    
+    // Add BM25 rankings
+    for (size_t rank = 0; rank < global_bm25_heap.heap.size(); ++rank) {
+        size_t doc_id = global_bm25_heap.heap[rank].second;
+        // Weight the RRF contribution
+        rrf_scores[doc_id] += bm25_weight * (1.0 / (rrf_k + rank + 1));
+    }
+    
+    // Sort by RRF score and return top-k
+    std::vector<std::pair<size_t, double>> results;
+    results.reserve(rrf_scores.size());
+    for (const auto& pair : rrf_scores) {
+        results.emplace_back(pair.first, pair.second);
+    }
+    
     std::sort(results.begin(), results.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
     
-    // Return top k results
     if (results.size() > k) {
         results.resize(k);
     }

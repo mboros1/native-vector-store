@@ -1,78 +1,55 @@
-#!/usr/bin/env node
-
 const fs = require('fs');
 const path = require('path');
 
-// Configuration
-const NUM_FILES = 1000;
-const DOCS_PER_FILE = 10;
-const DIM = 1536; // OpenAI embedding dimension
-const OUTPUT_DIR = path.join(__dirname, '../test_data');
+// Generate test documents with correct embedding dimensions
+const NUM_DOCS = 1000;
+const EMBEDDING_DIM = 128;
 
-// Create output directory
-if (!fs.existsSync(OUTPUT_DIR)) {
-    fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+const testDir = path.join(__dirname, 'cache_test_data');
+if (!fs.existsSync(testDir)) {
+    fs.mkdirSync(testDir);
 }
 
-console.log(`📁 Generating test data in ${OUTPUT_DIR}`);
-console.log(`   Files: ${NUM_FILES}`);
-console.log(`   Documents per file: ${DOCS_PER_FILE}`);
-console.log(`   Total documents: ${NUM_FILES * DOCS_PER_FILE}`);
-console.log(`   Embedding dimensions: ${DIM}`);
+console.log(`Generating ${NUM_DOCS} test documents with ${EMBEDDING_DIM}-dimensional embeddings...`);
 
-// Generate random embedding
-function generateRandomEmbedding(dim) {
-    const embedding = new Array(dim);
-    let sum = 0;
-    
-    for (let i = 0; i < dim; i++) {
-        embedding[i] = Math.random() * 2 - 1; // Random between -1 and 1
-        sum += embedding[i] * embedding[i];
-    }
-    
-    // Normalize
-    const norm = Math.sqrt(sum);
-    for (let i = 0; i < dim; i++) {
-        embedding[i] /= norm;
-    }
-    
-    return embedding;
-}
-
-// Generate files
-let totalDocs = 0;
-const startTime = Date.now();
+// Generate documents in batches (100 docs per file)
+const BATCH_SIZE = 100;
+const NUM_FILES = Math.ceil(NUM_DOCS / BATCH_SIZE);
 
 for (let fileIdx = 0; fileIdx < NUM_FILES; fileIdx++) {
-    const documents = [];
+    const docs = [];
+    const startIdx = fileIdx * BATCH_SIZE;
+    const endIdx = Math.min(startIdx + BATCH_SIZE, NUM_DOCS);
     
-    for (let docIdx = 0; docIdx < DOCS_PER_FILE; docIdx++) {
-        const globalIdx = fileIdx * DOCS_PER_FILE + docIdx;
+    for (let i = startIdx; i < endIdx; i++) {
+        // Generate a random embedding
+        const embedding = [];
+        for (let j = 0; j < EMBEDDING_DIM; j++) {
+            embedding.push(Math.random() * 2 - 1);
+        }
+        
+        // Generate text with keywords
+        const keywords = ['machine', 'learning', 'neural', 'network', 'data', 'science', 'algorithm', 'model'];
+        const selectedKeywords = keywords.filter(() => Math.random() > 0.5).join(' ');
+        
         const doc = {
-            id: `stress-doc-${globalIdx}`,
-            text: `This is stress test document ${globalIdx}. It contains sample text for testing the vector store's performance under load. The document has index ${globalIdx} and is in file ${fileIdx}.`,
+            id: `doc-${i}`,
+            text: `This is document ${i}. Keywords: ${selectedKeywords}. Lorem ipsum dolor sit amet.`,
             metadata: {
-                embedding: generateRandomEmbedding(DIM),
-                file_index: fileIdx,
-                doc_index: docIdx,
+                embedding: embedding,
+                index: i,
+                batch: fileIdx,
                 timestamp: Date.now()
             }
         };
-        documents.push(doc);
-        totalDocs++;
+        
+        docs.push(doc);
     }
     
-    // Write file
-    const filename = path.join(OUTPUT_DIR, `stress_test_${fileIdx.toString().padStart(3, '0')}.json`);
-    fs.writeFileSync(filename, JSON.stringify(documents, null, 2));
-    
-    if ((fileIdx + 1) % 10 === 0) {
-        process.stdout.write(`\r   Progress: ${fileIdx + 1}/${NUM_FILES} files`);
-    }
+    const filename = path.join(testDir, `batch_${fileIdx}.json`);
+    fs.writeFileSync(filename, JSON.stringify(docs, null, 2));
+    console.log(`Created ${filename} with ${docs.length} documents`);
 }
 
-const elapsed = Date.now() - startTime;
-console.log(`\n✅ Generated ${totalDocs} documents in ${NUM_FILES} files (${elapsed}ms)`);
-console.log(`   Average: ${(elapsed / NUM_FILES).toFixed(1)}ms per file`);
-console.log(`\n📝 To run stress tests:`);
-console.log(`   cd src && make stress`);
+console.log(`\nGenerated ${NUM_DOCS} documents in ${NUM_FILES} files`);
+console.log(`Test data saved to: ${testDir}`);
