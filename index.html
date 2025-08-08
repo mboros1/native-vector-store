@@ -60,8 +60,9 @@
 <li><strong>🚀 High Performance</strong>: C++ implementation with OpenMP SIMD optimization</li>
 <li><strong>📦 Arena Allocation</strong>: Memory-efficient storage with 64MB chunks</li>
 <li><strong>⚡ Fast Search</strong>: Sub-10ms similarity search for large document collections</li>
+<li><strong>🔍 Hybrid Search</strong>: Combines vector similarity (semantic) with BM25 text search (lexical)</li>
 <li><strong>🔧 MCP Integration</strong>: Built for Model Context Protocol servers</li>
-<li><strong>🌐 Cross-Platform</strong>: Works on Linux, macOS, and Windows</li>
+<li><strong>🌐 Cross-Platform</strong>: Works on Linux and macOS (Windows users: use WSL)</li>
 <li><strong>📊 TypeScript Support</strong>: Full type definitions included</li>
 <li><strong>🔄 Producer-Consumer Loading</strong>: Parallel document loading at 178k+ docs/sec</li>
 </ul>
@@ -85,7 +86,7 @@
 <li><strong>Linux</strong>: <code>sudo apt-get install libgomp1</code> (Ubuntu/Debian) or <code>dnf install libgomp</code> (Fedora)</li>
 <li><strong>Alpine</strong>: <code>apk add libgomp</code></li>
 <li><strong>macOS</strong>: <code>brew install libomp</code></li>
-<li><strong>Windows</strong>: Included with Visual C++ runtime</li>
+<li><strong>Windows</strong>: Use WSL (Windows Subsystem for Linux)</li>
 </ul>
 </li>
 </ul>
@@ -93,7 +94,6 @@
 <ul>
 <li>Linux (x64, arm64, musl/Alpine) - x64 builds are AWS Lambda compatible (no AVX-512)</li>
 <li>macOS (x64, arm64/Apple Silicon)</li>
-<li>Windows (x64)</li>
 </ul>
 <p>If building from source, you'll need:</p>
 <ul>
@@ -125,7 +125,15 @@ store.finalize(); // Must call before searching!
 
 // Search for similar documents
 const queryEmbedding = new Float32Array(1536);
+
+// Option 1: Vector-only search (traditional)
 const results = store.search(queryEmbedding, 5); // Top 5 results
+
+// Option 2: Hybrid search (NEW - combines vector + BM25 text search)
+const hybridResults = store.search(queryEmbedding, 5, &quot;your search query text&quot;);
+
+// Option 3: BM25 text-only search
+const textResults = store.searchBM25(&quot;your search query&quot;, 5);
 
 // Results format - array of SearchResult objects, sorted by score (highest first):
 console.log(results);
@@ -284,6 +292,47 @@ if (process.env.NODE_ENV === 'development') {
   fs.watch('./documents', { recursive: true }, reloadStore);
 }
 </code></pre>
+<h2 id="hybrid-search">Hybrid Search</h2>
+<p>The vector store now supports hybrid search, combining semantic similarity (vector search) with lexical matching (BM25 text search) for improved retrieval accuracy:</p>
+<pre class="prettyprint source lang-javascript"><code>const { VectorStore } = require('native-vector-store');
+
+const store = new VectorStore(1536);
+store.loadDir('./documents');
+
+// Hybrid search automatically combines vector and text search
+const queryEmbedding = new Float32Array(1536);
+const results = store.search(
+  queryEmbedding, 
+  10,                               // Top 10 results
+  &quot;machine learning algorithms&quot;    // Query text for BM25
+);
+
+// You can also use individual search methods
+const vectorResults = store.searchVector(queryEmbedding, 10);
+const textResults = store.searchBM25(&quot;machine learning&quot;, 10);
+
+// Or explicitly control the hybrid weights
+const customResults = store.searchHybrid(
+  queryEmbedding,
+  &quot;machine learning&quot;,
+  10,
+  0.3,  // Vector weight (30%)
+  0.7   // BM25 weight (70%)
+);
+
+// Tune BM25 parameters for your corpus
+store.setBM25Parameters(
+  1.2,  // k1: Term frequency saturation (default: 1.2)
+  0.75, // b: Document length normalization (default: 0.75)
+  1.0   // delta: Smoothing parameter (default: 1.0)
+);
+</code></pre>
+<p>Hybrid search is particularly effective for:</p>
+<ul>
+<li><strong>Question answering</strong>: BM25 finds documents with exact terms while vectors capture semantic meaning</li>
+<li><strong>Knowledge retrieval</strong>: Combines conceptual similarity with keyword matching</li>
+<li><strong>Multi-lingual search</strong>: Vectors handle cross-language similarity while BM25 matches exact terms</li>
+</ul>
 <h2 id="mcp-server-integration">MCP Server Integration</h2>
 <p>Perfect for building local RAG capabilities in MCP servers:</p>
 <pre class="prettyprint source lang-javascript"><code>const { MCPVectorServer } = require('native-vector-store/examples/mcp-server');
