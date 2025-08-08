@@ -22,7 +22,7 @@ This design eliminates complex state management, ensures consistent performance,
 - **⚡ Fast Search**: Sub-10ms similarity search for large document collections
 - **🔍 Hybrid Search**: Combines vector similarity (semantic) with BM25 text search (lexical)
 - **🔧 MCP Integration**: Built for Model Context Protocol servers
-- **🌐 Cross-Platform**: Works on Linux, macOS, and Windows
+- **🌐 Cross-Platform**: Works on Linux and macOS (Windows users: use WSL)
 - **📊 TypeScript Support**: Full type definitions included
 - **🔄 Producer-Consumer Loading**: Parallel document loading at 178k+ docs/sec
 
@@ -49,12 +49,11 @@ npm install native-vector-store
   - **Linux**: `sudo apt-get install libgomp1` (Ubuntu/Debian) or `dnf install libgomp` (Fedora)
   - **Alpine**: `apk add libgomp`
   - **macOS**: `brew install libomp`
-  - **Windows**: Included with Visual C++ runtime
+  - **Windows**: Use WSL (Windows Subsystem for Linux)
 
 Prebuilt binaries are included for:
 - Linux (x64, arm64, musl/Alpine) - x64 builds are AWS Lambda compatible (no AVX-512)
 - macOS (x64, arm64/Apple Silicon)
-- Windows (x64)
 
 If building from source, you'll need:
 - Node.js ≥14.0.0

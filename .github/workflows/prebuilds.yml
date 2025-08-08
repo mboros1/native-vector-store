@@ -200,34 +200,8 @@ jobs:
           name: prebuilds-darwin-${{ matrix.arch }}
           path: prebuilds/
 
-  prebuild-windows:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        arch: [x64]
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      
-      - name: Install npm dependencies
-        run: npm ci
-      
-      - name: Build for Windows ${{ matrix.arch }}
-        run: |
-          npx prebuildify --napi --strip --arch=${{ matrix.arch }}
-      
-      - uses: actions/upload-artifact@v4
-        with:
-          name: prebuilds-win32-${{ matrix.arch }}
-          path: prebuilds/
-
   package:
-    needs: [prebuild-linux, prebuild-macos, prebuild-windows]
+    needs: [prebuild-linux, prebuild-macos]
     runs-on: ubuntu-latest
     
     steps:
@@ -410,29 +384,3 @@ jobs:
           cp ../test/test-installed.js .
           node test-installed.js
 
-  test-windows-x64:
-    needs: package
-    runs-on: windows-latest
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/download-artifact@v4
-        with:
-          name: npm-package
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      
-      - name: Test packaged tarball
-        shell: bash
-        run: |
-          echo "Testing Windows x64 prebuild..."
-          mkdir test-install && cd test-install
-          npm init -y >/dev/null
-          npm install ../native-vector-store-*.tgz
-          # Copy and run the installation test
-          cp ../test/test-installed.js .
-          node test-installed.js
