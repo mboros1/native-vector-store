@@ -20,6 +20,7 @@ This design eliminates complex state management, ensures consistent performance,
 - **🚀 High Performance**: C++ implementation with OpenMP SIMD optimization
 - **📦 Arena Allocation**: Memory-efficient storage with 64MB chunks
 - **⚡ Fast Search**: Sub-10ms similarity search for large document collections
+- **🔍 Hybrid Search**: Combines vector similarity (semantic) with BM25 text search (lexical)
 - **🔧 MCP Integration**: Built for Model Context Protocol servers
 - **🌐 Cross-Platform**: Works on Linux, macOS, and Windows
 - **📊 TypeScript Support**: Full type definitions included
@@ -86,7 +87,15 @@ store.finalize(); // Must call before searching!
 
 // Search for similar documents
 const queryEmbedding = new Float32Array(1536);
+
+// Option 1: Vector-only search (traditional)
 const results = store.search(queryEmbedding, 5); // Top 5 results
+
+// Option 2: Hybrid search (NEW - combines vector + BM25 text search)
+const hybridResults = store.search(queryEmbedding, 5, "your search query text");
+
+// Option 3: BM25 text-only search
+const textResults = store.searchBM25("your search query", 5);
 
 // Results format - array of SearchResult objects, sorted by score (highest first):
 console.log(results);
@@ -277,6 +286,50 @@ if (process.env.NODE_ENV === 'development') {
   fs.watch('./documents', { recursive: true }, reloadStore);
 }
 ```
+
+## Hybrid Search
+
+The vector store now supports hybrid search, combining semantic similarity (vector search) with lexical matching (BM25 text search) for improved retrieval accuracy:
+
+```javascript
+const { VectorStore } = require('native-vector-store');
+
+const store = new VectorStore(1536);
+store.loadDir('./documents');
+
+// Hybrid search automatically combines vector and text search
+const queryEmbedding = new Float32Array(1536);
+const results = store.search(
+  queryEmbedding, 
+  10,                               // Top 10 results
+  "machine learning algorithms"    // Query text for BM25
+);
+
+// You can also use individual search methods
+const vectorResults = store.searchVector(queryEmbedding, 10);
+const textResults = store.searchBM25("machine learning", 10);
+
+// Or explicitly control the hybrid weights
+const customResults = store.searchHybrid(
+  queryEmbedding,
+  "machine learning",
+  10,
+  0.3,  // Vector weight (30%)
+  0.7   // BM25 weight (70%)
+);
+
+// Tune BM25 parameters for your corpus
+store.setBM25Parameters(
+  1.2,  // k1: Term frequency saturation (default: 1.2)
+  0.75, // b: Document length normalization (default: 0.75)
+  1.0   // delta: Smoothing parameter (default: 1.0)
+);
+```
+
+Hybrid search is particularly effective for:
+- **Question answering**: BM25 finds documents with exact terms while vectors capture semantic meaning
+- **Knowledge retrieval**: Combines conceptual similarity with keyword matching
+- **Multi-lingual search**: Vectors handle cross-language similarity while BM25 matches exact terms
 
 ## MCP Server Integration
 
