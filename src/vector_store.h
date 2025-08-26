@@ -1,3 +1,14 @@
+/**
+ * @file vector_store.h
+ * @brief High-performance vector similarity search engine with BM25 hybrid search
+ * 
+ * This header defines the VectorStore class, a thread-safe, SIMD-optimized vector
+ * database designed for Model Context Protocol (MCP) servers and RAG applications.
+ * 
+ * @author Martin Boros
+ * @date 2024
+ */
+
 #pragma once
 #include <atomic>
 #include <memory>
@@ -16,7 +27,13 @@
 #include <string>
 #include <parallel_hashmap/phmap.h>
 
-// Custom error codes for VectorStore
+/**
+ * @enum VectorStoreError
+ * @brief Error codes for VectorStore operations
+ * 
+ * Comprehensive error codes including JSON parsing errors mapped from simdjson.
+ * Used throughout the API for error handling without exceptions.
+ */
 enum class VectorStoreError {
     SUCCESS = 0,
     MEMORY_ALLOCATION_FAILED,
@@ -61,7 +78,11 @@ enum class VectorStoreError {
     JSON_TRAILING_CONTENT
 };
 
-// Map simdjson error to VectorStoreError
+/**
+ * @brief Maps simdjson error codes to VectorStoreError
+ * @param error The simdjson error code
+ * @return Corresponding VectorStoreError code
+ */
 inline VectorStoreError map_simdjson_error(simdjson::error_code error) {
     using namespace simdjson;
     switch (error) {
@@ -100,7 +121,11 @@ inline VectorStoreError map_simdjson_error(simdjson::error_code error) {
     }
 }
 
-// Convert VectorStoreError to string for error messages
+/**
+ * @brief Converts VectorStoreError to human-readable string
+ * @param error The error code to convert
+ * @return C-string with error description
+ */
 inline const char* vector_store_error_message(VectorStoreError error) {
     switch (error) {
         case VectorStoreError::SUCCESS: return "Success";
@@ -148,17 +173,29 @@ inline const char* vector_store_error_message(VectorStoreError error) {
     }
 }
 
+/**
+ * @class ArenaAllocator
+ * @brief Arena memory allocator optimized for batch allocations
+ * 
+ * Allocates memory in 64MB chunks to minimize fragmentation and improve cache locality.
+ * Per-thread instance - no synchronization needed.
+ * Memory is never freed until the allocator is destroyed.
+ */
 class ArenaAllocator {
-    static constexpr size_t CHUNK_SIZE = 1 << 26;  // 64MB chunks
+    static constexpr size_t CHUNK_SIZE = 1 << 26;  ///< 64MB chunks for cache efficiency
+    
+    /**
+     * @struct Chunk
+     * @brief Memory chunk with offset tracking
+     */
     struct Chunk {
         alignas(64) char data[CHUNK_SIZE];
-        std::atomic<size_t> offset{0};
-        std::atomic<Chunk*> next{nullptr};
+        size_t offset{0};
+        Chunk* next{nullptr};
     };
     
     std::unique_ptr<Chunk> head_;
-    std::atomic<Chunk*> current_;
-    std::mutex chunk_creation_mutex_;
+    Chunk* current_;
     
 public:
     ArenaAllocator();
@@ -167,16 +204,31 @@ public:
 };
 
 
+/**
+ * @struct Document
+ * @brief Lightweight document representation using string views
+ * 
+ * Zero-copy structure that references data in arena memory.
+ * All string_views point to arena-allocated memory that persists
+ * for the lifetime of the VectorStore.
+ */
 struct Document {
-    std::string_view id;
-    std::string_view text;
-    std::string_view metadata_json;  // Full JSON including embedding
+    std::string_view id;              ///< Unique document identifier
+    std::string_view text;            ///< Document text content
+    std::string_view metadata_json;   ///< Full JSON metadata including embedding
 };
 
-// Per-thread top-k tracker for thread-safe parallel search
+/**
+ * @struct TopK
+ * @brief Per-thread top-k result tracker using min-heap
+ * 
+ * Efficiently maintains top-k results during parallel search operations.
+ * Uses a min-heap to keep only the k best results, discarding lower scores.
+ * Move-only semantics prevent accidental copies in parallel contexts.
+ */
 struct TopK {
-    size_t k;
-    std::vector<std::pair<float, size_t>> heap; // min-heap by score
+    size_t k;                                    ///< Number of top results to keep
+    std::vector<std::pair<float, size_t>> heap; ///< Min-heap of (score, index) pairs
     
     explicit TopK(size_t k = 0);
     
@@ -194,20 +246,46 @@ struct TopK {
     void merge(const TopK& other);
 };
 
+/**
+ * @class VectorStore
+ * @brief High-performance vector similarity search engine with hybrid BM25 support
+ * 
+ * Two-phase lifecycle design:
+ * 1. Loading Phase: Add documents concurrently, no searches allowed
+ * 2. Serving Phase: After finalize(), searches allowed, no modifications
+ * 
+ * Features:
+ * - SIMD-optimized similarity computation with OpenMP
+ * - Lock-free parallel document loading
+ * - BM25 text search with configurable parameters  
+ * - Hybrid search combining vector and text similarity
+ * - Arena allocation for cache-efficient memory layout
+ * - Zero-copy document storage
+ * 
+ * Thread Safety:
+ * - Loading phase: Concurrent add_document() calls safe
+ * - Serving phase: Unlimited concurrent searches
+ * - Phase transition: finalize() provides memory barrier
+ * 
+ * @note Designed for <1M documents, optimal for <100k
+ */
 class VectorStore {
 public:
+    /**
+     * @struct Entry
+     * @brief Internal document entry with embedding and BM25 metadata
+     */
     struct Entry {
-        Document doc;
-        float* embedding;  // Extracted pointer for fast access
+        Document doc;       ///< Document data (id, text, metadata)
+        float* embedding;   ///< Direct pointer to embedding for SIMD operations
         
         // BM25 fields
-        size_t length;  // Total number of tokens in doc.text
-        phmap::flat_hash_map<std::string, int> tf;  // Term frequencies - better cache locality
+        size_t length;      ///< Total number of tokens in document
+        phmap::flat_hash_map<std::string, int> tf;  ///< Term frequencies for BM25
     };
 
 private:
     const size_t dim_;
-    ArenaAllocator arena_;
     
     // Per-thread arena allocators for zero-contention parallel allocation
     std::vector<std::unique_ptr<ArenaAllocator>> thread_arenas_;
@@ -251,22 +329,45 @@ private:
     double delta_ = 1.0;
     
 public:
+    /**
+     * @brief Constructs a VectorStore with specified embedding dimensions
+     * @param dim Number of dimensions for embeddings
+     */
     explicit VectorStore(size_t dim);
     
-    // Overload for document type (used in test_main.cpp)
+    /**
+     * @brief Adds a document from simdjson document object
+     * @param json_doc JSON document containing id, text/content, and metadata.embedding
+     * @return Error code indicating success or failure reason
+     */
     VectorStoreError add_document(simdjson::ondemand::document& json_doc);
     
+    /**
+     * @brief Adds a document from simdjson object
+     * @param json_doc JSON object containing id, text/content, and metadata.embedding
+     * @return Error code indicating success or failure reason
+     */
     VectorStoreError add_document(simdjson::ondemand::object& json_doc);
     
-    // Batch processing with index reservation
-    // Thread-local state for batched operations
+    /**
+     * @struct BatchState
+     * @brief Thread-local batch reservation for lock-free parallel loading
+     * 
+     * Reduces contention on atomic counter by reserving document indices
+     * in batches per thread.
+     */
     struct BatchState {
-        size_t batch_size;
-        size_t batch_start;
-        size_t batch_offset;
+        size_t batch_size;    ///< Number of indices to reserve at once
+        size_t batch_start;   ///< Start index of current batch
+        size_t batch_offset;  ///< Current offset within batch
         
         BatchState(size_t size = 128) : batch_size(size), batch_start(0), batch_offset(0) {}
         
+        /**
+         * @brief Reserves next document index from batch
+         * @param count Global atomic document counter
+         * @return Reserved document index
+         */
         size_t reserve_next(std::atomic<size_t>& count) {
             if (batch_offset >= batch_size) {
                 // Need new batch
@@ -277,36 +378,87 @@ public:
         }
     };
     
-    // Get thread-local batch state
+    /**
+     * @brief Gets thread-local batch state for current thread
+     * @return Reference to thread's batch state
+     */
     static BatchState& get_batch_state();
     
-    // Finalize the store: normalize and switch to serving phase
+    /**
+     * @brief Finalizes store for searching - normalizes embeddings and switches to serving phase
+     * 
+     * Must be called after all documents are added and before any searches.
+     * Provides memory barrier for safe phase transition.
+     */
     void finalize();
     
-    // Deprecated: use finalize() instead
+    /**
+     * @deprecated Use finalize() instead
+     */
     void normalize_all();
     
+    /**
+     * @brief Performs k-nearest neighbor vector similarity search
+     * @param query Query embedding vector (must have dim_ dimensions)
+     * @param k Number of top results to return
+     * @return Vector of (score, document_index) pairs sorted by score descending
+     * @note Uses SIMD-optimized dot product with OpenMP parallelization
+     */
     std::vector<std::pair<float, size_t>> 
     search(const float* __restrict__ query, size_t k) const;
     
-    // BM25 search
+    /**
+     * @brief Performs BM25 text search
+     * @param query_terms Vector of query terms (should be tokenized/normalized)
+     * @return Vector of (document_index, BM25_score) pairs
+     */
     std::vector<std::pair<size_t, double>> 
     search_bm25(const std::vector<std::string>& query_terms) const;
     
-    // Hybrid search combining vector similarity and BM25
+    /**
+     * @brief Performs hybrid search combining vector and BM25 scores
+     * @param query_vector Query embedding vector
+     * @param query_terms Query terms for BM25
+     * @param vector_weight Weight for vector similarity (0-1)
+     * @param bm25_weight Weight for BM25 score (0-1)
+     * @param k Number of top results to return
+     * @return Vector of (document_index, combined_score) pairs
+     * @note Uses Reciprocal Rank Fusion (RRF) for score combination
+     */
     std::vector<std::pair<size_t, double>>
     search_hybrid(const float* __restrict__ query_vector, const std::vector<std::string>& query_terms, 
                   double vector_weight = 0.7, double bm25_weight = 0.3, size_t k = 10) const;
     
-    // BM25 parameter setters
+    /**
+     * @brief Sets BM25 algorithm parameters
+     * @param k1 Term frequency saturation parameter (typical: 1.2)
+     * @param b Document length normalization (0-1, typical: 0.75)
+     * @param delta Smoothing parameter (typical: 1.0)
+     */
     void set_bm25_parameters(double k1, double b, double delta);
     
+    /**
+     * @brief Gets document entry by index
+     * @param idx Document index
+     * @return Reference to Entry structure
+     */
     const Entry& get_entry(size_t idx) const;
     
+    /**
+     * @brief Gets number of documents in store
+     * @return Document count
+     */
     size_t size() const;
     
+    /**
+     * @brief Checks if store is finalized and ready for searching
+     * @return True if finalized, false if still in loading phase
+     */
     bool is_finalized() const;
     
-    // Get average document length for BM25
+    /**
+     * @brief Gets average document length for BM25 calculations
+     * @return Average document length in tokens
+     */
     double avg_doc_length() const;
 };

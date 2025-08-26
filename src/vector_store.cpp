@@ -20,55 +20,40 @@ void* ArenaAllocator::allocate(size_t size, size_t align) {
         return nullptr;  // Cannot allocate larger than chunk size
     }
     
-    Chunk* chunk = current_.load(std::memory_order_acquire);
-    while (true) {
-        size_t old_offset = chunk->offset.load(std::memory_order_relaxed);
-        
-        // Calculate the pointer that would result from current offset
-        void* ptr = chunk->data + old_offset;
-        
-        // Calculate how much padding we need for alignment
-        size_t misalignment = (uintptr_t)ptr & (align - 1);
-        size_t padding = misalignment ? (align - misalignment) : 0;
-        
-        size_t aligned_offset = old_offset + padding;
-        size_t new_offset = aligned_offset + size;
-        
-        if (new_offset > CHUNK_SIZE) {
-            // Need new chunk
-            Chunk* next = chunk->next.load(std::memory_order_acquire);
-            if (!next) {
-                // Lock to prevent multiple threads creating chunks
-                std::lock_guard<std::mutex> lock(chunk_creation_mutex_);
-                // Double-check after acquiring lock
-                next = chunk->next.load(std::memory_order_acquire);
-                if (!next) {
-                    auto new_chunk = std::make_unique<Chunk>();
-                    next = new_chunk.get();
-                    chunk->next.store(next, std::memory_order_release);
-                    // Transfer ownership after setting atomic pointer
-                    new_chunk.release();
-                }
-            }
-            // Update current to the new chunk
-            current_.store(next, std::memory_order_release);
-            chunk = next;
-            continue;
+    // Calculate the pointer that would result from current offset
+    void* ptr = current_->data + current_->offset;
+    
+    // Calculate how much padding we need for alignment
+    size_t misalignment = (uintptr_t)ptr & (align - 1);
+    size_t padding = misalignment ? (align - misalignment) : 0;
+    
+    size_t aligned_offset = current_->offset + padding;
+    size_t new_offset = aligned_offset + size;
+    
+    if (new_offset > CHUNK_SIZE) {
+        // Need new chunk
+        if (!current_->next) {
+            auto new_chunk = std::make_unique<Chunk>();
+            current_->next = new_chunk.get();
+            // Transfer ownership after setting pointer
+            new_chunk.release();
         }
-        
-        if (chunk->offset.compare_exchange_weak(old_offset, new_offset,
-                                               std::memory_order_release,
-                                               std::memory_order_relaxed)) {
-            return chunk->data + aligned_offset;
-        }
+        // Move to the next chunk
+        current_ = current_->next;
+        // Retry allocation in new chunk
+        return allocate(size, align);
     }
+    
+    // Update offset and return aligned pointer
+    current_->offset = new_offset;
+    return current_->data + aligned_offset;
 }
 
 ArenaAllocator::~ArenaAllocator() {
     // Clean up linked chunks
-    Chunk* chunk = head_->next.load(std::memory_order_acquire);
+    Chunk* chunk = head_->next;
     while (chunk) {
-        Chunk* next = chunk->next.load(std::memory_order_acquire);
+        Chunk* next = chunk->next;
         delete chunk;
         chunk = next;
     }
