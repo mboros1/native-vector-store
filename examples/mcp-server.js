@@ -1,17 +1,38 @@
 #!/usr/bin/env node
 
 /**
- * MCP Server Integration Example
+ * @file mcp-server.js
+ * @description MCP (Model Context Protocol) Server Integration Example
  * 
  * This example demonstrates how to use native-vector-store in an MCP server
  * for fast local RAG (Retrieval-Augmented Generation) capabilities.
+ * 
+ * @example
+ * // Usage as MCP server
+ * const server = new MCPVectorServer(1536);
+ * await server.loadDocuments('./knowledge-base');
+ * const results = server.search(queryEmbedding, 10, 0.7);
+ * 
+ * @author Martin Boros
+ * @license MIT
  */
 
 const { VectorStore } = require('../index');
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * @class MCPVectorServer
+ * @description Wrapper class for VectorStore optimized for MCP server usage
+ * 
+ * Provides high-level methods for document management and semantic search
+ * with built-in error handling and performance monitoring.
+ */
 class MCPVectorServer {
+  /**
+   * @constructor
+   * @param {number} [dimensions=1536] - Embedding vector dimensions (1536 for OpenAI ada-002)
+   */
   constructor(dimensions = 1536) {
     this.store = new VectorStore(dimensions);
     this.dimensions = dimensions;
@@ -20,6 +41,13 @@ class MCPVectorServer {
 
   /**
    * Load document corpus from a directory of JSON files
+   * @async
+   * @param {string} documentsPath - Path to directory containing JSON documents
+   * @returns {Promise<Object>} Loading result with success status, document count, and timing
+   * @returns {boolean} returns.success - Whether loading succeeded
+   * @returns {number} [returns.documentCount] - Number of documents loaded
+   * @returns {number} [returns.loadTimeMs] - Time taken to load in milliseconds
+   * @returns {string} [returns.error] - Error message if loading failed
    */
   async loadDocuments(documentsPath) {
     console.log(`Loading documents from: ${documentsPath}`);
@@ -47,6 +75,13 @@ class MCPVectorServer {
 
   /**
    * Add a single document to the vector store
+   * @param {Object} document - Document to add
+   * @param {string} document.id - Unique document identifier
+   * @param {string} document.text - Document text content
+   * @param {Object} document.metadata - Document metadata
+   * @param {number[]} document.metadata.embedding - Embedding vector
+   * @returns {Object} Result with success status and total document count
+   * @throws {Error} If document format is invalid or dimensions mismatch
    */
   addDocument(document) {
     if (!document.id || !document.text || !document.metadata?.embedding) {
@@ -62,7 +97,15 @@ class MCPVectorServer {
   }
 
   /**
-   * Search for similar documents
+   * Search for similar documents using vector similarity
+   * @param {number[]} queryEmbedding - Query embedding vector
+   * @param {number} [k=5] - Number of top results to return
+   * @param {number} [threshold=0.0] - Minimum similarity score threshold (0-1)
+   * @returns {Object} Search results with timing information
+   * @returns {Array<Object>} returns.results - Array of matching documents
+   * @returns {number} returns.searchTimeMs - Search execution time in milliseconds
+   * @returns {number} returns.totalDocuments - Total documents in store
+   * @throws {Error} If no documents loaded or dimension mismatch
    */
   search(queryEmbedding, k = 5, threshold = 0.0) {
     if (!this.isLoaded) {
@@ -96,7 +139,12 @@ class MCPVectorServer {
   }
 
   /**
-   * Get server statistics
+   * Get server statistics and health information
+   * @returns {Object} Server statistics
+   * @returns {boolean} returns.isLoaded - Whether documents are loaded
+   * @returns {number} returns.documentCount - Number of documents in store
+   * @returns {number} returns.dimensions - Configured embedding dimensions
+   * @returns {boolean} returns.isFinalized - Whether store is finalized for searching
    */
   getStats() {
     return {
