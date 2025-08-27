@@ -9,8 +9,13 @@
 #include <iomanip>
 #include <sstream>
 #include <unordered_map>
+#include <algorithm>
 #include "document_loader.h"
-#include <openssl/sha.h>
+
+// Include xxHash implementation
+#define XXH_STATIC_LINKING_ONLY
+#define XXH_IMPLEMENTATION
+#include "xxhash.h"
 
 namespace fs = std::filesystem;
 
@@ -309,7 +314,7 @@ private:
         
         for (const auto& filename : files) {
             std::string filepath = opts_.output_dir + "/" + filename;
-            std::string hash = computeSHA256(filepath);
+            std::string hash = computeXXH64(filepath);
             if (hash.empty()) return false;
             
             file << hash << "  " << filename << "\n";
@@ -318,28 +323,29 @@ private:
         return file.good();
     }
     
-    std::string computeSHA256(const std::string& filepath) {
+    std::string computeXXH64(const std::string& filepath) {
         std::ifstream file(filepath, std::ios::binary);
         if (!file) return "";
         
-        SHA256_CTX ctx;
-        SHA256_Init(&ctx);
+        XXH64_state_t* state = XXH64_createState();
+        if (!state) return "";
+        
+        XXH64_reset(state, 0);  // seed = 0
         
         char buffer[8192];
         while (file.read(buffer, sizeof(buffer))) {
-            SHA256_Update(&ctx, buffer, file.gcount());
+            XXH64_update(state, buffer, file.gcount());
         }
         if (file.gcount() > 0) {
-            SHA256_Update(&ctx, buffer, file.gcount());
+            XXH64_update(state, buffer, file.gcount());
         }
         
-        unsigned char hash[SHA256_DIGEST_LENGTH];
-        SHA256_Final(hash, &ctx);
+        XXH64_hash_t hash = XXH64_digest(state);
+        XXH64_freeState(state);
         
+        // Convert 64-bit hash to hex string
         std::stringstream ss;
-        for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-        }
+        ss << std::hex << std::setfill('0') << std::setw(16) << hash;
         
         return ss.str();
     }

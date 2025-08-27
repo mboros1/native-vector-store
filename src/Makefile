@@ -8,18 +8,21 @@ OBJ_DIR = obj
 # Compiler
 ifeq ($(UNAME_S),Darwin)
     CXX = clang++
+    CC = clang
 else
     CXX = g++
+    CC = gcc
 endif
 
 # Base flags
 CXXFLAGS = -std=c++17 -g -O3 -march=native -fno-omit-frame-pointer
+CFLAGS = -std=c11 -g -O3 -march=native -fno-omit-frame-pointer
 
 # OS-specific configuration
 ifeq ($(UNAME_S),Darwin)
     # macOS configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I/opt/homebrew/opt/libomp/include
-    LDFLAGS = -L/opt/homebrew/opt/libomp/lib -L/opt/homebrew/opt/openssl@3/lib
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I/opt/homebrew/opt/libomp/include
+    LDFLAGS = -L/opt/homebrew/opt/libomp/lib
     LIBS = -lomp
     # Add flags for better debugging with lldb
     CXXFLAGS += -glldb -gdwarf-4
@@ -27,7 +30,7 @@ ifeq ($(UNAME_S),Darwin)
     CXXFLAGS += -Xpreprocessor -fopenmp
 else
     # Linux configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash
     LDFLAGS = -L/usr/lib
     LIBS = -lgomp
     # OpenMP flags for Linux
@@ -63,7 +66,7 @@ $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
 $(PACK_TARGET): $(BIN_DIR) $(OBJ_DIR) $(PACK_OBJECTS)
-	$(CXX) $(CXXFLAGS) $(PACK_OBJECTS) -o $(PACK_TARGET) $(LDFLAGS) $(LIBS) -lcrypto
+	$(CXX) $(CXXFLAGS) $(PACK_OBJECTS) -o $(PACK_TARGET) $(LDFLAGS) $(LIBS)
 
 $(BUNDLE_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(BUNDLE_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(BUNDLE_TEST_OBJECTS) -o $(BUNDLE_TEST_TARGET) $(LDFLAGS) $(LIBS)
