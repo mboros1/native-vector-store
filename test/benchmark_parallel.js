@@ -74,7 +74,7 @@ async function runBenchmark() {
     const nvsPackPath = path.join(__dirname, '..', 'src', 'bin', 'nvs-pack');
     if (!fs.existsSync(nvsPackPath)) {
         console.log('⚙️  Building nvs-pack...');
-        execSync('make -C src nvs-pack', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+        execSync('make -C src all', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
     }
     
     // Create bundle

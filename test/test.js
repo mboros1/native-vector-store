@@ -61,7 +61,7 @@ function createBundle(dataDir, bundleDir) {
   // Check if nvs-pack exists
   if (!fs.existsSync(nvsPackPath)) {
     console.log('⚠️  nvs-pack not found, building it...');
-    execSync('make -C src nvs-pack', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+    execSync('make -C src all', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
   }
   
   // Remove old bundle directory if it exists
