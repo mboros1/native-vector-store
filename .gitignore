@@ -18,6 +18,9 @@ src/test-bundle/
 src/stress_test_bundle/
 src/test_*_bundle/
 test/stress_data/
+test/test_data/
+test/*_bundle/
+*.nvs
 
 # Library files
 *.a

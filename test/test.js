@@ -1,6 +1,7 @@
 const { VectorStore } = require('../index');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 function generateRandomEmbedding(dim) {
   const embedding = new Float32Array(dim);
@@ -22,114 +23,152 @@ function createTestDocument(id, text, dim) {
     id: id,
     text: text,
     metadata: {
-      embedding: Array.from(generateRandomEmbedding(dim)),
-      timestamp: Date.now()
+      embedding: Array.from(generateRandomEmbedding(dim))
     }
   };
+}
+
+function prepareTestData(numDocs = 100, dim = 384) {
+  const testDir = path.join(__dirname, 'test_data');
+  
+  // Clean up and create test directory
+  if (fs.existsSync(testDir)) {
+    fs.rmSync(testDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(testDir, { recursive: true });
+  
+  // Create test documents
+  const documents = [];
+  for (let i = 0; i < numDocs; i++) {
+    documents.push(createTestDocument(
+      `doc-${i}`,
+      `This is test document number ${i} with some content for testing search functionality.`,
+      dim
+    ));
+  }
+  
+  // Save documents to JSON file
+  const jsonPath = path.join(testDir, 'documents.json');
+  fs.writeFileSync(jsonPath, JSON.stringify(documents, null, 2));
+  
+  return testDir;
+}
+
+function createBundle(dataDir, bundleDir) {
+  // Build the nvs-pack command
+  const nvsPackPath = path.join(__dirname, '..', 'src', 'bin', 'nvs-pack');
+  
+  // Check if nvs-pack exists
+  if (!fs.existsSync(nvsPackPath)) {
+    console.log('⚠️  nvs-pack not found, building it...');
+    execSync('make -C src nvs-pack', { stdio: 'inherit', cwd: path.join(__dirname, '..') });
+  }
+  
+  // Remove old bundle directory if it exists
+  if (fs.existsSync(bundleDir)) {
+    fs.rmSync(bundleDir, { recursive: true, force: true });
+  }
+  
+  // Create the bundle
+  try {
+    execSync(`${nvsPackPath} --out ${bundleDir} ${dataDir}`, { stdio: 'pipe' });
+    return true;
+  } catch (error) {
+    console.error('Failed to create bundle:', error.message);
+    return false;
+  }
 }
 
 function performanceTest() {
   console.log('🚀 Starting performance tests...');
   
   const dim = 1536; // OpenAI embedding dimension
-  const store = new VectorStore(dim);
-  
-  // Test 1: JavaScript object creation performance (not file loading)
-  console.log('📚 Test 1: JavaScript object creation performance');
-  const startLoad = Date.now();
-  
   const numDocs = 10000;
-  for (let i = 0; i < numDocs; i++) {
-    const doc = createTestDocument(
-      `doc-${i}`,
-      `This is test document number ${i} with some content.`,
-      dim
-    );
-    store.addDocument(doc);
+  
+  // Prepare test data
+  console.log(`📚 Preparing ${numDocs} test documents...`);
+  const startPrep = Date.now();
+  const testDir = prepareTestData(numDocs, dim);
+  const prepTime = Date.now() - startPrep;
+  console.log(`   Data preparation: ${prepTime}ms`);
+  
+  // Create bundle
+  const bundleDir = path.join(__dirname, 'test_perf_bundle');
+  console.log('📦 Creating test bundle...');
+  const startBundle = Date.now();
+  if (!createBundle(testDir, bundleDir)) {
+    console.error('Failed to create test bundle');
+    return false;
+  }
+  const bundleTime = Date.now() - startBundle;
+  console.log(`   Bundle creation: ${bundleTime}ms`);
+  
+  // Load the bundle
+  console.log('🔄 Loading bundle into vector store...');
+  const store = new VectorStore(bundleDir);
+  
+  // Test search performance
+  console.log('🔍 Testing search performance...');
+  const query = generateRandomEmbedding(dim);
+  
+  // Warm-up
+  for (let i = 0; i < 5; i++) {
+    store.search(query, 10);
   }
   
-  // Finalize the store before searching
-  store.finalize();
-  
-  const loadTime = Date.now() - startLoad;
-  console.log(`✅ Created and added ${numDocs} JS objects in ${loadTime}ms (${(loadTime/numDocs).toFixed(2)}ms per doc)`);
-  console.log(`   Note: This tests JS object creation, not file loading. See benchmark_parallel.js for file loading performance.`);
-  
-  // Test 2: Search performance (100 searches)
-  console.log('🔍 Test 2: Search performance (100 searches)');
-  const k = 10;
+  // Measure search time
   const searchTimes = [];
-  
-  // Run 100 searches
-  for (let i = 0; i < 100; i++) {
-    const query = generateRandomEmbedding(dim);
-    const startSearch = Date.now();
-    const results = store.search(query, k);
-    const searchTime = Date.now() - startSearch;
-    searchTimes.push(searchTime);
-    
-    if (i === 0) {
-      console.log(`   First search: Found ${results.length} results in ${searchTime}ms`);
-      console.log(`   Top result: ${results[0].id} (score: ${results[0].score.toFixed(4)})`);
-    }
+  const iterations = 100;
+  for (let i = 0; i < iterations; i++) {
+    const start = Date.now();
+    const results = store.search(query, 10);
+    const time = Date.now() - start;
+    searchTimes.push(time);
   }
   
-  // Calculate statistics
-  const minTime = Math.min(...searchTimes);
-  const maxTime = Math.max(...searchTimes);
   const meanTime = searchTimes.reduce((a, b) => a + b, 0) / searchTimes.length;
+  const maxTime = Math.max(...searchTimes);
+  const minTime = Math.min(...searchTimes);
   
-  console.log(`✅ Completed 100 searches`);
-  console.log(`   Min: ${minTime}ms`);
-  console.log(`   Max: ${maxTime}ms`);
-  console.log(`   Mean: ${meanTime.toFixed(2)}ms (target: <10ms)`);
-  
-  // Test 3: Normalization performance
-  console.log('🧮 Test 3: Normalization performance');
-  const startNorm = Date.now();
-  store.normalize();
-  const normTime = Date.now() - startNorm;
-  
-  console.log(`✅ Normalized ${store.size()} documents in ${normTime}ms`);
-  
-  // Performance summary
-  console.log('\n📊 Performance Summary:');
-  console.log(`   JS object creation time: ${loadTime}ms`);
-  console.log(`   Search time (mean): ${meanTime.toFixed(2)}ms (target: <10ms)`);
-  console.log(`   Normalization time: ${normTime}ms`);
+  console.log('📊 Performance Results:');
+  console.log(`   Bundle creation: ${bundleTime}ms for ${numDocs} documents`);
+  console.log(`   Search latency (mean): ${meanTime.toFixed(2)}ms`);
+  console.log(`   Search latency (min/max): ${minTime}ms / ${maxTime}ms`);
   console.log(`   Total documents: ${store.size()}`);
   
+  // Clean up
+  store.close();
+  fs.rmSync(bundleDir, { recursive: true, force: true });
+  fs.rmSync(testDir, { recursive: true, force: true });
+  
   // Verify performance targets
-  // Note: JS object creation is slow, but actual file loading is fast (see benchmark_parallel.js)
-  const loadPassed = true; // We don't fail on JS object creation speed
   const searchPassed = meanTime < 10;
   
   console.log(`\n🎯 Performance Targets:`);
-  console.log(`   JS object creation: N/A (see benchmark_parallel.js for actual file loading)`);
+  console.log(`   Bundle creation: ✅ (${(numDocs / (bundleTime / 1000)).toFixed(0)} docs/sec)`);
   console.log(`   Search performance: ${searchPassed ? '✅' : '❌'} (mean: ${meanTime.toFixed(2)}ms)`);
   
-  return loadPassed && searchPassed;
+  return searchPassed;
 }
 
 function functionalTest() {
   console.log('🧪 Starting functional tests...');
   
   const dim = 384; // Smaller dimension for testing
-  const store = new VectorStore(dim);
   
-  // Test 1: Basic document operations
-  console.log('📄 Test 1: Basic document operations');
-  const doc1 = createTestDocument('test-1', 'Hello world', dim);
-  const doc2 = createTestDocument('test-2', 'Goodbye world', dim);
+  // Prepare test data
+  console.log('📄 Test 1: Bundle creation and loading');
+  const testDir = prepareTestData(10, dim);
+  const bundleDir = path.join(__dirname, 'test_func_bundle');
   
-  store.addDocument(doc1);
-  store.addDocument(doc2);
+  if (!createBundle(testDir, bundleDir)) {
+    console.error('Failed to create test bundle');
+    return false;
+  }
   
-  console.log(`✅ Added 2 documents, store size: ${store.size()}`);
-  
-  // Finalize the store to transition to serving phase
-  store.finalize();
-  console.log('✅ Store finalized and ready for searching');
+  // Load the bundle
+  const store = new VectorStore(bundleDir);
+  console.log(`✅ Bundle loaded, store size: ${store.size()}`);
   
   // Test 2: Search functionality
   console.log('🔍 Test 2: Search functionality');
@@ -137,22 +176,52 @@ function functionalTest() {
   const results = store.search(query, 2);
   
   console.log(`✅ Search returned ${results.length} results`);
-  console.log(`   Result 1: ${results[0].id} (score: ${results[0].score.toFixed(4)})`);
-  console.log(`   Result 2: ${results[1].id} (score: ${results[1].score.toFixed(4)})`);
+  if (results.length >= 2) {
+    console.log(`   Result 1: ${results[0].id} (score: ${results[0].score.toFixed(4)})`);
+    console.log(`   Result 2: ${results[1].id} (score: ${results[1].score.toFixed(4)})`);
+  }
   
-  // Test 3: Data integrity
-  console.log('🔒 Test 3: Data integrity');
+  // Test 3: BM25 search
+  console.log('📝 Test 3: BM25 text search');
+  const textResults = store.searchBM25('document testing', 2);
+  console.log(`✅ BM25 search returned ${textResults.length} results`);
+  
+  // Test 4: Hybrid search
+  console.log('🔀 Test 4: Hybrid search');
+  const hybridResults = store.searchHybrid(query, 'document testing', 2);
+  console.log(`✅ Hybrid search returned ${hybridResults.length} results`);
+  
+  // Test 5: Data integrity
+  console.log('🔒 Test 5: Data integrity');
   const result = results[0];
   const isValidScore = typeof result.score === 'number' && !isNaN(result.score);
   const hasId = typeof result.id === 'string' && result.id.length > 0;
   const hasText = typeof result.text === 'string' && result.text.length > 0;
+  const hasMetadata = typeof result.metadata === 'string';
   
   console.log(`✅ Data integrity check:`);
   console.log(`   Valid score: ${isValidScore}`);
   console.log(`   Has ID: ${hasId}`);
   console.log(`   Has text: ${hasText}`);
+  console.log(`   Has metadata: ${hasMetadata}`);
   
-  return isValidScore && hasId && hasText;
+  // Test 6: Store operations
+  console.log('🔧 Test 6: Store operations');
+  const isOpen = store.isOpen();
+  const dimensions = store.dimensions();
+  const size = store.size();
+  
+  console.log(`✅ Store operations:`);
+  console.log(`   Is open: ${isOpen}`);
+  console.log(`   Dimensions: ${dimensions}`);
+  console.log(`   Size: ${size}`);
+  
+  // Clean up
+  store.close();
+  fs.rmSync(bundleDir, { recursive: true, force: true });
+  fs.rmSync(testDir, { recursive: true, force: true });
+  
+  return isValidScore && hasId && hasText && isOpen && dimensions === dim;
 }
 
 async function main() {
