@@ -1,218 +1,127 @@
-// SimpleSentenceSplitter.h
-#pragma once
+#ifndef SIMPLE_SENTENCE_SPLITTER_H
+#define SIMPLE_SENTENCE_SPLITTER_H
 
 #include <string>
 #include <vector>
-#include <regex>
-#include <algorithm>
-#include <cctype>
-
-// You’ll need C++ ports of these:
-//   • EnglishAbbreviations::contains(const std::string&)
-//   • EnglishDictionary::instance().count(const std::string&)
-#include "english_abbreviations.h"
-#include "english_dictionary.h"
+#include <string_view>
 
 class SimpleSentenceSplitter {
 public:
-    /// Singleton accessor
-    static SimpleSentenceSplitter& getInstance() {
-        static SimpleSentenceSplitter instance;
-        return instance;
-    }
-
-    /// Split text into sentences.
-    std::vector<std::string> split(const std::string& input) {
+    std::vector<std::string> split(const std::string& text) const {
         std::vector<std::string> sentences;
-        int len = 0;
-        std::string text = input;
-
-        // 1) Normalize carriage returns to spaces
-        text = std::regex_replace(text, regexCarriageReturn(), " ");
-
-        // 2) Clear any stray 0x19 markers
-        for (char& c : text) if (c == '\x19') c = ' ';
-
-        // 3) Insert 0x19 where a space was likely forgotten after .!? 
-        text = std::regex_replace(text, regexForgottenSpace(), "$1$2\x19$3");
-
-        // 4) Add a newline so regex can match the final sentence
-        text.push_back('\n');
-
-        auto begin = text.cbegin();
-        std::smatch m;
-        std::string current;
-
-        // 5) Loop over sentence-boundary matches
-        while (std::regex_search(begin, text.cend(), m, regexSentence())) {
-            // Extract groups
-            std::string sent = m[1].str();
-            std::string punct = m[2].str();
-
-            // Determine which “after” group matched, and compute its end offset
-            std::string after;
-            size_t offsetBase = begin - text.cbegin();
-            size_t newEnd;
-            if (m[3].matched) {
-                after = m[3].str();
-                newEnd = m.position(3) + m.length(3) + offsetBase;
+        std::string current_sentence;
+        
+        size_t i = 0;
+        while (i < text.length()) {
+            char c = text[i];
+            current_sentence += c;
+            
+            // Check for sentence endings
+            if (c == '.' || c == '!' || c == '?') {
+                // Look ahead to see if this is really the end of a sentence
+                size_t next = i + 1;
+                
+                // Skip any closing quotes or brackets
+                while (next < text.length() && 
+                       (text[next] == '"' || text[next] == '\'' || 
+                        text[next] == ')' || text[next] == ']')) {
+                    current_sentence += text[next];
+                    next++;
+                }
+                
+                // Skip whitespace
+                size_t ws_start = next;
+                while (next < text.length() && std::isspace(text[next])) {
+                    next++;
+                }
+                
+                // Check if the next character indicates a new sentence
+                bool is_sentence_end = false;
+                if (next >= text.length()) {
+                    is_sentence_end = true;  // End of text
+                } else if (std::isupper(text[next])) {
+                    is_sentence_end = true;  // Next sentence starts with capital
+                } else if (next - ws_start > 1) {
+                    is_sentence_end = true;  // Multiple spaces/newlines
+                }
+                
+                // Check for common abbreviations that shouldn't end sentences
+                if (is_sentence_end && c == '.') {
+                    // Simple check for common patterns like "Mr." "Dr." "Inc." etc
+                    if (current_sentence.length() >= 3) {
+                        size_t word_start = current_sentence.rfind(' ', current_sentence.length() - 2);
+                        if (word_start == std::string::npos) word_start = 0;
+                        else word_start++;
+                        
+                        std::string last_word = current_sentence.substr(word_start);
+                        // Remove trailing period for comparison
+                        if (!last_word.empty() && last_word.back() == '.') {
+                            last_word.pop_back();
+                        }
+                        
+                        // Check if it's a common abbreviation
+                        if (is_common_abbreviation(last_word)) {
+                            is_sentence_end = false;
+                        }
+                    }
+                }
+                
+                if (is_sentence_end) {
+                    // Trim whitespace from the sentence
+                    size_t first = current_sentence.find_first_not_of(" \t\n\r");
+                    size_t last = current_sentence.find_last_not_of(" \t\n\r");
+                    if (first != std::string::npos) {
+                        sentences.push_back(current_sentence.substr(first, last - first + 1));
+                    }
+                    current_sentence.clear();
+                    i = next - 1;  // Position before the next non-whitespace character
+                }
             }
-            else if (m[5].matched) {
-                after = m[5].str();
-                newEnd = m.position(5) + m.length(5) + offsetBase;
-            }
-            else {
-                after.clear();
-                newEnd = m.position(0) + m.length(0) + offsetBase;
-            }
-
-            // Count words in 'sent'
-            len += countWords(sent);
-
-            std::string nextWord = m[4].matched ? m[4].str() : "";
-
-            // Decide if this is a true break
-            bool isBreak = false;
-            if (punct == ".") {
-                if (!isAbbreviation(sent, nextWord, len)) isBreak = true;
-            }
-            else if (punct == "!" || punct == "?" || (punct == ":" && len > 6)) {
-                isBreak = true;
-            }
-
-            // Append appropriately
-            if (isBreak) {
-                appendSentence(sentences, current, sent, punct, after);
-                len = 0;
-            } else {
-                appendContinuation(current, sent, punct, after);
-            }
-
-            // Move search cursor forward
-            begin = text.cbegin() + newEnd;
+            i++;
         }
-
-        // Capture any trailing text
-        size_t consumed = begin - text.cbegin();
-        if (consumed < text.size()) {
-            current += text.substr(consumed);
+        
+        // Don't forget the last sentence if it doesn't end with punctuation
+        if (!current_sentence.empty()) {
+            size_t first = current_sentence.find_first_not_of(" \t\n\r");
+            size_t last = current_sentence.find_last_not_of(" \t\n\r");
+            if (first != std::string::npos) {
+                sentences.push_back(current_sentence.substr(first, last - first + 1));
+            }
         }
-        if (!current.empty()) {
-            sentences.push_back(cleanOutput(current));
-        }
-
+        
         return sentences;
     }
-
+    
 private:
-    SimpleSentenceSplitter() = default;
-    SimpleSentenceSplitter(const SimpleSentenceSplitter&) = delete;
-    SimpleSentenceSplitter& operator=(const SimpleSentenceSplitter&) = delete;
-
-    // Regex factories (thread‐safe init)
-    static const std::regex& regexCarriageReturn() {
-        static const std::regex r{"[\\n\\r]+"};
-        return r;
-    }
-    static const std::regex& regexForgottenSpace() {
-        static const std::regex r{"(.)([\\.!?])([^0-9\\s\\.\"'`\\)\\}\\]])"};
-        return r;
-    }
-    static const std::regex& regexSentence() {
-        static const std::regex r{
-            R"((['\"`]*[\(\{\[]?[A-Za-z0-9]+.*?)([\.!\?:])"
-            R"(?:(?=([\(\[\{\"'`<>]*[ \x19]+)[\(\[\{\"'`\)\}\] ]*([A-Z0-9][a-z]*))"
-            R"(|(?=([\(\)\"'`<\}\] \x19]+)\s)))"
+    bool is_common_abbreviation(const std::string& word) const {
+        // Common abbreviations that don't end sentences
+        static const std::vector<std::string> abbreviations = {
+            "Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr",
+            "Inc", "Corp", "Ltd", "Co", "vs", "etc", "al",
+            "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec",
+            "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+            "St", "Ave", "Rd", "Blvd", "Dept", "Univ", "Prof",
+            "Ph", "M", "B", "D",  // Ph.D., M.D., B.S., etc.
+            "U", "S", "E", "N", "W",  // U.S., E.U., N.Y., etc.
+            "i", "e", "g",  // i.e., e.g.
         };
-        return r;
-    }
-    static const std::regex& regexWhitespace() {
-        static const std::regex r{"\\s+"};
-        return r;
-    }
-    static const std::regex& regexLastWord() {
-        static const std::regex r{"\\b([\\w0-9\\.']+)$"};
-        return r;
-    }
-
-    // Helpers
-    static size_t countWords(const std::string& s) {
-        return std::distance(
-            std::sregex_token_iterator(s.begin(), s.end(), regexWhitespace(), -1),
-            std::sregex_token_iterator{}
-        );
-    }
-
-    static std::string extractLastWord(const std::string& s) {
-        std::smatch m2;
-        if (std::regex_search(s, m2, regexLastWord())) return m2[1].str();
-        return "";
-    }
-
-    static bool isAbbreviation(const std::string& sentence,
-                               const std::string& nextWord,
-                               int wordCount) 
-    {
-        std::string last = extractLastWord(sentence);
-        // Check vowel presence, letter patterns, single-letter
-        static const std::regex hasVowel{"[AEIOUaeiou]"};
-        static const std::regex hasLower{"[a-z]"};
-        static const std::regex hasY{"y"};
-        static const std::regex letterDot{"([A-Za-z]\\.)+"};
-
-        bool cond1 = !std::regex_search(last, hasVowel)
-                     && std::regex_search(last, hasLower)
-                     && !std::regex_search(last, hasY);
-        bool cond2 = std::regex_match(last, letterDot);
-        bool cond3 = (last.size()==1 && std::isalpha(last[0]) && last!="I");
-        bool cond4 = EnglishAbbreviations::contains(toLower(last));
-
-        if (cond1||cond2||cond3||cond4) {
-            if (EnglishDictionary::instance().count(nextWord) && wordCount>6) {
-                return false; // actually a sentence break
-            }
-            return true; // abbreviation = no break
+        
+        for (const auto& abbr : abbreviations) {
+            if (word == abbr) return true;
         }
+        
+        // Check for single capital letters (like in "U.S.A.")
+        if (word.length() == 1 && std::isupper(word[0])) {
+            return true;
+        }
+        
+        // Check for numbers ending in period (like "1." in lists)
+        if (!word.empty() && std::isdigit(word[0])) {
+            return true;
+        }
+        
         return false;
-    }
-
-    static std::string toLower(const std::string& s) {
-        std::string out; out.reserve(s.size());
-        for (char c: s) out.push_back(std::tolower((unsigned char)c));
-        return out;
-    }
-
-    static void appendSentence(std::vector<std::string>& v,
-                               std::string& curr,
-                               const std::string& sent,
-                               const std::string& punct,
-                               const std::string& after)
-    {
-        curr += sent + punct + after;
-        v.push_back(cleanOutput(curr));
-        curr.clear();
-    }
-
-    static void appendContinuation(std::string& curr,
-                                   const std::string& sent,
-                                   const std::string& punct,
-                                   const std::string& after)
-    {
-        curr += sent + punct;
-        if (after.find('\x19')==std::string::npos) curr.push_back(' ');
-    }
-
-    static std::string cleanOutput(const std::string& s) {
-        // Remove markers and trim whitespace
-        std::string tmp;
-        tmp.reserve(s.size());
-        for (char c: s) if (c!='\x19') tmp.push_back(c);
-        // Trim
-        auto ws = " \t\n\r";
-        auto start = tmp.find_first_not_of(ws);
-        if (start==std::string::npos) return "";
-        auto end = tmp.find_last_not_of(ws);
-        return tmp.substr(start, end-start+1);
     }
 };
 
+#endif // SIMPLE_SENTENCE_SPLITTER_H

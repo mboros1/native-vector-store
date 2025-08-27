@@ -1,0 +1,19 @@
+xxHash Fast Hash Algorithm
+===========================
+
+Source: https://github.com/Cyan4973/xxHash
+Commit: bab7e27f4c6ae4efbb83dd99ae8a554423571635
+Date downloaded: 2025-08-27
+Branch: dev
+
+Files included:
+- xxhash.h (single-header implementation)
+
+License: BSD 2-Clause License
+
+Note: xxHash is an extremely fast non-cryptographic hash algorithm, working at
+RAM speed limits. We're using the single-header implementation which includes
+all necessary code inline.
+
+Usage: Define XXH_IMPLEMENTATION in exactly one .c/.cpp file before including
+the header to get the implementation.
