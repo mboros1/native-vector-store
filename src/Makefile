@@ -97,6 +97,15 @@ clean:
 test: $(TEST_TARGET)
 	./$(TEST_TARGET) test-bundle
 
+test-bundle: $(BUNDLE_TEST_TARGET)
+	@echo "Usage: make test-bundle BUNDLE_DIR=<path-to-bundle>"
+	@echo "Example: make test-bundle BUNDLE_DIR=./test-bundle"
+	@if [ -n "$(BUNDLE_DIR)" ]; then \
+		./$(BUNDLE_TEST_TARGET) $(BUNDLE_DIR); \
+	else \
+		echo "No BUNDLE_DIR specified. Use BUNDLE_DIR=<path> to test a bundle."; \
+	fi
+
 # Force rebuild (useful for CI)
 rebuild: clean all
 

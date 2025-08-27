@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <cmath>
 #include <unordered_map>
 #include <cassert>
 #include <simdjson.h>
