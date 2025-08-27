@@ -7,18 +7,24 @@ build/
 .DS_Store
 test/benchmark_data/
 test_data/
+.VSCodeCounter/
 
 # C++ build artifacts
-*.o
-src/test_vector_store
-src/test_main
-src/stress_test
-src/test_stress
-src/test_bm25
-src/test_hybrid_search
+src/bin/
+src/obj/
+
+# Test bundles and temporary directories
+src/test-bundle/
+src/stress_test_bundle/
+src/test_*_bundle/
+test/stress_data/
+
+# Library files
 *.a
 *.so
 *.dylib
+
+# Debug symbols
 *.dSYM/
 **/*.dSYM/
 
@@ -38,3 +44,4 @@ config.status
 
 # JSDoc generated documentation
 docs/
+

@@ -10,7 +10,6 @@ public:
     /// Returns the singleton dictionary (built once, thread-safe in C++11+)
     static const std::unordered_set<std::string>& instance() {
         static const std::unordered_set<std::string> dict = []{
-            // Paste your word list (one word per line) between the delimiters below:
             static constexpr const char* blob = R"DICT(
 10th
 1st

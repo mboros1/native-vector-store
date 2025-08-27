@@ -12,7 +12,6 @@ public:
     /// Returns the singleton abbreviation set.
     static const std::unordered_set<std::string>& instance() {
         static const std::unordered_set<std::string> dict = []{
-            // Paste your newline-separated abbreviations here:
             static constexpr const char* blob = R"ABBR(
 acc
 ad

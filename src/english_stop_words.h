@@ -12,7 +12,6 @@ public:
     /// Returns the singleton stop-word set.
     static const std::unordered_set<std::string>& instance() {
         static const std::unordered_set<std::string> dict = []{
-            // Paste your newline-separated stop-words list between the delimiters:
             static constexpr const char* blob = R"STOPWORDS(
 *
 •
