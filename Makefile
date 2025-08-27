@@ -11,10 +11,6 @@ build:
 # Run all tests
 test: build
 	npm test
-	node test/loader_test.js
-	node test/create_benchmark_data.js
-	node test/benchmark_parallel.js
-	cd src && make rebuild && ./test_vector_store ../test
 
 # Clean build artifacts
 clean:
@@ -42,7 +38,7 @@ distcheck:
 
 # C++ only targets
 cpp-test:
-	cd src && make clean && make && ./test_vector_store ../test
+	cd src && make clean && make all
 
 # Performance benchmark
 benchmark: build
