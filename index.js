@@ -103,31 +103,102 @@ class VectorStoreWrapper {
   addDocument(doc) {}
 
   /**
-   * Search for the k most similar documents to a query embedding.
-   * Uses SIMD-optimized cosine similarity for fast performance.
+   * Search for the k most similar documents. Uses hybrid search if queryText is provided,
+   * otherwise performs vector-only search.
    * 
    * @param {Float32Array} query - Query embedding vector (must match store dimensions)
    * @param {number} k - Number of results to return (top-k nearest neighbors)
-   * @param {boolean} [normalizeQuery=true] - Whether to L2-normalize the query vector
-   * @returns {SearchResult[]} Array of search results sorted by similarity (highest first)
+   * @param {string} [queryText] - Optional text query for hybrid search (BM25 + vector)
+   * @returns {SearchResult[]} Array of search results sorted by score (highest first)
    * @throws {Error} If store is not finalized or query dimensions don't match
    * 
    * @example
-   * // Basic search
+   * // Vector-only search
    * const queryEmbedding = new Float32Array(1536);
    * const results = store.search(queryEmbedding, 10);
    * 
    * @example
-   * // Search with pre-normalized query
-   * const normalized = normalizeVector(queryEmbedding);
-   * const results = store.search(normalized, 5, false);
+   * // Hybrid search (combines vector similarity with BM25 text search)
+   * const results = store.search(queryEmbedding, 10, "machine learning algorithms");
    * 
    * @example
    * // Filter results by score threshold
-   * const results = store.search(queryEmbedding, 20)
+   * const results = store.search(queryEmbedding, 20, "neural networks")
    *   .filter(r => r.score > 0.7);
    */
-  search(query, k, normalizeQuery = true) {}
+  search(query, k, queryText) {}
+  
+  /**
+   * Pure vector similarity search using SIMD-optimized cosine similarity.
+   * 
+   * @param {Float32Array} query - Query embedding vector (must match store dimensions)
+   * @param {number} k - Number of results to return
+   * @param {boolean} [normalizeQuery=true] - Whether to L2-normalize the query vector
+   * @returns {SearchResult[]} Array of search results sorted by similarity
+   * @throws {Error} If store is not finalized or query dimensions don't match
+   * 
+   * @example
+   * const results = store.searchVector(queryEmbedding, 10);
+   */
+  searchVector(query, k, normalizeQuery = true) {}
+  
+  /**
+   * Pure BM25 text search for lexical matching.
+   * 
+   * @param {string|string[]} queryText - Query text or array of pre-tokenized terms
+   * @param {number} k - Number of results to return
+   * @returns {SearchResult[]} Array of search results sorted by BM25 score
+   * @throws {Error} If store is not finalized
+   * 
+   * @example
+   * // Search with text string
+   * const results = store.searchBM25("machine learning algorithms", 10);
+   * 
+   * @example
+   * // Search with pre-tokenized terms
+   * const results = store.searchBM25(["machine", "learning"], 10);
+   */
+  searchBM25(queryText, k) {}
+  
+  /**
+   * Hybrid search combining vector similarity and BM25 text search.
+   * Uses Reciprocal Rank Fusion (RRF) to combine scores.
+   * 
+   * @param {Float32Array} query - Query embedding vector
+   * @param {string} queryText - Query text for BM25 component
+   * @param {number} k - Number of results to return
+   * @param {number} [vectorWeight=0.5] - Weight for vector similarity (0-1)
+   * @param {number} [bm25Weight=0.5] - Weight for BM25 score (0-1)
+   * @returns {SearchResult[]} Array of search results sorted by combined score
+   * @throws {Error} If store is not finalized or weights don't sum to 1
+   * 
+   * @example
+   * // Equal weighting (default)
+   * const results = store.searchHybrid(embedding, "neural networks", 10);
+   * 
+   * @example
+   * // Favor text matching (70% BM25, 30% vector)
+   * const results = store.searchHybrid(embedding, "deep learning", 10, 0.3, 0.7);
+   */
+  searchHybrid(query, queryText, k, vectorWeight = 0.5, bm25Weight = 0.5) {}
+  
+  /**
+   * Set BM25 algorithm parameters for text search.
+   * 
+   * @param {number} k1 - Term frequency saturation parameter (default: 1.2, range: 0-3)
+   * @param {number} b - Document length normalization (default: 0.75, range: 0-1)
+   * @param {number} [delta=1.0] - Smoothing parameter for term frequency
+   * @returns {void}
+   * 
+   * @example
+   * // Reduce length normalization for short documents
+   * store.setBM25Parameters(1.2, 0.5);
+   * 
+   * @example
+   * // Increase term frequency saturation for keyword-heavy queries
+   * store.setBM25Parameters(2.0, 0.75);
+   */
+  setBM25Parameters(k1, b, delta = 1.0) {}
 
   /**
    * Finalize the store: normalize all embeddings and switch to serving mode.
