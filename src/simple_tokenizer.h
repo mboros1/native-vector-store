@@ -1,8 +1,9 @@
 #pragma once
 #include <string>
 #include <vector>
-#include <regex>
 #include <unordered_set>
+#include <algorithm>
+#include "ctre-unicode.hpp"
 
 namespace nvs {
 
@@ -17,15 +18,11 @@ public:
 private:
     bool splitContraction_;
 
-    // -- static precompiled regexes --
-    static const std::regex WONT_CONTRACTION;
-    static const std::regex SHANT_CONTRACTION;
-    static const std::regex AINT_CONTRACTION;
-    static const std::vector<std::regex> NOT_CONTRACTIONS;
-    static const std::vector<std::regex> CONTRACTIONS2;
-    static const std::vector<std::regex> CONTRACTIONS3;
-    static const std::vector<std::regex> DELIMITERS;
-    static const std::regex WHITESPACE;
+    // Process contractions
+    std::string process_contractions(std::string text) const;
+    
+    // Process delimiters  
+    std::string process_delimiters(std::string text) const;
 
     // very minimal abbreviation set; expand as needed
     static bool isAbbreviation(const std::string& tok);

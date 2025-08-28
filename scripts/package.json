@@ -1,0 +1,17 @@
+{
+  "name": "native-vector-store-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Utility scripts for native-vector-store project",
+  "scripts": {
+    "code-review": "node ai-code-review.js",
+    "view-bundle": "node view_bundle.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "openai": "^4.104.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

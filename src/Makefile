@@ -45,6 +45,7 @@ STRESS_TARGET = $(BIN_DIR)/test_stress
 COMP_TARGET = $(BIN_DIR)/test_comprehensive
 SPLITTER_TEST_TARGET = $(BIN_DIR)/test_sentence_splitter
 UNIT_TEST_TARGET = $(BIN_DIR)/unit_tests
+TOKENIZER_TEST_TARGET = $(BIN_DIR)/test_tokenizer
 
 # Source files
 PACK_SOURCES = nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
@@ -55,6 +56,7 @@ TEST_SOURCES = test/test_vector_store_v2.cpp vector_store_v2.cpp simple_tokenize
 STRESS_SOURCES = test/test_stress_v2.cpp vector_store_v2.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 COMP_SOURCES = test/test_comprehensive_v2.cpp vector_store_v2.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 SPLITTER_TEST_SOURCES = test/test_sentence_splitter.cpp
+TOKENIZER_TEST_SOURCES = test/test_tokenizer.cpp
 # Object files
 PACK_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(PACK_SOURCES)))
 BUNDLE_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(BUNDLE_TEST_SOURCES)))
@@ -62,6 +64,7 @@ TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(TEST_SOURCES)))
 STRESS_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(STRESS_SOURCES)))
 COMP_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(COMP_SOURCES)))
 SPLITTER_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SPLITTER_TEST_SOURCES)))
+TOKENIZER_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(TOKENIZER_TEST_SOURCES)))
 # Unit test objects need special naming to avoid conflicts
 UNIT_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/test_%.o,$(notdir $(UNIT_TEST_SOURCES)))
 
@@ -90,6 +93,9 @@ $(COMP_TARGET): $(BIN_DIR) $(OBJ_DIR) $(COMP_OBJECTS)
 
 $(SPLITTER_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(SPLITTER_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(SPLITTER_TEST_OBJECTS) -o $(SPLITTER_TEST_TARGET) $(LDFLAGS) $(LIBS)
+
+$(TOKENIZER_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(TOKENIZER_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $(TOKENIZER_TEST_OBJECTS) -o $(TOKENIZER_TEST_TARGET) $(LDFLAGS) $(LIBS)
 
 # Unit test target - compiles with tests enabled
 $(UNIT_TEST_TARGET): CXXFLAGS += -DNVS_ENABLE_INLINE_TESTS
@@ -140,6 +146,10 @@ test-bundle: $(BUNDLE_TEST_TARGET)
 
 test-splitter: $(SPLITTER_TEST_TARGET)
 	./$(SPLITTER_TEST_TARGET)
+
+test-tokenizer: $(TOKENIZER_TEST_TARGET)
+	@echo "Running tokenizer unit tests..."
+	./$(TOKENIZER_TEST_TARGET)
 
 # Force rebuild (useful for CI)
 rebuild: clean all

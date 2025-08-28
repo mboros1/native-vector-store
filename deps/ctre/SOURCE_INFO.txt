@@ -9,6 +9,8 @@ Path: /single-header/
 
 Files included:
 - ctre.hpp (single-header implementation)
+- ctre-unicode.hpp (Unicode support header, downloaded 2025-08-28)
+- unicode-db.hpp (Unicode database header, downloaded 2025-08-28)
 
 License: Apache License 2.0
 
