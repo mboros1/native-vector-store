@@ -120,7 +120,7 @@ public:
         size_t k = info[1].As<Napi::Number>().Uint32Value();
         
         // Tokenize query
-        SimpleTokenizer tokenizer;
+        nvs::SimpleTokenizer tokenizer;
         auto queryTerms = tokenizer.split(query);
         
         auto results = store_->search_bm25(queryTerms, k);
@@ -169,7 +169,7 @@ public:
         float* query = queryArray.Data();
         
         // Tokenize text query
-        SimpleTokenizer tokenizer;
+        nvs::SimpleTokenizer tokenizer;
         auto queryTerms = tokenizer.split(textQuery);
         
         auto results = store_->search_hybrid(query, queryTerms, k, vectorWeight);
