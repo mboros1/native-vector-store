@@ -8,6 +8,8 @@
         "src",
         "deps/simdjson",
         "deps/atomic_queue",
+        "deps/ctre",
+        "deps/doctest",
         "deps"
       ],
       "dependencies": ["<!(node -p \"require('node-addon-api').gyp\")"],

@@ -549,7 +549,7 @@ int main(int argc, char* argv[]) {
 
 // Unit tests - only compiled when tests are enabled
 #ifdef NVS_ENABLE_INLINE_TESTS
-#include "../deps/doctest.h"
+#include "doctest/doctest.h"
 #include <map>
 #include <cstddef>  // for offsetof
 #include <cstring>  // for memcpy

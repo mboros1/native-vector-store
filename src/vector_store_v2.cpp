@@ -600,7 +600,7 @@ VectorStoreV2::decode_posting_list(size_t term_id) const {
 
 // Unit tests - only compiled when tests are enabled
 #ifdef NVS_ENABLE_INLINE_TESTS
-#include "../deps/doctest.h"
+#include "doctest/doctest.h"
 #include <random>
 #include <cmath>
 #include <filesystem>

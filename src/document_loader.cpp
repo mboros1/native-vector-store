@@ -334,7 +334,7 @@ void DocumentLoader::processDocumentText(Document& doc) {
 
 // Unit tests - only compiled when tests are enabled
 #ifdef NVS_ENABLE_INLINE_TESTS
-#include "../deps/doctest.h"
+#include "doctest/doctest.h"
 #include <sstream>
 #include <fstream>
 #include <filesystem>

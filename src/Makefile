@@ -21,7 +21,7 @@ CFLAGS = -std=c11 -g -O3 -march=native -fno-omit-frame-pointer
 # OS-specific configuration
 ifeq ($(UNAME_S),Darwin)
     # macOS configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I../deps/ctre -I../deps/ctre -I/opt/homebrew/opt/libomp/include
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I../deps/ctre -I../deps/doctest -I/opt/homebrew/opt/libomp/include
     LDFLAGS = -L/opt/homebrew/opt/libomp/lib
     LIBS = -lomp
     # Add flags for better debugging with lldb
@@ -30,7 +30,7 @@ ifeq ($(UNAME_S),Darwin)
     CXXFLAGS += -Xpreprocessor -fopenmp
 else
     # Linux configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I../deps/ctre
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I../deps/ctre -I../deps/doctest
     LDFLAGS = -L/usr/lib
     LIBS = -lgomp
     # OpenMP flags for Linux
