@@ -70,8 +70,7 @@ void test_bundle_creation_stress(const std::string& test_dir) {
     
     // Load documents using document loader
     auto start = high_resolution_clock::now();
-    DocumentLoader loader;
-    auto result = loader.loadDirectory(test_dir);
+    auto result = nvs::DocumentLoader::loadDirectory(test_dir);
     auto load_time = duration_cast<milliseconds>(high_resolution_clock::now() - start).count();
     
     std::cout << "   Loaded " << result.documents.size() << " documents in " << load_time << "ms\n";

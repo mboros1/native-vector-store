@@ -44,12 +44,6 @@ public:
     // Uses adaptive strategy: mmap for small files, streaming for large files
     static LoadResult loadDirectory(const std::string& path, bool verbose = false);
     
-private:
-    // File loading strategies
-    static bool loadFileMMap(const std::string& path, std::vector<Document>& documents, LoadResult& result);
-    static bool loadFileStream(const std::string& path, std::vector<Document>& documents, LoadResult& result);
-    static bool parseDocument(const std::string& json_content, std::vector<Document>& documents, LoadResult& result);
-    
     // Helper to tokenize and build term frequencies
     static void processDocumentText(Document& doc);
 };

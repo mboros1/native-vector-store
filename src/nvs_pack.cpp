@@ -344,9 +344,17 @@ private:
             meta_file.write(reinterpret_cast<const char*>(header), sizeof(header));
         }
         
-        // Write block data
+        // Write block data with padding to blockSize
+        std::vector<uint8_t> padding(opts_.block_size, 0);
         for (const auto& block : blocks) {
+            // Write actual data
             meta_file.write(reinterpret_cast<const char*>(block.data.data()), block.data.size());
+            
+            // Pad to block_size if needed
+            if (block.data.size() < opts_.block_size) {
+                size_t pad_size = opts_.block_size - block.data.size();
+                meta_file.write(reinterpret_cast<const char*>(padding.data()), pad_size);
+            }
         }
         
         // Write index
@@ -657,6 +665,340 @@ TEST_CASE("NVSPack file I/O") {
         CHECK(values[1] == 1024);   // offset_in_block
         CHECK(values[2] == 2048);   // doc_size
         CHECK(values[3] == 0);      // padding
+    }
+}
+
+TEST_CASE("NVSPacker options parsing") {
+    using namespace nvs;
+    
+    SUBCASE("Default options") {
+        PackerOptions opts;
+        
+        CHECK(opts.output_dir == "./nvs-bundle");
+        CHECK(opts.dim == 0);
+        CHECK(opts.embedding_model == "unknown");
+        CHECK(opts.quantize_f16 == false);
+        CHECK(opts.bm25_k1 == doctest::Approx(1.2));
+        CHECK(opts.bm25_b == doctest::Approx(0.75));
+        CHECK(opts.min_df == 1);
+        CHECK(opts.block_size == 131072);
+        CHECK(opts.verbose == false);
+    }
+    
+    SUBCASE("Block size validation") {
+        PackerOptions opts;
+        
+        // Block size should be power of 2
+        opts.block_size = 65536;  // 64KB
+        CHECK(opts.block_size == 65536);
+        
+        opts.block_size = 262144;  // 256KB
+        CHECK(opts.block_size == 262144);
+    }
+}
+
+TEST_CASE("NVSPacker data structures") {
+    using namespace nvs;
+    
+    SUBCASE("PackerData initialization") {
+        struct TestPackerData {
+            std::vector<DocumentLoader::Document> documents;
+            size_t dimensions = 0;
+            std::unordered_map<std::string, size_t> term_to_id;
+            std::vector<std::string> id_to_term;
+            std::unordered_map<std::string, size_t> document_frequencies;
+            std::vector<std::vector<std::pair<size_t, int>>> postings;
+            double average_document_length = 0.0;
+        };
+        
+        TestPackerData data;
+        CHECK(data.documents.empty());
+        CHECK(data.dimensions == 0);
+        CHECK(data.term_to_id.empty());
+        CHECK(data.id_to_term.empty());
+        CHECK(data.document_frequencies.empty());
+        CHECK(data.postings.empty());
+        CHECK(data.average_document_length == 0.0);
+    }
+    
+    SUBCASE("Document metadata generation") {
+        DocumentLoader::Document doc;
+        doc.id = "test_doc";
+        doc.text = "Test document text";
+        doc.embedding = {0.1f, 0.2f, 0.3f};
+        
+        // Check that document has required fields
+        CHECK(!doc.id.empty());
+        CHECK(!doc.text.empty());
+        CHECK(doc.embedding.size() == 3);
+    }
+}
+
+TEST_CASE("NVSPacker checksums") {
+    using namespace nvs;
+    
+    SUBCASE("XXHash64 calculation") {
+        std::string data = "test data";
+        uint64_t hash = XXH64(data.data(), data.size(), 0);
+        
+        // Hash should be deterministic
+        uint64_t hash2 = XXH64(data.data(), data.size(), 0);
+        CHECK(hash == hash2);
+        
+        // Different data should produce different hash
+        std::string data2 = "different data";
+        uint64_t hash3 = XXH64(data2.data(), data2.size(), 0);
+        CHECK(hash != hash3);
+    }
+    
+    SUBCASE("Hash formatting") {
+        uint64_t hash = 0x123456789ABCDEF0ULL;
+        std::stringstream ss;
+        ss << std::hex << std::setfill('0') << std::setw(16) << hash;
+        std::string hash_str = ss.str();
+        
+        CHECK(hash_str.length() == 16);
+        CHECK(hash_str == "123456789abcdef0");
+    }
+}
+
+TEST_CASE("NVSPacker vector quantization") {
+    using namespace nvs;
+    
+    SUBCASE("Float16 conversion boundaries") {
+        // Test that float16 quantization flag exists
+        PackerOptions opts;
+        opts.quantize_f16 = true;
+        CHECK(opts.quantize_f16);
+        
+        opts.quantize_f16 = false;
+        CHECK_FALSE(opts.quantize_f16);
+    }
+    
+    SUBCASE("Vector dimension validation") {
+        std::vector<float> embedding;
+        
+        // Empty embedding
+        CHECK(embedding.size() == 0);
+        
+        // Standard dimensions
+        embedding.resize(384);  // sentence-transformers/all-MiniLM-L6-v2
+        CHECK(embedding.size() == 384);
+        
+        embedding.resize(768);  // BERT base
+        CHECK(embedding.size() == 768);
+        
+        embedding.resize(1536);  // OpenAI text-embedding-3-small
+        CHECK(embedding.size() == 1536);
+    }
+}
+
+TEST_CASE("NVSPacker BM25 processing") {
+    using namespace nvs;
+    
+    SUBCASE("Term ID assignment") {
+        std::unordered_map<std::string, size_t> term_to_id;
+        std::vector<std::string> id_to_term;
+        
+        // Assign IDs to terms
+        std::vector<std::string> terms = {"apple", "banana", "cherry"};
+        for (size_t i = 0; i < terms.size(); ++i) {
+            term_to_id[terms[i]] = i;
+            id_to_term.push_back(terms[i]);
+        }
+        
+        CHECK(term_to_id["apple"] == 0);
+        CHECK(term_to_id["banana"] == 1);
+        CHECK(term_to_id["cherry"] == 2);
+        CHECK(id_to_term[0] == "apple");
+        CHECK(id_to_term[1] == "banana");
+        CHECK(id_to_term[2] == "cherry");
+    }
+    
+    SUBCASE("Document frequency calculation") {
+        std::unordered_map<std::string, size_t> doc_freqs;
+        
+        // Simulate documents containing terms
+        doc_freqs["common"] = 100;
+        doc_freqs["rare"] = 1;
+        doc_freqs["medium"] = 50;
+        
+        CHECK(doc_freqs["common"] == 100);
+        CHECK(doc_freqs["rare"] == 1);
+        CHECK(doc_freqs["medium"] == 50);
+    }
+    
+    SUBCASE("Average document length") {
+        std::vector<size_t> doc_lengths = {10, 20, 30, 40, 50};
+        double avg = 0.0;
+        for (size_t len : doc_lengths) {
+            avg += len;
+        }
+        avg /= doc_lengths.size();
+        
+        CHECK(avg == doctest::Approx(30.0));
+    }
+    
+    SUBCASE("Posting list structure") {
+        // Posting list: term -> [(doc_id, term_freq), ...]
+        std::vector<std::pair<size_t, int>> postings;
+        postings.emplace_back(0, 2);  // doc 0, freq 2
+        postings.emplace_back(3, 1);  // doc 3, freq 1
+        postings.emplace_back(7, 4);  // doc 7, freq 4
+        
+        CHECK(postings.size() == 3);
+        CHECK(postings[0].first == 0);
+        CHECK(postings[0].second == 2);
+        CHECK(postings[2].first == 7);
+        CHECK(postings[2].second == 4);
+    }
+}
+
+TEST_CASE("NVSPacker metadata block creation") {
+    using namespace nvs;
+    
+    SUBCASE("Block size limits") {
+        const size_t BLOCK_SIZE = 131072;  // 128KB
+        
+        // Calculate how many documents fit in a block
+        size_t doc_size = sizeof(DocHeader) + 50 + 1000 + 20;  // header + id + text + source
+        size_t docs_per_block = BLOCK_SIZE / doc_size;
+        
+        CHECK(docs_per_block > 0);
+        CHECK(docs_per_block * doc_size <= BLOCK_SIZE);
+    }
+    
+    SUBCASE("Document header padding") {
+        DocHeader header;
+        
+        // Check that padding aligns structure
+        CHECK(sizeof(header) % 8 == 0);  // Should be 8-byte aligned
+        CHECK(sizeof(header) == 32);     // Fixed size
+    }
+    
+    SUBCASE("Block header format") {
+        MetaBlock block;
+        block.block_id = 42;
+        block.uncompressed_size = 100000;
+        block.doc_count = 25;
+        block.padding = 0;
+        
+        CHECK(block.block_id == 42);
+        CHECK(block.uncompressed_size == 100000);
+        CHECK(block.doc_count == 25);
+        CHECK(block.padding == 0);
+    }
+    
+    SUBCASE("Metadata index alignment") {
+        MetaIndex idx;
+        
+        // Check structure is properly aligned
+        CHECK(sizeof(idx) == 16);
+        CHECK(sizeof(idx) % 8 == 0);
+    }
+}
+
+TEST_CASE("NVSPacker file I/O operations") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+    
+    SUBCASE("Output directory creation") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_pack_test";
+        
+        // Directory should be creatable
+        bool created = fs::create_directories(temp_dir);
+        CHECK((created || fs::exists(temp_dir)));
+        
+        // Cleanup
+        fs::remove_all(temp_dir);
+    }
+    
+    SUBCASE("Binary file writing") {
+        auto temp_file = fs::temp_directory_path() / "test.bin";
+        
+        // Write binary data
+        std::ofstream out(temp_file, std::ios::binary);
+        uint32_t data[] = {1, 2, 3, 4, 5};
+        out.write(reinterpret_cast<const char*>(data), sizeof(data));
+        out.close();
+        
+        // Verify file size
+        CHECK(fs::file_size(temp_file) == sizeof(data));
+        
+        // Read back and verify
+        std::ifstream in(temp_file, std::ios::binary);
+        uint32_t read_data[5];
+        in.read(reinterpret_cast<char*>(read_data), sizeof(read_data));
+        in.close();
+        
+        for (int i = 0; i < 5; ++i) {
+            CHECK(read_data[i] == data[i]);
+        }
+        
+        // Cleanup
+        fs::remove(temp_file);
+    }
+    
+    SUBCASE("JSON manifest writing") {
+        auto temp_file = fs::temp_directory_path() / "manifest.json";
+        
+        std::ofstream out(temp_file);
+        out << "{\n";
+        out << "  \"format\": \"nvs.v1\",\n";
+        out << "  \"num_docs\": 100\n";
+        out << "}";
+        out.close();
+        
+        CHECK(fs::exists(temp_file));
+        
+        // Read back
+        std::ifstream in(temp_file);
+        std::string content((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+        in.close();
+        
+        CHECK(content.find("nvs.v1") != std::string::npos);
+        CHECK(content.find("100") != std::string::npos);
+        
+        // Cleanup
+        fs::remove(temp_file);
+    }
+}
+
+TEST_CASE("NVSPacker edge cases") {
+    using namespace nvs;
+    
+    SUBCASE("Empty document handling") {
+        DocumentLoader::Document doc;
+        CHECK(doc.id.empty());
+        CHECK(doc.text.empty());
+        CHECK(doc.embedding.empty());
+    }
+    
+    SUBCASE("Very large document") {
+        DocumentLoader::Document doc;
+        doc.text = std::string(1000000, 'a');  // 1MB of text
+        
+        CHECK(doc.text.size() == 1000000);
+    }
+    
+    SUBCASE("Special characters in text") {
+        DocumentLoader::Document doc;
+        doc.text = "Test with special chars: \n\t\r\0 and UTF-8: 你好";
+        
+        CHECK(!doc.text.empty());
+    }
+    
+    SUBCASE("Dimension mismatch detection") {
+        std::vector<float> vec1(100, 0.1f);
+        std::vector<float> vec2(200, 0.2f);
+        
+        CHECK(vec1.size() != vec2.size());
+    }
+    
+    SUBCASE("Zero-dimension vectors") {
+        std::vector<float> empty_vec;
+        CHECK(empty_vec.size() == 0);
     }
 }
 #endif

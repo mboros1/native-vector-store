@@ -597,3 +597,436 @@ VectorStoreV2::decode_posting_list(size_t term_id) const {
 }
 
 } // namespace nvs
+
+// Unit tests - only compiled when tests are enabled
+#ifdef NVS_ENABLE_INLINE_TESTS
+#include "../deps/doctest.h"
+#include <random>
+#include <cmath>
+#include <filesystem>
+
+TEST_CASE("VectorStoreV2 MMapFile") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+    
+    SUBCASE("Default construction") {
+        VectorStoreV2::MMapFile mmap;
+        CHECK(mmap.data() == nullptr);
+        CHECK(mmap.size() == 0);
+        CHECK_FALSE(mmap.is_open());
+    }
+    
+    SUBCASE("Open non-existent file") {
+        VectorStoreV2::MMapFile mmap;
+        bool result = mmap.open("/non/existent/file.bin");
+        CHECK_FALSE(result);
+        CHECK_FALSE(mmap.is_open());
+    }
+    
+    SUBCASE("Open and close file") {
+        // Create a temporary file
+        auto temp_dir = fs::temp_directory_path();
+        auto temp_file = temp_dir / "test_mmap.bin";
+        
+        std::ofstream out(temp_file, std::ios::binary);
+        std::string data = "Hello, MMap!";
+        out.write(data.c_str(), data.size());
+        out.close();
+        
+        VectorStoreV2::MMapFile mmap;
+        bool result = mmap.open(temp_file.string());
+        
+        CHECK(result);
+        CHECK(mmap.is_open());
+        CHECK(mmap.size() == data.size());
+        CHECK(mmap.data() != nullptr);
+        
+        // Verify content
+        std::string read_data(mmap.data(), mmap.size());
+        CHECK(read_data == data);
+        
+        // Close and verify
+        mmap.close();
+        CHECK_FALSE(mmap.is_open());
+        CHECK(mmap.data() == nullptr);
+        CHECK(mmap.size() == 0);
+        
+        // Cleanup
+        fs::remove(temp_file);
+    }
+    
+    SUBCASE("Move semantics") {
+        auto temp_dir = fs::temp_directory_path();
+        auto temp_file = temp_dir / "test_move.bin";
+        
+        std::ofstream out(temp_file, std::ios::binary);
+        out << "test data";
+        out.close();
+        
+        VectorStoreV2::MMapFile mmap1;
+        mmap1.open(temp_file.string());
+        size_t original_size = mmap1.size();
+        
+        // Move constructor
+        VectorStoreV2::MMapFile mmap2(std::move(mmap1));
+        CHECK(mmap2.size() == original_size);
+        CHECK(mmap2.is_open());
+        CHECK_FALSE(mmap1.is_open());
+        
+        // Move assignment
+        VectorStoreV2::MMapFile mmap3;
+        mmap3 = std::move(mmap2);
+        CHECK(mmap3.size() == original_size);
+        CHECK(mmap3.is_open());
+        CHECK_FALSE(mmap2.is_open());
+        
+        // Cleanup
+        fs::remove(temp_file);
+    }
+}
+
+TEST_CASE("VectorStoreV2 similarity computation") {
+    using namespace nvs;
+    
+    SUBCASE("Dot product calculation") {
+        VectorStoreV2 store;
+        
+        // Simple vectors for testing
+        float vec1[] = {1.0f, 0.0f, 0.0f};
+        float vec2[] = {1.0f, 0.0f, 0.0f};
+        float vec3[] = {0.0f, 1.0f, 0.0f};
+        float vec4[] = {-1.0f, 0.0f, 0.0f};
+        
+        // Set dimension for testing
+        store.dimensions_ = 3;
+        
+        // Same vectors should have similarity 1.0
+        float sim1 = store.compute_similarity(vec1, vec2);
+        CHECK(sim1 == doctest::Approx(1.0f));
+        
+        // Orthogonal vectors should have similarity 0.0
+        float sim2 = store.compute_similarity(vec1, vec3);
+        CHECK(sim2 == doctest::Approx(0.0f));
+        
+        // Opposite vectors should have similarity -1.0
+        float sim3 = store.compute_similarity(vec1, vec4);
+        CHECK(sim3 == doctest::Approx(-1.0f));
+    }
+    
+    SUBCASE("Normalized vectors") {
+        VectorStoreV2 store;
+        store.dimensions_ = 2;
+        
+        // 45-degree angle vectors
+        float vec1[] = {0.707107f, 0.707107f};  // normalized [1, 1]
+        float vec2[] = {1.0f, 0.0f};
+        
+        float sim = store.compute_similarity(vec1, vec2);
+        CHECK(sim == doctest::Approx(0.707107f).epsilon(0.0001));
+    }
+}
+
+TEST_CASE("VectorStoreV2 BM25 scoring") {
+    using namespace nvs;
+    
+    SUBCASE("Basic BM25 score") {
+        VectorStoreV2 store;
+        
+        // Set up test parameters
+        store.num_docs_ = 100;
+        store.bm25_avgdl_ = 50.0;
+        store.bm25_k1_ = 1.2;
+        store.bm25_b_ = 0.75;
+        
+        // Create mock document lengths
+        store.doc_lengths_ = new uint32_t[1]{60};  // Document 0 has 60 tokens
+        
+        // Create query term frequencies
+        std::unordered_map<std::string, int> query_tf;
+        query_tf["test"] = 1;
+        
+        // Mock term statistics
+        store.term_doc_freqs_["test"] = 10;  // Term appears in 10 docs
+        
+        // Calculate BM25 score
+        double score = store.compute_bm25_score(0, query_tf);
+        
+        // Score should be positive for matching terms
+        CHECK(score > 0.0);
+        
+        // Cleanup
+        delete[] store.doc_lengths_;
+        store.doc_lengths_ = nullptr;
+    }
+    
+    SUBCASE("BM25 with no matching terms") {
+        VectorStoreV2 store;
+        
+        store.num_docs_ = 100;
+        store.bm25_avgdl_ = 50.0;
+        store.bm25_k1_ = 1.2;
+        store.bm25_b_ = 0.75;
+        
+        store.doc_lengths_ = new uint32_t[1]{60};
+        
+        // Query with non-existent term
+        std::unordered_map<std::string, int> query_tf;
+        query_tf["nonexistent"] = 1;
+        
+        double score = store.compute_bm25_score(0, query_tf);
+        
+        // Score should be 0 for non-matching terms
+        CHECK(score == 0.0);
+        
+        // Cleanup
+        delete[] store.doc_lengths_;
+        store.doc_lengths_ = nullptr;
+    }
+}
+
+TEST_CASE("VectorStoreV2 bundle loading") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+    
+    // Create a minimal test bundle
+    auto temp_dir = fs::temp_directory_path() / "nvs_test_bundle";
+    fs::create_directories(temp_dir);
+    
+    SUBCASE("Load non-existent bundle") {
+        VectorStoreV2 store;
+        bool result = store.open("/non/existent/bundle");
+        
+        CHECK_FALSE(result);
+        CHECK_FALSE(store.is_open());
+    }
+    
+    SUBCASE("Create and load minimal bundle") {
+        // Create manifest
+        std::ofstream manifest(temp_dir / "manifest.json");
+        manifest << R"({
+            "format": "nvs.v1",
+            "num_docs": 2,
+            "dim": 3,
+            "embedding": {
+                "model": "test",
+                "dtype": "f32"
+            },
+            "bm25": {
+                "avgdl": 10.0,
+                "k1": 1.2,
+                "b": 0.75
+            },
+            "files": {
+                "vectors": {"path": "vectors.f32", "dtype": "f32", "rows": 2, "cols": 3},
+                "doclen": {"path": "doclen.u32", "dtype": "u32", "rows": 2},
+                "lexicon": {"path": "lexicon.bin"},
+                "postings": {"path": "postings.bin"},
+                "terms": {"path": "terms.dict"},
+                "meta_idx": {"path": "meta.idx"},
+                "meta": {"path": "meta.bin"}
+            }
+        })";
+        manifest.close();
+        
+        // Create vectors file (2 vectors of dimension 3)
+        std::ofstream vectors(temp_dir / "vectors.f32", std::ios::binary);
+        float vec_data[] = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+        vectors.write(reinterpret_cast<char*>(vec_data), sizeof(vec_data));
+        vectors.close();
+        
+        // Create doclen file
+        std::ofstream doclen(temp_dir / "doclen.u32", std::ios::binary);
+        uint32_t lengths[] = {10, 12};
+        doclen.write(reinterpret_cast<char*>(lengths), sizeof(lengths));
+        doclen.close();
+        
+        // Create empty lexicon
+        std::ofstream lexicon(temp_dir / "lexicon.bin", std::ios::binary);
+        uint32_t zero = 0;
+        lexicon.write(reinterpret_cast<char*>(&zero), sizeof(zero));
+        lexicon.close();
+        
+        // Create empty postings
+        std::ofstream postings(temp_dir / "postings.bin", std::ios::binary);
+        postings.close();
+        
+        // Create empty terms
+        std::ofstream terms(temp_dir / "terms.dict", std::ios::binary);
+        terms.close();
+        
+        // Create metadata index
+        std::ofstream meta_idx(temp_dir / "meta.idx", std::ios::binary);
+        struct {
+            uint64_t offset;
+            uint32_t size;
+            uint32_t padding;
+        } idx_entries[] = {
+            {0, 10, 0},
+            {10, 12, 0}
+        };
+        meta_idx.write(reinterpret_cast<char*>(idx_entries), sizeof(idx_entries));
+        meta_idx.close();
+        
+        // Create metadata
+        std::ofstream meta(temp_dir / "meta.bin", std::ios::binary);
+        meta << "doc1_meta_doc2_meta_";
+        meta.close();
+        
+        // Try to load the bundle
+        VectorStoreV2 store;
+        bool result = store.open(temp_dir.string());
+        
+        CHECK(result);
+        CHECK(store.is_open());
+        CHECK(store.num_docs() == 2);
+        CHECK(store.dimensions() == 3);
+        
+        store.close();
+        CHECK_FALSE(store.is_open());
+    }
+    
+    // Cleanup
+    fs::remove_all(temp_dir);
+}
+
+TEST_CASE("VectorStoreV2 search functionality") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+    
+    SUBCASE("Search on closed store") {
+        VectorStoreV2 store;
+        float query[] = {1.0f, 0.0f, 0.0f};
+        
+        auto results = store.search(query, 10);
+        
+        CHECK(results.empty());
+    }
+    
+    SUBCASE("Search with invalid k") {
+        VectorStoreV2 store;
+        // Even with closed store, k validation should work
+        float query[] = {1.0f};
+        
+        auto results = store.search(query, 0);
+        CHECK(results.empty());
+    }
+}
+
+TEST_CASE("VectorStoreV2 hybrid search") {
+    using namespace nvs;
+    
+    SUBCASE("Empty query terms") {
+        VectorStoreV2 store;
+        float query_vec[] = {1.0f, 0.0f, 0.0f};
+        std::vector<std::string> query_terms;
+        
+        auto results = store.search_hybrid(query_vec, query_terms, 10, 0.5);
+        
+        // Should fall back to vector-only search
+        CHECK(results.empty());  // Store is closed, so no results
+    }
+    
+    SUBCASE("RRF weight validation") {
+        VectorStoreV2 store;
+        float query_vec[] = {1.0f};
+        std::vector<std::string> terms = {"test"};
+        
+        // Weight should be clamped to [0, 1]
+        auto results1 = store.search_hybrid(query_vec, terms, 10, -0.5);
+        auto results2 = store.search_hybrid(query_vec, terms, 10, 1.5);
+        
+        // Both should complete without crash (even if empty due to closed store)
+        CHECK(results1.empty());
+        CHECK(results2.empty());
+    }
+}
+
+TEST_CASE("VectorStoreV2 document retrieval") {
+    using namespace nvs;
+    
+    SUBCASE("Get document from closed store") {
+        VectorStoreV2 store;
+        VectorStoreV2::SearchResult result;
+        
+        bool success = store.get_document(0, result);
+        
+        CHECK_FALSE(success);
+    }
+    
+    SUBCASE("Get document with out-of-bounds ID") {
+        VectorStoreV2 store;
+        store.num_docs_ = 10;  // Simulate 10 documents
+        
+        VectorStoreV2::SearchResult result;
+        bool success = store.get_document(15, result);
+        
+        CHECK_FALSE(success);
+    }
+}
+
+TEST_CASE("VectorStoreV2 posting list decoding") {
+    using namespace nvs;
+    
+    SUBCASE("Decode empty posting list") {
+        VectorStoreV2 store;
+        store.lexicon_ = new uint32_t[5]{0, 0, 0, 0, 0};  // Empty lexicon entry
+        
+        auto postings = store.decode_posting_list(0);
+        
+        CHECK(postings.empty());
+        
+        delete[] reinterpret_cast<uint32_t*>(store.lexicon_);
+        store.lexicon_ = nullptr;
+    }
+    
+    SUBCASE("Decode delta-encoded postings") {
+        VectorStoreV2 store;
+        
+        // Create mock postings data
+        // Format: [delta1, tf1, delta2, tf2, ...]
+        uint32_t postings_data[] = {
+            0, 2,  // doc 0, term freq 2
+            3, 1,  // doc 3 (0+3), term freq 1
+            2, 3   // doc 5 (3+2), term freq 3
+        };
+        
+        store.postings_ = reinterpret_cast<uint8_t*>(postings_data);
+        
+        // Create lexicon entry pointing to this data
+        // Format: [term_id, doc_freq, postings_offset, postings_size]
+        uint32_t lexicon_entry[] = {0, 3, 0, 0, sizeof(postings_data)};
+        store.lexicon_ = reinterpret_cast<uint8_t*>(lexicon_entry);
+        
+        auto decoded = store.decode_posting_list(0);
+        
+        CHECK(decoded.size() == 3);
+        CHECK(decoded[0].first == 0);
+        CHECK(decoded[0].second == 2);
+        CHECK(decoded[1].first == 3);
+        CHECK(decoded[1].second == 1);
+        CHECK(decoded[2].first == 5);
+        CHECK(decoded[2].second == 3);
+        
+        store.postings_ = nullptr;
+        store.lexicon_ = nullptr;
+    }
+}
+
+TEST_CASE("VectorStoreV2 performance metrics") {
+    using namespace nvs;
+    
+    SUBCASE("Memory usage tracking") {
+        VectorStoreV2 store;
+        
+        // Initially no memory used
+        CHECK(store.memory_usage() == 0);
+        
+        // Simulate loaded data
+        store.vectors_file_.size_ = 1024 * 1024;  // 1MB vectors
+        store.meta_file_.size_ = 512 * 1024;      // 512KB metadata
+        
+        size_t usage = store.memory_usage();
+        CHECK(usage == 1024 * 1024 + 512 * 1024);
+    }
+}
+#endif
