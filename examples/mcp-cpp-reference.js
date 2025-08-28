@@ -8,7 +8,8 @@ const {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } = require('@modelcontextprotocol/sdk/types.js');
-const { VectorStore } = require('../');
+const { VectorStoreV2 } = require('../');
+const { execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -29,7 +30,7 @@ class CppReferenceServer {
 
     this.vectorStore = null;
     this.isInitialized = false;
-    this.docsPath = null;
+    this.bundlePath = null;
 
     this.setupToolHandlers();
     
@@ -40,38 +41,69 @@ class CppReferenceServer {
   async initialize() {
     console.error('🚀 Initializing C++ Reference MCP Server...');
     
-    // Try to find C++ docs in several locations
-    const possiblePaths = [
-      path.join(__dirname, '../cpp_std_embedded'),
-      path.join(process.cwd(), 'cpp_std_embedded'),
-      process.env.CPP_DOCS_PATH
+    // Try to find C++ docs bundle in several locations
+    const possibleBundlePaths = [
+      path.join(__dirname, '../cpp_std_bundle'),
+      path.join(process.cwd(), 'cpp_std_bundle'),
+      process.env.CPP_BUNDLE_PATH
     ].filter(Boolean);
 
-    for (const docPath of possiblePaths) {
-      if (fs.existsSync(docPath)) {
-        this.docsPath = docPath;
+    for (const bundlePath of possibleBundlePaths) {
+      if (fs.existsSync(bundlePath)) {
+        this.bundlePath = bundlePath;
         break;
       }
     }
 
-    if (!this.docsPath) {
-      console.error('❌ C++ documentation not found. Please set CPP_DOCS_PATH environment variable or run:');
-      console.error('   node scripts/generate_embeddings.js cpp_std_embeddings cpp_std_embedded');
-      return;
+    // If no bundle exists, check for source docs and create bundle
+    if (!this.bundlePath) {
+      const possibleDocPaths = [
+        path.join(__dirname, '../cpp_std_embedded'),
+        path.join(process.cwd(), 'cpp_std_embedded'),
+        process.env.CPP_DOCS_PATH
+      ].filter(Boolean);
+
+      let docsPath = null;
+      for (const docPath of possibleDocPaths) {
+        if (fs.existsSync(docPath)) {
+          docsPath = docPath;
+          break;
+        }
+      }
+
+      if (!docsPath) {
+        console.error('❌ C++ documentation not found. Please set CPP_DOCS_PATH environment variable or run:');
+        console.error('   node scripts/generate_embeddings.js cpp_std_embeddings cpp_std_embedded');
+        return;
+      }
+
+      // Create bundle from embedded docs
+      console.error(`📦 Creating bundle from ${docsPath}...`);
+      this.bundlePath = path.join(path.dirname(docsPath), 'cpp_std_bundle');
+      try {
+        execSync(`./bin/nvs-pack ${docsPath} ${this.bundlePath}`, {
+          cwd: path.join(__dirname, '../src'),
+          stdio: 'inherit'
+        });
+      } catch (err) {
+        console.error('❌ Failed to create bundle:', err.message);
+        return;
+      }
     }
 
-    console.error(`📂 Loading C++ docs from: ${this.docsPath}`);
+    console.error(`📂 Loading C++ bundle from: ${this.bundlePath}`);
     
-    // Initialize vector store with OpenAI embedding dimensions
-    this.vectorStore = new VectorStore(1536);
-    
-    // Load documents
-    const start = Date.now();
-    this.vectorStore.loadDir(this.docsPath);
-    const loadTime = Date.now() - start;
-    
-    console.error(`✅ Loaded ${this.vectorStore.size()} documents in ${loadTime}ms`);
-    console.error(`✅ Vector store finalized: ${this.vectorStore.isFinalized()}`);
+    // Initialize vector store with bundle
+    try {
+      this.vectorStore = new VectorStoreV2(this.bundlePath);
+      const start = Date.now();
+      const loadTime = Date.now() - start;
+      
+      console.error(`✅ Loaded ${this.vectorStore.size()} documents in ${loadTime}ms`);
+    } catch (err) {
+      console.error('❌ Failed to load bundle:', err.message);
+      return;
+    }
     
     this.isInitialized = true;
   }
@@ -146,7 +178,7 @@ class CppReferenceServer {
       
       if (uri === 'cpp://status') {
         const status = this.isInitialized
-          ? `C++ Reference loaded successfully\nDocuments: ${this.vectorStore.size()}\nPath: ${this.docsPath}`
+          ? `C++ Reference loaded successfully\nDocuments: ${this.vectorStore.size()}\nBundle: ${this.bundlePath}`
           : 'C++ Reference not initialized';
         
         return {

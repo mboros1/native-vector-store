@@ -21,7 +21,7 @@ CFLAGS = -std=c11 -g -O3 -march=native -fno-omit-frame-pointer
 # OS-specific configuration
 ifeq ($(UNAME_S),Darwin)
     # macOS configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I/opt/homebrew/opt/libomp/include
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I../deps/ctre -I../deps/ctre -I/opt/homebrew/opt/libomp/include
     LDFLAGS = -L/opt/homebrew/opt/libomp/lib
     LIBS = -lomp
     # Add flags for better debugging with lldb
@@ -30,7 +30,7 @@ ifeq ($(UNAME_S),Darwin)
     CXXFLAGS += -Xpreprocessor -fopenmp
 else
     # Linux configuration
-    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash
+    INCLUDES = -I. -I../deps/simdjson -I../deps/atomic_queue -I../deps -I../deps/xxhash -I../deps/ctre
     LDFLAGS = -L/usr/lib
     LIBS = -lgomp
     # OpenMP flags for Linux
@@ -43,6 +43,7 @@ BUNDLE_TEST_TARGET = $(BIN_DIR)/test_bundle
 TEST_TARGET = $(BIN_DIR)/test_vector_store
 STRESS_TARGET = $(BIN_DIR)/test_stress
 COMP_TARGET = $(BIN_DIR)/test_comprehensive
+SPLITTER_TEST_TARGET = $(BIN_DIR)/test_sentence_splitter
 
 # Source files
 PACK_SOURCES = nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
@@ -50,14 +51,16 @@ BUNDLE_TEST_SOURCES = test/test_bundle.cpp ../deps/simdjson/simdjson.cpp
 TEST_SOURCES = test/test_vector_store_v2.cpp vector_store_v2.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 STRESS_SOURCES = test/test_stress_v2.cpp vector_store_v2.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 COMP_SOURCES = test/test_comprehensive_v2.cpp vector_store_v2.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
+SPLITTER_TEST_SOURCES = test/test_sentence_splitter.cpp
 # Object files
 PACK_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(PACK_SOURCES)))
 BUNDLE_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(BUNDLE_TEST_SOURCES)))
 TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(TEST_SOURCES)))
 STRESS_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(STRESS_SOURCES)))
 COMP_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(COMP_SOURCES)))
+SPLITTER_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SPLITTER_TEST_SOURCES)))
 
-all: $(BIN_DIR) $(OBJ_DIR) $(PACK_TARGET) $(BUNDLE_TEST_TARGET) $(TEST_TARGET) $(STRESS_TARGET) $(COMP_TARGET)
+all: $(BIN_DIR) $(OBJ_DIR) $(PACK_TARGET) $(BUNDLE_TEST_TARGET) $(TEST_TARGET) $(STRESS_TARGET) $(COMP_TARGET) $(SPLITTER_TEST_TARGET)
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -79,6 +82,9 @@ $(STRESS_TARGET): $(BIN_DIR) $(OBJ_DIR) $(STRESS_OBJECTS)
 
 $(COMP_TARGET): $(BIN_DIR) $(OBJ_DIR) $(COMP_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(COMP_OBJECTS) -o $(COMP_TARGET) $(LDFLAGS) $(LIBS)
+
+$(SPLITTER_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(SPLITTER_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $(SPLITTER_TEST_OBJECTS) -o $(SPLITTER_TEST_TARGET) $(LDFLAGS) $(LIBS)
 
 # Pattern rules for different source directories
 $(OBJ_DIR)/%.o: %.cpp | $(OBJ_DIR)
@@ -105,6 +111,9 @@ test-bundle: $(BUNDLE_TEST_TARGET)
 	else \
 		echo "No BUNDLE_DIR specified. Use BUNDLE_DIR=<path> to test a bundle."; \
 	fi
+
+test-splitter: $(SPLITTER_TEST_TARGET)
+	./$(SPLITTER_TEST_TARGET)
 
 # Force rebuild (useful for CI)
 rebuild: clean all

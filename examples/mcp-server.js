@@ -17,7 +17,8 @@
  * @license MIT
  */
 
-const { VectorStore } = require('../index');
+const { VectorStoreV2 } = require('../index');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -31,32 +32,41 @@ const path = require('path');
 class MCPVectorServer {
   /**
    * @constructor
-   * @param {number} [dimensions=1536] - Embedding vector dimensions (1536 for OpenAI ada-002)
+   * @param {string} bundlePath - Path to vector store bundle
    */
-  constructor(dimensions = 1536) {
-    this.store = new VectorStore(dimensions);
-    this.dimensions = dimensions;
+  constructor(bundlePath) {
+    this.bundlePath = bundlePath;
+    this.store = null;
     this.isLoaded = false;
   }
 
   /**
-   * Load document corpus from a directory of JSON files
-   * @async
-   * @param {string} documentsPath - Path to directory containing JSON documents
+   * Initialize the vector store from a bundle or create one
+   * @async 
+   * @param {string} [documentsPath] - Optional path to create bundle from
    * @returns {Promise<Object>} Loading result with success status, document count, and timing
    * @returns {boolean} returns.success - Whether loading succeeded
    * @returns {number} [returns.documentCount] - Number of documents loaded
    * @returns {number} [returns.loadTimeMs] - Time taken to load in milliseconds
    * @returns {string} [returns.error] - Error message if loading failed
    */
-  async loadDocuments(documentsPath) {
-    console.log(`Loading documents from: ${documentsPath}`);
-    
+  async initialize(documentsPath) {
     const startTime = Date.now();
     
     try {
-      // Use native loadDir method for optimal performance
-      this.store.loadDir(documentsPath);
+      // Check if bundle exists
+      if (!fs.existsSync(this.bundlePath) && documentsPath) {
+        // Create bundle from documents
+        console.log(`📦 Creating bundle from ${documentsPath}...`);
+        execSync(`./bin/nvs-pack ${documentsPath} ${this.bundlePath}`, {
+          cwd: path.join(__dirname, '../src'),
+          stdio: 'inherit'
+        });
+      }
+      
+      // Load the bundle
+      console.log(`Loading bundle from: ${this.bundlePath}`);
+      this.store = new VectorStoreV2(this.bundlePath);
       
       const loadTime = Date.now() - startTime;
       const docCount = this.store.size();
@@ -68,32 +78,18 @@ class MCPVectorServer {
       return { success: true, documentCount: docCount, loadTimeMs: loadTime };
       
     } catch (error) {
-      console.error('❌ Error loading documents:', error);
+      console.error('❌ Error loading bundle:', error);
       return { success: false, error: error.message };
     }
   }
 
   /**
-   * Add a single document to the vector store
-   * @param {Object} document - Document to add
-   * @param {string} document.id - Unique document identifier
-   * @param {string} document.text - Document text content
-   * @param {Object} document.metadata - Document metadata
-   * @param {number[]} document.metadata.embedding - Embedding vector
-   * @returns {Object} Result with success status and total document count
-   * @throws {Error} If document format is invalid or dimensions mismatch
+   * Note: VectorStoreV2 uses immutable bundles. Documents cannot be added after initialization.
+   * To add documents, create a new bundle with all documents.
+   * @deprecated Use bundle creation workflow instead
    */
   addDocument(document) {
-    if (!document.id || !document.text || !document.metadata?.embedding) {
-      throw new Error('Document must have id, text, and metadata.embedding');
-    }
-    
-    if (document.metadata.embedding.length !== this.dimensions) {
-      throw new Error(`Embedding dimension mismatch: expected ${this.dimensions}, got ${document.metadata.embedding.length}`);
-    }
-    
-    this.store.addDocument(document);
-    return { success: true, totalDocuments: this.store.size() };
+    throw new Error('VectorStoreV2 uses immutable bundles. Create a new bundle with all documents.');
   }
 
   /**
@@ -112,9 +108,7 @@ class MCPVectorServer {
       throw new Error('No documents loaded. Call loadDocuments() first.');
     }
     
-    if (queryEmbedding.length !== this.dimensions) {
-      throw new Error(`Query embedding dimension mismatch: expected ${this.dimensions}, got ${queryEmbedding.length}`);
-    }
+    // VectorStoreV2 handles dimension validation internally
     
     const startTime = Date.now();
     
@@ -169,9 +163,9 @@ class MCPVectorServer {
           const { document } = params;
           return this.addDocument(document);
           
-        case 'load_documents':
+        case 'initialize':
           const { path } = params;
-          return await this.loadDocuments(path);
+          return await this.initialize(path);
           
         case 'get_stats':
           return this.getStats();
@@ -190,8 +184,9 @@ async function demonstration() {
   console.log('🚀 MCP Vector Server Demonstration');
   console.log('==================================\n');
   
-  // Initialize server
-  const server = new MCPVectorServer(1536);
+  // Initialize server with bundle path
+  const bundlePath = path.join(__dirname, '../sample_bundle');
+  const server = new MCPVectorServer(bundlePath);
   
   // Example 1: Create sample documents
   console.log('📝 Creating sample documents...');

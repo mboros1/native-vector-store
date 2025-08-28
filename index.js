@@ -1,5 +1,8 @@
 const { VectorStore } = require('node-gyp-build')(__dirname);
 
+// VectorStoreV2 is the same as VectorStore - the native module now only implements v2
+const VectorStoreV2 = VectorStore;
+
 /**
  * @typedef {Object} Document
  * @property {string} id - Unique identifier for the document
@@ -245,4 +248,4 @@ class VectorStoreWrapper {
 }
 
 // Re-export the native VectorStore as-is, but the JSDoc above provides documentation
-module.exports = { VectorStore };
+module.exports = { VectorStore, VectorStoreV2 };

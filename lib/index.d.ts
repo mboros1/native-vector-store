@@ -16,7 +16,7 @@ export interface SearchResult {
 }
 
 export class VectorStore {
-  constructor(dimensions: number);
+  constructor(bundlePath: string);
   
   /**
    * Load all JSON documents from a directory
@@ -92,4 +92,8 @@ export class VectorStore {
    * Get the number of documents in the store
    */
   size(): number;
+}
+
+export class VectorStoreV2 extends VectorStore {
+  constructor(bundlePath: string);
 }

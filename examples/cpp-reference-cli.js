@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-const { VectorStore } = require('../');
+const { VectorStoreV2 } = require('../');
+const { execSync } = require('child_process');
 const { OpenAI } = require('openai');
 const path = require('path');
 const fs = require('fs');
@@ -31,39 +32,71 @@ class CppReferenceCLI {
       console.log('⚠️  No OPENAI_API_KEY found - using demo mode with random embeddings');
     }
 
-    // Find C++ docs
-    const possiblePaths = [
-      path.join(__dirname, '../cpp_std_embedded'),
-      path.join(process.cwd(), 'cpp_std_embedded'),
-      process.env.CPP_DOCS_PATH
+    // Try to find bundle first
+    const possibleBundlePaths = [
+      path.join(__dirname, '../cpp_std_bundle'),
+      path.join(process.cwd(), 'cpp_std_bundle'),
+      process.env.CPP_BUNDLE_PATH
     ].filter(Boolean);
 
-    let docsPath = null;
-    for (const docPath of possiblePaths) {
-      if (fs.existsSync(docPath)) {
-        docsPath = docPath;
+    let bundlePath = null;
+    for (const bundle of possibleBundlePaths) {
+      if (fs.existsSync(bundle)) {
+        bundlePath = bundle;
         break;
       }
     }
 
-    if (!docsPath) {
-      console.error('❌ C++ documentation not found. Please run:');
-      console.error('   node scripts/generate_embeddings.js cpp_std_embeddings cpp_std_embedded');
-      process.exit(1);
+    // If no bundle, check for docs and create one
+    if (!bundlePath) {
+      const possibleDocPaths = [
+        path.join(__dirname, '../cpp_std_embedded'),
+        path.join(process.cwd(), 'cpp_std_embedded'),
+        process.env.CPP_DOCS_PATH
+      ].filter(Boolean);
+
+      let docsPath = null;
+      for (const docPath of possibleDocPaths) {
+        if (fs.existsSync(docPath)) {
+          docsPath = docPath;
+          break;
+        }
+      }
+
+      if (!docsPath) {
+        console.error('❌ C++ documentation not found. Please run:');
+        console.error('   node scripts/generate_embeddings.js cpp_std_embeddings cpp_std_embedded');
+        process.exit(1);
+      }
+
+      // Create bundle from docs
+      console.log(`📦 Creating bundle from ${docsPath}...`);
+      bundlePath = path.join(path.dirname(docsPath), 'cpp_std_bundle');
+      try {
+        execSync(`./bin/nvs-pack ${docsPath} ${bundlePath}`, {
+          cwd: path.join(__dirname, '../src'),
+          stdio: 'inherit'
+        });
+      } catch (err) {
+        console.error('❌ Failed to create bundle:', err.message);
+        process.exit(1);
+      }
     }
 
-    console.log(`📂 Loading C++ docs from: ${docsPath}`);
+    console.log(`📂 Loading C++ bundle from: ${bundlePath}`);
     
-    // Initialize vector store
-    this.vectorStore = new VectorStore(1536);
-    
-    // Load documents
-    const start = Date.now();
-    this.vectorStore.loadDir(docsPath);
-    const loadTime = Date.now() - start;
-    
-    console.log(`✅ Loaded ${this.vectorStore.size()} documents in ${loadTime}ms`);
-    console.log(`✅ Ready for queries!\n`);
+    // Initialize vector store with bundle
+    try {
+      const start = Date.now();
+      this.vectorStore = new VectorStoreV2(bundlePath);
+      const loadTime = Date.now() - start;
+      
+      console.log(`✅ Loaded ${this.vectorStore.size()} documents in ${loadTime}ms`);
+      console.log(`✅ Ready for queries!\n`);
+    } catch (err) {
+      console.error('❌ Failed to load bundle:', err.message);
+      process.exit(1);
+    }
   }
 
   async getEmbedding(text) {

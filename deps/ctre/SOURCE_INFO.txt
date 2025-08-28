@@ -1,0 +1,24 @@
+CTRE - Compile Time Regular Expressions
+========================================
+
+Source: https://github.com/hanickadot/compile-time-regular-expressions
+Commit: e34c26ba149b9fd9c34aa0f678e39739641a0d1e
+Date downloaded: 2025-08-27
+Branch: main
+Path: /single-header/
+
+Files included:
+- ctre.hpp (single-header implementation)
+
+License: Apache License 2.0
+
+Note: CTRE is a C++17/20 library for compile-time regular expressions. It provides
+zero-overhead regex matching by compiling patterns at compile time. This results in
+significantly faster runtime performance compared to std::regex.
+
+Features:
+- Compile-time pattern compilation and validation
+- Zero runtime overhead for pattern compilation
+- C++17 compatible
+- Header-only library
+- Supports most common regex features

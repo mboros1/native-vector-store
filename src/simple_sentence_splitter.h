@@ -3,89 +3,160 @@
 
 #include <string>
 #include <vector>
+#include <cctype>
+#include <algorithm>
 #include <string_view>
+#include "ctre.hpp"
+#include "english_abbreviations.h"
+#include "english_dictionary.h"
 
+/**
+ * Simple sentence splitter for English text, based on Smile NLP's implementation.
+ * 
+ * This splitter handles:
+ * - Standard sentence endings (. ! ?)
+ * - Abbreviations (Mr., Dr., etc.)
+ * - Numbers with periods
+ * - Quoted text and brackets
+ * - URLs and decimal numbers
+ * 
+ * The implementation follows the logic from Smile NLP's SimpleSentenceSplitter
+ * but adapted for C++ using CTRE for compile-time regex performance.
+ */
 class SimpleSentenceSplitter {
 public:
     std::vector<std::string> split(const std::string& text) const {
         std::vector<std::string> sentences;
-        std::string current_sentence;
         
+        if (text.empty()) {
+            return sentences;
+        }
+        
+        // Clean up the text - replace carriage returns with spaces
+        std::string cleaned = text;
+        for (auto& c : cleaned) {
+            if (c == '\n' || c == '\r') {
+                c = ' ';
+            }
+        }
+        
+        // Use \031 (end of medium) as a special character for missing space after punctuation
+        const char MISSING_SPACE_MARKER = '\031';
+        
+        // Clean any existing markers
+        for (auto& c : cleaned) {
+            if (c == MISSING_SPACE_MARKER) c = ' ';
+        }
+        
+        // Insert missing spaces after punctuation using CTRE
+        // Pattern: (any char)(. or ! or ?)(non-space, non-punctuation char)
+        cleaned = insert_missing_spaces(cleaned, MISSING_SPACE_MARKER);
+        
+        // Add newline at end for processing
+        cleaned += "\n";
+        
+        // Process the text character by character with lookahead
+        std::string current_sentence;
         size_t i = 0;
-        while (i < text.length()) {
-            char c = text[i];
+        int word_count = 0;
+        
+        while (i < cleaned.length()) {
+            char c = cleaned[i];
+            
+            // Count words as we go
+            if (i > 0 && !std::isspace(cleaned[i-1]) && std::isspace(c)) {
+                word_count++;
+            }
+            
             current_sentence += c;
             
-            // Check for sentence endings
-            if (c == '.' || c == '!' || c == '?') {
-                // Look ahead to see if this is really the end of a sentence
+            // Check for potential sentence endings
+            if (c == '.' || c == '!' || c == '?' || c == ':') {
+                // Look ahead for context
                 size_t next = i + 1;
                 
-                // Skip any closing quotes or brackets
-                while (next < text.length() && 
-                       (text[next] == '"' || text[next] == '\'' || 
-                        text[next] == ')' || text[next] == ']')) {
-                    current_sentence += text[next];
+                // Skip quotes and brackets after punctuation
+                while (next < cleaned.length() && 
+                       (cleaned[next] == '"' || cleaned[next] == '\'' || 
+                        cleaned[next] == ')' || cleaned[next] == ']' || 
+                        cleaned[next] == '}')) {
+                    current_sentence += cleaned[next];
                     next++;
                 }
                 
-                // Skip whitespace
+                // Skip whitespace to find next word
                 size_t ws_start = next;
-                while (next < text.length() && std::isspace(text[next])) {
+                while (next < cleaned.length() && 
+                       (std::isspace(cleaned[next]) || cleaned[next] == MISSING_SPACE_MARKER)) {
+                    if (cleaned[next] != MISSING_SPACE_MARKER) {
+                        current_sentence += cleaned[next];
+                    }
                     next++;
                 }
                 
-                // Check if the next character indicates a new sentence
-                bool is_sentence_end = false;
-                if (next >= text.length()) {
-                    is_sentence_end = true;  // End of text
-                } else if (std::isupper(text[next])) {
-                    is_sentence_end = true;  // Next sentence starts with capital
-                } else if (next - ws_start > 1) {
-                    is_sentence_end = true;  // Multiple spaces/newlines
-                }
+                // Determine if this is a sentence break
+                bool is_sentence_break = false;
                 
-                // Check for common abbreviations that shouldn't end sentences
-                if (is_sentence_end && c == '.') {
-                    // Simple check for common patterns like "Mr." "Dr." "Inc." etc
-                    if (current_sentence.length() >= 3) {
-                        size_t word_start = current_sentence.rfind(' ', current_sentence.length() - 2);
-                        if (word_start == std::string::npos) word_start = 0;
-                        else word_start++;
-                        
-                        std::string last_word = current_sentence.substr(word_start);
-                        // Remove trailing period for comparison
-                        if (!last_word.empty() && last_word.back() == '.') {
-                            last_word.pop_back();
+                if (c == '.') {
+                    // Get the last word before the period
+                    std::string last_word = extract_last_word(current_sentence);
+                    
+                    // Get the next word (if any)
+                    std::string next_word;
+                    if (next < cleaned.length()) {
+                        size_t word_end = next;
+                        while (word_end < cleaned.length() && !std::isspace(cleaned[word_end])) {
+                            word_end++;
                         }
-                        
-                        // Check if it's a common abbreviation
-                        if (is_common_abbreviation(last_word)) {
-                            is_sentence_end = false;
-                        }
+                        next_word = cleaned.substr(next, word_end - next);
                     }
+                    
+                    // Check various abbreviation patterns
+                    if (is_abbreviation(last_word)) {
+                        // Known abbreviation - only break if next word is common and we have enough context
+                        if (is_common_word(next_word) && word_count > 6) {
+                            is_sentence_break = true;
+                        }
+                    } else if (is_special_abbreviation_pattern(last_word)) {
+                        // Special patterns like Ph.D., U.S.A., etc.
+                        if (is_common_word(next_word) && word_count > 6) {
+                            is_sentence_break = true;
+                        }
+                    } else if (next < cleaned.length() && std::isupper(cleaned[next])) {
+                        // Next character is uppercase - likely sentence break
+                        is_sentence_break = true;
+                    } else if (next >= cleaned.length() - 1) {
+                        // End of text
+                        is_sentence_break = true;
+                    }
+                } else if (c == '!' || c == '?') {
+                    // These almost always end sentences
+                    is_sentence_break = true;
+                } else if (c == ':' && word_count > 6) {
+                    // Colon only ends sentence after sufficient context
+                    is_sentence_break = true;
                 }
                 
-                if (is_sentence_end) {
-                    // Trim whitespace from the sentence
-                    size_t first = current_sentence.find_first_not_of(" \t\n\r");
-                    size_t last = current_sentence.find_last_not_of(" \t\n\r");
-                    if (first != std::string::npos) {
-                        sentences.push_back(current_sentence.substr(first, last - first + 1));
+                if (is_sentence_break) {
+                    // Clean and add the sentence
+                    std::string final_sentence = cleanup_sentence(current_sentence);
+                    if (!final_sentence.empty()) {
+                        sentences.push_back(final_sentence);
                     }
                     current_sentence.clear();
-                    i = next - 1;  // Position before the next non-whitespace character
+                    word_count = 0;
+                    i = next - 1; // Position at last processed character
                 }
             }
+            
             i++;
         }
         
-        // Don't forget the last sentence if it doesn't end with punctuation
+        // Add any remaining sentence
         if (!current_sentence.empty()) {
-            size_t first = current_sentence.find_first_not_of(" \t\n\r");
-            size_t last = current_sentence.find_last_not_of(" \t\n\r");
-            if (first != std::string::npos) {
-                sentences.push_back(current_sentence.substr(first, last - first + 1));
+            std::string final_sentence = cleanup_sentence(current_sentence);
+            if (!final_sentence.empty() && final_sentence != "\n") {
+                sentences.push_back(final_sentence);
             }
         }
         
@@ -93,34 +164,150 @@ public:
     }
     
 private:
-    bool is_common_abbreviation(const std::string& word) const {
-        // Common abbreviations that don't end sentences
-        static const std::vector<std::string> abbreviations = {
-            "Mr", "Mrs", "Ms", "Dr", "Prof", "Sr", "Jr",
-            "Inc", "Corp", "Ltd", "Co", "vs", "etc", "al",
-            "Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec",
-            "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
-            "St", "Ave", "Rd", "Blvd", "Dept", "Univ", "Prof",
-            "Ph", "M", "B", "D",  // Ph.D., M.D., B.S., etc.
-            "U", "S", "E", "N", "W",  // U.S., E.U., N.Y., etc.
-            "i", "e", "g",  // i.e., e.g.
-        };
+    // Insert missing spaces after punctuation
+    std::string insert_missing_spaces(const std::string& text, char marker) const {
+        std::string result;
+        result.reserve(text.size() + 100); // Reserve extra space
         
-        for (const auto& abbr : abbreviations) {
-            if (word == abbr) return true;
+        // Use CTRE for pattern matching
+        static constexpr auto pattern = ctll::fixed_string{R"(([.!?])([^\s."'`\)\}\]]))"};
+        
+        size_t last_pos = 0;
+        for (auto match : ctre::search_all<pattern>(text)) {
+            // Add text before match
+            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
+            
+            // Add the punctuation
+            result += match.get<1>().str();
+            
+            // Add marker for missing space
+            result += marker;
+            
+            // Add the character after punctuation
+            result += match.get<2>().str();
+            
+            last_pos = match.end() - text.begin();
         }
         
-        // Check for single capital letters (like in "U.S.A.")
-        if (word.length() == 1 && std::isupper(word[0])) {
+        // Add remaining text
+        result.append(text, last_pos);
+        
+        return result;
+    }
+    
+    // Extract the last word from a sentence
+    std::string extract_last_word(const std::string& sentence) const {
+        if (sentence.empty()) return "";
+        
+        // Find the last word boundary
+        size_t end = sentence.find_last_not_of(".!?:;, \t\n\r");
+        if (end == std::string::npos) return "";
+        
+        size_t start = sentence.find_last_of(" \t\n\r", end);
+        if (start == std::string::npos) {
+            start = 0;
+        } else {
+            start++;
+        }
+        
+        std::string word = sentence.substr(start, end - start + 1);
+        
+        // Remove trailing punctuation for checking
+        while (!word.empty() && std::ispunct(word.back()) && word.back() != '.') {
+            word.pop_back();
+        }
+        
+        return word;
+    }
+    
+    // Check if a word is an abbreviation using our compiled list
+    bool is_abbreviation(const std::string& word) const {
+        if (word.empty()) return false;
+        
+        std::string check_word = word;
+        // Remove trailing period if present
+        if (!check_word.empty() && check_word.back() == '.') {
+            check_word.pop_back();
+        }
+        
+        // Convert to lowercase for checking
+        std::string lower = to_lower(check_word);
+        
+        return EnglishAbbreviations::instance().count(lower) > 0;
+    }
+    
+    // Check for special abbreviation patterns
+    bool is_special_abbreviation_pattern(const std::string& word) const {
+        if (word.empty()) return false;
+        
+        // Check for letter.period pattern (U.S.A., Ph.D., etc.)
+        static constexpr auto letter_period = ctll::fixed_string{R"(^([A-Za-z]\.)+$)"};
+        if (ctre::match<letter_period>(word)) {
             return true;
         }
         
-        // Check for numbers ending in period (like "1." in lists)
-        if (!word.empty() && std::isdigit(word[0])) {
+        // Check for all consonants with at least one lowercase
+        bool has_vowel = false;
+        bool has_lowercase = false;
+        for (char c : word) {
+            if (c == '.') continue;
+            char lower_c = std::tolower(c);
+            if (lower_c == 'a' || lower_c == 'e' || lower_c == 'i' || 
+                lower_c == 'o' || lower_c == 'u' || lower_c == 'y') {
+                has_vowel = true;
+                break;
+            }
+            if (std::islower(c)) {
+                has_lowercase = true;
+            }
+        }
+        
+        if (!has_vowel && has_lowercase) {
+            return true;
+        }
+        
+        // Single letter (except 'I')
+        if (word.length() == 1 && std::isalpha(word[0]) && std::toupper(word[0]) != 'I') {
             return true;
         }
         
         return false;
+    }
+    
+    // Check if word is in common dictionary
+    bool is_common_word(const std::string& word) const {
+        if (word.empty()) return false;
+        
+        std::string lower = to_lower(word);
+        // Remove any punctuation
+        while (!lower.empty() && std::ispunct(lower.back())) {
+            lower.pop_back();
+        }
+        
+        return !lower.empty() && EnglishDictionary::instance().count(lower) > 0;
+    }
+    
+    // Convert string to lowercase
+    std::string to_lower(const std::string& str) const {
+        std::string result = str;
+        std::transform(result.begin(), result.end(), result.begin(), 
+                      [](char c) { return std::tolower(c); });
+        return result;
+    }
+    
+    // Clean up a sentence - remove special markers and trim
+    std::string cleanup_sentence(const std::string& sentence) const {
+        std::string result = sentence;
+        
+        // Remove all MISSING_SPACE_MARKER characters
+        result.erase(std::remove(result.begin(), result.end(), '\031'), result.end());
+        
+        // Trim whitespace from both ends
+        size_t first = result.find_first_not_of(" \t\n\r");
+        if (first == std::string::npos) return "";
+        
+        size_t last = result.find_last_not_of(" \t\n\r");
+        return result.substr(first, (last - first + 1));
     }
 };
 
