@@ -5,6 +5,8 @@
 #include <unordered_set>
 #include <sstream>
 
+namespace nvs {
+
 /// Compiled-in set of English abbreviations (e.g. Mr, Mrs, Dr).
 /// Built once (thread-safe in C++11+) from the raw string literal below.
 class EnglishAbbreviations {
@@ -193,4 +195,6 @@ private:
     EnglishAbbreviations(const EnglishAbbreviations&) = delete;
     EnglishAbbreviations& operator=(const EnglishAbbreviations&) = delete;
 };
+
+} // namespace nvs
 

@@ -6,6 +6,8 @@
 #include <string_view>
 #include <atomic>
 
+namespace nvs {
+
 // General-purpose document loader that returns structured data
 // This replaces vector_store_loader and provides data for both packing and direct use
 
@@ -51,3 +53,5 @@ private:
     // Helper to tokenize and build term frequencies
     static void processDocumentText(Document& doc);
 };
+
+} // namespace nvs

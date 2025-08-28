@@ -13,6 +13,8 @@
 
 namespace fs = std::filesystem;
 
+namespace nvs {
+
 // Forward declaration of helper function
 static bool parseDocumentObject(simdjson::ondemand::object& obj, 
                                 DocumentLoader::Document& doc,
@@ -327,3 +329,5 @@ void DocumentLoader::processDocumentText(Document& doc) {
         doc.term_frequencies[token]++;
     }
 }
+
+} // namespace nvs

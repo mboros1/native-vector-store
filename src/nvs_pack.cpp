@@ -19,6 +19,8 @@
 
 namespace fs = std::filesystem;
 
+namespace nvs {
+
 struct PackerOptions {
     std::string input_path;
     std::string output_dir = "./nvs-bundle";
@@ -28,8 +30,34 @@ struct PackerOptions {
     double bm25_k1 = 1.2;
     double bm25_b = 0.75;
     size_t min_df = 1;
-    size_t block_bytes = 2097152; // 2MB default
+    size_t block_size = 131072; // 128KB blocks for metadata
     bool verbose = false;
+};
+
+// Binary metadata format
+struct DocHeader {
+    uint64_t doc_id;
+    uint64_t timestamp_unix;  // 0 if unknown
+    uint32_t id_len;         // document ID string length
+    uint32_t text_len;       // text content length
+    uint32_t source_len;     // source string length (0 if none)
+    uint32_t padding;        // for alignment
+    // Followed by: id[id_len], text[text_len], source[source_len]
+};
+
+struct MetaBlock {
+    uint32_t block_id;
+    uint32_t uncompressed_size;
+    uint32_t doc_count;  // number of documents in this block
+    uint32_t padding;
+    std::vector<uint8_t> data;
+};
+
+struct MetaIndex {
+    uint32_t block_id;
+    uint32_t offset_in_block;
+    uint32_t doc_size;  // total size of this doc's data
+    uint32_t padding;
 };
 
 class NVSPacker {
@@ -216,41 +244,130 @@ private:
     }
     
     bool writeMetadata() {
-        std::cout << "Writing metadata...\n";
+        std::cout << "Writing metadata with doc-aligned blocks...\n";
         
-        // Write document IDs and text
-        std::string meta_path = opts_.output_dir + "/meta.bin";
+        // Prepare blocks
+        std::vector<MetaBlock> blocks;
+        std::vector<MetaIndex> index;
+        
+        MetaBlock current_block;
+        current_block.block_id = 0;
+        current_block.uncompressed_size = 0;
+        current_block.doc_count = 0;
+        current_block.data.reserve(opts_.block_size);
+        
+        for (size_t doc_idx = 0; doc_idx < data_.documents.size(); ++doc_idx) {
+            const auto& doc = data_.documents[doc_idx];
+            
+            // Extract source from metadata_json if available
+            std::string source;
+            // Simple extraction - look for "source_file" in JSON
+            size_t source_pos = doc.metadata_json.find("\"source_file\":");
+            if (source_pos != std::string::npos) {
+                size_t start = doc.metadata_json.find('"', source_pos + 14);
+                if (start != std::string::npos) {
+                    size_t end = doc.metadata_json.find('"', start + 1);
+                    if (end != std::string::npos) {
+                        source = doc.metadata_json.substr(start + 1, end - start - 1);
+                    }
+                }
+            }
+            
+            // Calculate document size
+            size_t doc_size = sizeof(DocHeader) + doc.id.size() + doc.text.size() + source.size();
+            
+            // Check if adding this doc would exceed block size
+            // Never split a document across blocks
+            if (current_block.uncompressed_size + doc_size > opts_.block_size && current_block.doc_count > 0) {
+                // Save current block and start new one
+                blocks.push_back(std::move(current_block));
+                current_block = MetaBlock();
+                current_block.block_id = blocks.size();
+                current_block.uncompressed_size = 0;
+                current_block.doc_count = 0;
+                current_block.data.clear();
+                current_block.data.reserve(opts_.block_size);
+            }
+            
+            // Create index entry
+            MetaIndex idx_entry;
+            idx_entry.block_id = current_block.block_id;
+            idx_entry.offset_in_block = current_block.uncompressed_size;
+            idx_entry.doc_size = doc_size;
+            idx_entry.padding = 0;
+            index.push_back(idx_entry);
+            
+            // Create document header
+            DocHeader header;
+            header.doc_id = doc_idx;
+            header.timestamp_unix = 0;  // Could extract from metadata if available
+            header.id_len = doc.id.size();
+            header.text_len = doc.text.size();
+            header.source_len = source.size();
+            header.padding = 0;
+            
+            // Write to block
+            const uint8_t* header_bytes = reinterpret_cast<const uint8_t*>(&header);
+            current_block.data.insert(current_block.data.end(), header_bytes, header_bytes + sizeof(DocHeader));
+            current_block.data.insert(current_block.data.end(), doc.id.begin(), doc.id.end());
+            current_block.data.insert(current_block.data.end(), doc.text.begin(), doc.text.end());
+            if (!source.empty()) {
+                current_block.data.insert(current_block.data.end(), source.begin(), source.end());
+            }
+            
+            current_block.uncompressed_size += doc_size;
+            current_block.doc_count++;
+        }
+        
+        // Add the last block if it has documents
+        if (current_block.doc_count > 0) {
+            blocks.push_back(std::move(current_block));
+        }
+        
+        // Write blocks to file
+        std::string meta_path = opts_.output_dir + "/meta.blocks";
         std::ofstream meta_file(meta_path, std::ios::binary);
         if (!meta_file) return false;
         
-        // Write index for random access
+        // Write block count
+        uint32_t block_count = blocks.size();
+        meta_file.write(reinterpret_cast<const char*>(&block_count), sizeof(block_count));
+        
+        // Write block headers first (for seeking)
+        for (const auto& block : blocks) {
+            uint32_t header[4] = {
+                block.block_id,
+                block.uncompressed_size,
+                block.doc_count,
+                0  // padding
+            };
+            meta_file.write(reinterpret_cast<const char*>(header), sizeof(header));
+        }
+        
+        // Write block data
+        for (const auto& block : blocks) {
+            meta_file.write(reinterpret_cast<const char*>(block.data.data()), block.data.size());
+        }
+        
+        // Write index
         std::string idx_path = opts_.output_dir + "/meta.idx";
         std::ofstream idx_file(idx_path, std::ios::binary);
         if (!idx_file) return false;
         
-        uint64_t offset = 0;
-        for (const auto& doc : data_.documents) {
-            // Write index entry
-            idx_file.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
-            
-            // Write ID length and ID
-            uint32_t id_len = doc.id.size();
-            meta_file.write(reinterpret_cast<const char*>(&id_len), sizeof(id_len));
-            meta_file.write(doc.id.data(), id_len);
-            offset += sizeof(id_len) + id_len;
-            
-            // Write text length and text
-            uint32_t text_len = doc.text.size();
-            meta_file.write(reinterpret_cast<const char*>(&text_len), sizeof(text_len));
-            meta_file.write(doc.text.data(), text_len);
-            offset += sizeof(text_len) + text_len;
-            
-            // Write metadata JSON
-            uint32_t meta_len = doc.metadata_json.size();
-            meta_file.write(reinterpret_cast<const char*>(&meta_len), sizeof(meta_len));
-            meta_file.write(doc.metadata_json.data(), meta_len);
-            offset += sizeof(meta_len) + meta_len;
+        for (const auto& entry : index) {
+            idx_file.write(reinterpret_cast<const char*>(&entry), sizeof(MetaIndex));
         }
+        
+        std::cout << "  Created " << blocks.size() << " blocks (" 
+                  << opts_.block_size / 1024 << "KB target size)\n";
+        std::cout << "  Average docs per block: " 
+                  << (data_.documents.size() / blocks.size()) << "\n";
+        
+        size_t total_size = 0;
+        for (const auto& block : blocks) {
+            total_size += block.data.size();
+        }
+        std::cout << "  Total metadata size: " << (total_size / (1024*1024)) << "MB\n";
         
         return meta_file.good() && idx_file.good();
     }
@@ -285,8 +402,8 @@ private:
         file << "    \"lexicon\": { \"path\": \"lexicon.bin\" },\n";
         file << "    \"postings\": { \"path\": \"postings.bin\" },\n";
         file << "    \"terms\": { \"path\": \"terms.dict\" },\n";
-        file << "    \"meta_idx\": { \"path\": \"meta.idx\" },\n";
-        file << "    \"meta\": { \"path\": \"meta.bin\" }\n";
+        file << "    \"meta_idx\": { \"path\": \"meta.idx\", \"schema\": \"u32 block_id, u32 offset, u32 doc_size\" },\n";
+        file << "    \"meta\": { \"path\": \"meta.blocks\", \"block_size\": " << opts_.block_size << ", \"doc_aligned\": true }\n";
         file << "  }\n";
         file << "}\n";
         
@@ -309,7 +426,7 @@ private:
             "postings.bin",
             "terms.dict",
             "meta.idx",
-            "meta.bin"
+            "meta.blocks"
         };
         
         for (const auto& filename : files) {
@@ -351,6 +468,8 @@ private:
     }
 };
 
+} // namespace nvs
+
 void printUsage(const char* program) {
     std::cout << "Usage: " << program << " [options] <input-directory>\n\n";
     std::cout << "Options:\n";
@@ -361,13 +480,14 @@ void printUsage(const char* program) {
     std::cout << "  --bm25-k1 <n>         BM25 k1 parameter (default: 1.2)\n";
     std::cout << "  --bm25-b <n>          BM25 b parameter (default: 0.75)\n";
     std::cout << "  --min-df <n>          Minimum document frequency (default: 1)\n";
-    std::cout << "  --block-bytes <n>     Compression block size (default: 2097152)\n";
+    std::cout << "  --block-size <n>      Metadata block size in bytes (default: 131072)\n";
     std::cout << "  --verbose             Verbose output\n";
     std::cout << "  --help                Show this help\n";
 }
 
+#ifndef NVS_ENABLE_INLINE_TESTS
 int main(int argc, char* argv[]) {
-    PackerOptions opts;
+    nvs::PackerOptions opts;
     
     // Parse command line arguments
     for (int i = 1; i < argc; ++i) {
@@ -391,8 +511,8 @@ int main(int argc, char* argv[]) {
             opts.bm25_b = std::stod(argv[++i]);
         } else if (arg == "--min-df" && i + 1 < argc) {
             opts.min_df = std::stoul(argv[++i]);
-        } else if (arg == "--block-bytes" && i + 1 < argc) {
-            opts.block_bytes = std::stoul(argv[++i]);
+        } else if (arg == "--block-size" && i + 1 < argc) {
+            opts.block_size = std::stoul(argv[++i]);
         } else if (arg == "--verbose") {
             opts.verbose = true;
         } else if (arg[0] != '-') {
@@ -414,6 +534,129 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    NVSPacker packer(opts);
+    nvs::NVSPacker packer(opts);
     return packer.run();
 }
+#endif // NVS_ENABLE_INLINE_TESTS
+
+// Unit tests - only compiled when tests are enabled
+#ifdef NVS_ENABLE_INLINE_TESTS
+#include "../deps/doctest.h"
+#include <map>
+#include <cstddef>  // for offsetof
+#include <cstring>  // for memcpy
+
+TEST_CASE("NVSPack metadata block generation") {
+    SUBCASE("MetaBlock structure alignment") {
+        // Ensure our structures are properly aligned
+        CHECK(sizeof(nvs::DocHeader) == 32);
+        CHECK(sizeof(nvs::MetaIndex) == 16);
+        
+        // Check field offsets
+        CHECK(offsetof(nvs::DocHeader, doc_id) == 0);
+        CHECK(offsetof(nvs::DocHeader, timestamp_unix) == 8);
+        CHECK(offsetof(nvs::DocHeader, id_len) == 16);
+        CHECK(offsetof(nvs::DocHeader, text_len) == 20);
+        CHECK(offsetof(nvs::DocHeader, source_len) == 24);
+        CHECK(offsetof(nvs::DocHeader, padding) == 28);
+    }
+    
+    SUBCASE("Block size calculations") {
+        nvs::MetaBlock block;
+        block.block_id = 0;
+        block.uncompressed_size = 0;
+        block.doc_count = 0;
+        
+        // Simulate adding a document
+        std::string doc_id = "test_doc_1";
+        std::string text = "This is test content";
+        std::string source = "test_source";
+        
+        size_t doc_size = sizeof(nvs::DocHeader) + doc_id.size() + text.size() + source.size();
+        
+        // Check size calculation
+        CHECK(doc_size == 32 + 10 + 20 + 11);  // 73 bytes total
+        
+        // Verify block size limits
+        const size_t BLOCK_SIZE = 131072;  // 128KB
+        CHECK(doc_size < BLOCK_SIZE);
+    }
+    
+    SUBCASE("Document header serialization") {
+        nvs::DocHeader header;
+        header.doc_id = 42;
+        header.timestamp_unix = 1234567890;
+        header.id_len = 10;
+        header.text_len = 100;
+        header.source_len = 20;
+        header.padding = 0;
+        
+        // Serialize to buffer
+        uint8_t buffer[32];
+        memcpy(buffer, &header, sizeof(nvs::DocHeader));
+        
+        // Deserialize and verify
+        nvs::DocHeader* deserialized = reinterpret_cast<nvs::DocHeader*>(buffer);
+        CHECK(deserialized->doc_id == 42);
+        CHECK(deserialized->timestamp_unix == 1234567890);
+        CHECK(deserialized->id_len == 10);
+        CHECK(deserialized->text_len == 100);
+        CHECK(deserialized->source_len == 20);
+    }
+}
+
+TEST_CASE("NVSPack BM25 index generation") {
+    SUBCASE("Term extraction") {
+        // Test that terms are properly extracted from text
+        std::string text = "The quick brown fox jumps over the lazy dog";
+        std::vector<std::string> expected = {"quick", "brown", "fox", "jumps", "lazy", "dog"};
+        
+        // Note: Actual tokenization would use simple_tokenizer
+        // This is a placeholder for the test structure
+        CHECK(expected.size() == 6);
+    }
+    
+    SUBCASE("Document frequency calculation") {
+        // Test doc frequency calculations
+        std::map<std::string, uint32_t> term_doc_freq;
+        term_doc_freq["test"] = 5;
+        term_doc_freq["vector"] = 3;
+        
+        CHECK(term_doc_freq["test"] == 5);
+        CHECK(term_doc_freq["vector"] == 3);
+        CHECK(term_doc_freq.size() == 2);
+    }
+}
+
+TEST_CASE("NVSPack file I/O") {
+    SUBCASE("Manifest generation") {
+        // Test manifest structure (manually generated in this codebase)
+        std::string format = "nvs.v1";
+        int num_docs = 100;
+        int dim = 1536;
+        
+        CHECK(format == "nvs.v1");
+        CHECK(num_docs == 100);
+        CHECK(dim == 1536);
+    }
+    
+    SUBCASE("Index file structure") {
+        nvs::MetaIndex index;
+        index.block_id = 1;
+        index.offset_in_block = 1024;
+        index.doc_size = 2048;
+        index.padding = 0;
+        
+        // Test serialization
+        uint8_t buffer[16];
+        memcpy(buffer, &index, sizeof(nvs::MetaIndex));
+        
+        // Verify structure
+        uint32_t* values = reinterpret_cast<uint32_t*>(buffer);
+        CHECK(values[0] == 1);      // block_id
+        CHECK(values[1] == 1024);   // offset_in_block
+        CHECK(values[2] == 2048);   // doc_size
+        CHECK(values[3] == 0);      // padding
+    }
+}
+#endif

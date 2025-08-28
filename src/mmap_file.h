@@ -11,6 +11,8 @@
 #include <unistd.h>
 #endif
 
+namespace nvs {
+
 // Cross-platform memory-mapped file wrapper
 class MMapFile {
 public:
@@ -157,3 +159,5 @@ private:
     int fd_ = -1;
     #endif
 };
+
+} // namespace nvs

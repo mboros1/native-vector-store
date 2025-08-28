@@ -1,4 +1,4 @@
-// Comprehensive test suite for VectorStoreV2
+// Comprehensive test suite for nvs::VectorStoreV2
 // Tests edge cases, error conditions, and data integrity
 #include "../vector_store_v2.h"
 #include "../document_loader.h"
@@ -57,7 +57,7 @@ void test_missing_bundle_files() {
     })";
     manifest.close();
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     
     // Test: Should fail when vectors.f32 is missing
     if (!store.open(bad_bundle)) {
@@ -95,7 +95,7 @@ void test_corrupted_manifest() {
     manifest << "{ this is not valid JSON ]";
     manifest.close();
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     if (!store.open(bad_bundle)) {
         test_pass("Correctly rejected malformed JSON manifest");
     } else {
@@ -177,7 +177,7 @@ void test_dimension_mismatch() {
     std::ofstream meta(bad_bundle + "/meta.bin", std::ios::binary);
     meta.close();
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     // The dimension mismatch should be caught when checking file sizes
     if (store.open(bad_bundle)) {
         // If it opened, verify operations fail safely
@@ -240,7 +240,7 @@ void test_zero_documents() {
     
     std::ofstream(empty_bundle + "/meta.bin", std::ios::binary).close();
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     if (store.open(empty_bundle)) {
         // Test operations on empty store
         assert(store.size() == 0);
@@ -275,7 +275,7 @@ void test_out_of_bounds() {
         return;
     }
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     if (!store.open(bundle_path)) {
         test_fail("Open bundle", "Failed to open test bundle");
         return;
@@ -284,7 +284,7 @@ void test_out_of_bounds() {
     size_t num_docs = store.size();
     
     // Test 1: Document retrieval with invalid ID
-    VectorStoreV2::SearchResult result;
+    nvs::VectorStoreV2::SearchResult result;
     
     // Beyond bounds
     if (!store.get_document(num_docs + 100, result)) {
@@ -345,7 +345,7 @@ void test_concurrent_opening() {
     
     for (int i = 0; i < num_threads; ++i) {
         threads.emplace_back([&bundle_path, &successful_opens, &any_error, i]() {
-            VectorStoreV2 store;
+            nvs::VectorStoreV2 store;
             if (store.open(bundle_path)) {
                 successful_opens++;
                 
@@ -395,7 +395,7 @@ void test_bundle_consistency() {
     
     // First opening
     {
-        VectorStoreV2 store;
+        nvs::VectorStoreV2 store;
         if (!store.open(bundle_path)) {
             test_fail("Open bundle", "Failed to open for consistency test");
             return;
@@ -419,7 +419,7 @@ void test_bundle_consistency() {
     
     // Reopen and verify same results
     for (int i = 0; i < 5; ++i) {
-        VectorStoreV2 store;
+        nvs::VectorStoreV2 store;
         if (!store.open(bundle_path)) {
             test_fail("Reopen bundle", "Failed on iteration " + std::to_string(i));
             return;
@@ -464,7 +464,7 @@ void test_mmap_stress() {
     auto start = high_resolution_clock::now();
     
     for (int i = 0; i < iterations; ++i) {
-        VectorStoreV2 store;
+        nvs::VectorStoreV2 store;
         if (!store.open(bundle_path)) {
             test_fail("mmap stress", "Failed on iteration " + std::to_string(i));
             return;
@@ -476,9 +476,9 @@ void test_mmap_stress() {
     test_pass(std::to_string(iterations) + " open/close cycles in " + std::to_string(elapsed) + "ms");
     
     // Test multiple stores open simultaneously (different mmap regions)
-    std::vector<std::unique_ptr<VectorStoreV2>> stores;
+    std::vector<std::unique_ptr<nvs::VectorStoreV2>> stores;
     for (int i = 0; i < 10; ++i) {
-        auto store = std::make_unique<VectorStoreV2>();
+        auto store = std::make_unique<nvs::VectorStoreV2>();
         if (!store->open(bundle_path)) {
             test_fail("Multiple mmaps", "Failed to open store " + std::to_string(i));
             return;
@@ -501,7 +501,7 @@ void test_mmap_stress() {
 
 int main(int argc, char** argv) {
     std::cout << "\n" << BLUE << "╔════════════════════════════════════╗" << RESET << "\n";
-    std::cout << BLUE << "║" << RESET << "  VectorStoreV2 Comprehensive Tests  " << BLUE << "║" << RESET << "\n";
+    std::cout << BLUE << "║" << RESET << "  nvs::VectorStoreV2 Comprehensive Tests  " << BLUE << "║" << RESET << "\n";
     std::cout << BLUE << "╚════════════════════════════════════╝" << RESET << "\n";
     
     // Run all tests

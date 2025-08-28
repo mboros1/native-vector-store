@@ -7,7 +7,7 @@
 #include <memory>
 
 class VectorStoreWrapper : public Napi::ObjectWrap<VectorStoreWrapper> {
-    std::unique_ptr<VectorStoreV2> store_;
+    std::unique_ptr<nvs::VectorStoreV2> store_;
     
 public:
     static Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -29,7 +29,7 @@ public:
     
     VectorStoreWrapper(const Napi::CallbackInfo& info) 
         : Napi::ObjectWrap<VectorStoreWrapper>(info) {
-        store_ = std::make_unique<VectorStoreV2>();
+        store_ = std::make_unique<nvs::VectorStoreV2>();
         
         // If a bundle path is provided, open it immediately
         if (info.Length() > 0 && info[0].IsString()) {
@@ -199,7 +199,7 @@ public:
         }
         
         size_t docId = info[0].As<Napi::Number>().Uint32Value();
-        VectorStoreV2::SearchResult result;
+        nvs::VectorStoreV2::SearchResult result;
         
         if (!store_->get_document(docId, result)) {
             return info.Env().Null();

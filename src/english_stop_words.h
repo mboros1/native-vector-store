@@ -7,6 +7,8 @@
 
 /// Provides access to a single, compiled-in list of English stop words.
 /// The set is built once (thread-safe in C++11+) from the raw string literal below.
+namespace nvs {
+
 class EnglishStopWords {
 public:
     /// Returns the singleton stop-word set.
@@ -431,3 +433,5 @@ private:
     EnglishStopWords& operator=(const EnglishStopWords&) = delete;
 };
 
+
+} // namespace nvs

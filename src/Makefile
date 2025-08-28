@@ -44,10 +44,13 @@ TEST_TARGET = $(BIN_DIR)/test_vector_store
 STRESS_TARGET = $(BIN_DIR)/test_stress
 COMP_TARGET = $(BIN_DIR)/test_comprehensive
 SPLITTER_TEST_TARGET = $(BIN_DIR)/test_sentence_splitter
+UNIT_TEST_TARGET = $(BIN_DIR)/unit_tests
 
 # Source files
 PACK_SOURCES = nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 BUNDLE_TEST_SOURCES = test/test_bundle.cpp ../deps/simdjson/simdjson.cpp
+# Unit test sources - includes production code with tests enabled
+UNIT_TEST_SOURCES = test_runner.cpp nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 TEST_SOURCES = test/test_vector_store_v2.cpp vector_store_v2.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 STRESS_SOURCES = test/test_stress_v2.cpp vector_store_v2.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 COMP_SOURCES = test/test_comprehensive_v2.cpp vector_store_v2.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
@@ -59,6 +62,8 @@ TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(TEST_SOURCES)))
 STRESS_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(STRESS_SOURCES)))
 COMP_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(COMP_SOURCES)))
 SPLITTER_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(SPLITTER_TEST_SOURCES)))
+# Unit test objects need special naming to avoid conflicts
+UNIT_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/test_%.o,$(notdir $(UNIT_TEST_SOURCES)))
 
 all: $(BIN_DIR) $(OBJ_DIR) $(PACK_TARGET) $(BUNDLE_TEST_TARGET) $(TEST_TARGET) $(STRESS_TARGET) $(COMP_TARGET) $(SPLITTER_TEST_TARGET)
 
@@ -86,6 +91,11 @@ $(COMP_TARGET): $(BIN_DIR) $(OBJ_DIR) $(COMP_OBJECTS)
 $(SPLITTER_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(SPLITTER_TEST_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(SPLITTER_TEST_OBJECTS) -o $(SPLITTER_TEST_TARGET) $(LDFLAGS) $(LIBS)
 
+# Unit test target - compiles with tests enabled
+$(UNIT_TEST_TARGET): CXXFLAGS += -DNVS_ENABLE_INLINE_TESTS
+$(UNIT_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(UNIT_TEST_OBJECTS)
+	$(CXX) $(CXXFLAGS) $(UNIT_TEST_OBJECTS) -o $(UNIT_TEST_TARGET) $(LDFLAGS) $(LIBS)
+
 # Pattern rules for different source directories
 $(OBJ_DIR)/%.o: %.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
@@ -96,12 +106,28 @@ $(OBJ_DIR)/%.o: test/%.cpp | $(OBJ_DIR)
 $(OBJ_DIR)/%.o: ../deps/simdjson/%.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
+# Special rules for unit test objects with test prefix to avoid conflicts
+$(OBJ_DIR)/test_%.o: %.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -DNVS_ENABLE_INLINE_TESTS -c $< -o $@
+
+$(OBJ_DIR)/test_simdjson.o: ../deps/simdjson/simdjson.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -DNVS_ENABLE_INLINE_TESTS -c $< -o $@
+
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
 # Test targets
 test: $(TEST_TARGET)
 	./$(TEST_TARGET) test-bundle
+
+# Run unit tests with doctest
+unit-tests: $(UNIT_TEST_TARGET)
+	@echo "Running unit tests with doctest..."
+	./$(UNIT_TEST_TARGET)
+
+# Build tests but don't run (for CI)
+build-tests: $(UNIT_TEST_TARGET)
+	@echo "Tests built successfully"
 
 test-bundle: $(BUNDLE_TEST_TARGET)
 	@echo "Usage: make test-bundle BUNDLE_DIR=<path-to-bundle>"

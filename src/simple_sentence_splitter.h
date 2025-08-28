@@ -10,6 +10,8 @@
 #include "english_abbreviations.h"
 #include "english_dictionary.h"
 
+namespace nvs {
+
 /**
  * Simple sentence splitter for English text, based on Smile NLP's implementation.
  * 
@@ -310,5 +312,7 @@ private:
         return result.substr(first, (last - first + 1));
     }
 };
+
+} // namespace nvs
 
 #endif // SIMPLE_SENTENCE_SPLITTER_H

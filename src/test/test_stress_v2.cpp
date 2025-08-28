@@ -1,4 +1,4 @@
-// Stress test for VectorStoreV2 - bundle-based implementation
+// Stress test for nvs::VectorStoreV2 - bundle-based implementation
 // Tests concurrent operations, memory safety, and performance
 #include "../vector_store_v2.h"
 #include "../document_loader.h"
@@ -106,7 +106,7 @@ void test_concurrent_search_stress(const std::string& bundle_path) {
     }
     
     // Open the store
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     auto start = high_resolution_clock::now();
     
     if (!store.open(bundle_path)) {
@@ -185,7 +185,7 @@ void test_mmap_stress(const std::string& bundle_path) {
     std::vector<long> first_search_times;
     
     // First open to get dimensions
-    VectorStoreV2 temp_store;
+    nvs::VectorStoreV2 temp_store;
     if (!temp_store.open(bundle_path)) {
         std::cout << "❌ Failed to open bundle for dimension check\n";
         return;
@@ -197,7 +197,7 @@ void test_mmap_stress(const std::string& bundle_path) {
     auto query = generate_random_embedding(dim, rng);
     
     for (int i = 0; i < cycles; ++i) {
-        VectorStoreV2 store;
+        nvs::VectorStoreV2 store;
         
         auto start = high_resolution_clock::now();
         if (!store.open(bundle_path)) {
@@ -239,7 +239,7 @@ void test_hybrid_search_stress(const std::string& bundle_path) {
         return;
     }
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     if (!store.open(bundle_path)) {
         std::cout << "❌ Failed to open bundle\n";
         return;
@@ -308,7 +308,7 @@ void test_document_retrieval_stress(const std::string& bundle_path) {
         return;
     }
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     if (!store.open(bundle_path)) {
         std::cout << "❌ Failed to open bundle\n";
         return;
@@ -331,7 +331,7 @@ void test_document_retrieval_stress(const std::string& bundle_path) {
             try {
                 for (size_t i = 0; i < 100; ++i) {
                     size_t doc_id = dist(rng);
-                    VectorStoreV2::SearchResult result;
+                    nvs::VectorStoreV2::SearchResult result;
                     
                     if (!store.get_document(doc_id, result)) {
                         std::cerr << "Thread " << t << ": Failed to retrieve document " << doc_id << "\n";
@@ -382,7 +382,7 @@ void test_race_conditions(const std::string& bundle_path) {
     std::atomic<bool> has_race{false};
     
     for (int iter = 0; iter < num_iterations; ++iter) {
-        VectorStoreV2 store;
+        nvs::VectorStoreV2 store;
         if (!store.open(bundle_path)) {
             std::cout << "❌ Failed to open bundle\n";
             return;
@@ -424,7 +424,7 @@ void test_race_conditions(const std::string& bundle_path) {
         for (int i = 0; i < 4; ++i) {
             workers.emplace_back([&store, &has_race]() {
                 for (size_t j = 0; j < std::min(size_t(10), store.size()); ++j) {
-                    VectorStoreV2::SearchResult result;
+                    nvs::VectorStoreV2::SearchResult result;
                     if (!store.get_document(j, result)) {
                         std::cerr << "Race: Failed to retrieve valid document\n";
                         has_race = true;
@@ -450,7 +450,7 @@ void test_race_conditions(const std::string& bundle_path) {
 }
 
 int main(int argc, char** argv) {
-    std::cout << "🔥 VectorStoreV2 Stress Tests\n";
+    std::cout << "🔥 nvs::VectorStoreV2 Stress Tests\n";
     std::cout << "==============================\n";
     
     // Detect which sanitizer is enabled

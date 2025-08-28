@@ -4,6 +4,8 @@
 #include <regex>
 #include <unordered_set>
 
+namespace nvs {
+
 class SimpleTokenizer {
 public:
     explicit SimpleTokenizer(bool splitContraction = false)
@@ -28,3 +30,5 @@ private:
     // very minimal abbreviation set; expand as needed
     static bool isAbbreviation(const std::string& tok);
 };
+
+} // namespace nvs

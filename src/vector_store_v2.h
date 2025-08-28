@@ -10,6 +10,8 @@
 #include <omp.h>
 #include <simdjson.h>
 
+namespace nvs {
+
 // VectorStore V2 - Bundle-based implementation
 // Works exclusively with pre-built bundles for optimal performance
 // No JSON parsing at runtime, direct mmap access to all data
@@ -186,3 +188,5 @@ private:
     // Helper to decode delta-encoded postings
     std::vector<std::pair<uint32_t, uint32_t>> decode_posting_list(size_t term_id) const;
 };
+
+} // namespace nvs

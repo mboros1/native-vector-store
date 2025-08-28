@@ -7,6 +7,8 @@
 #include <queue>
 #include <algorithm>
 
+namespace nvs {
+
 // MMapFile implementation
 VectorStoreV2::MMapFile::MMapFile(MMapFile&& other) noexcept
     : data_(other.data_), size_(other.size_), fd_(other.fd_) {
@@ -593,3 +595,5 @@ VectorStoreV2::decode_posting_list(size_t term_id) const {
     
     return postings;
 }
+
+} // namespace nvs

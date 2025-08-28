@@ -5,6 +5,8 @@
 #include <unordered_set>
 #include <sstream>
 
+namespace nvs {
+
 class EnglishDictionary {
 public:
     /// Returns the singleton dictionary (built once, thread-safe in C++11+)
@@ -25182,3 +25184,4 @@ zygote
     }
 };
 
+} // namespace nvs

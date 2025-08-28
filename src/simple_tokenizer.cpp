@@ -1,6 +1,8 @@
 #include "simple_tokenizer.h"
 #include <sstream>
 
+namespace nvs {
+
 std::vector<std::string> SimpleTokenizer::split(const std::string& input) {
     std::string text = input;
 
@@ -90,3 +92,5 @@ const std::vector<std::regex> SimpleTokenizer::DELIMITERS = {
 };
 
 const std::regex SimpleTokenizer::WHITESPACE("\\s+");
+
+} // namespace nvs

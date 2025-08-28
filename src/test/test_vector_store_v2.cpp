@@ -57,7 +57,7 @@ int main(int argc, char* argv[]) {
     std::cout << YELLOW << "Test 1: Opening bundle..." << RESET << "\n";
     auto start = std::chrono::high_resolution_clock::now();
     
-    VectorStoreV2 store;
+    nvs::VectorStoreV2 store;
     if (!store.open(bundle_path)) {
         test_fail("Open bundle", "Failed to open");
         return 1;
@@ -148,7 +148,7 @@ int main(int argc, char* argv[]) {
     // Test 5: Document retrieval
     std::cout << YELLOW << "Test 5: Document retrieval..." << RESET << "\n";
     
-    VectorStoreV2::SearchResult doc;
+    nvs::VectorStoreV2::SearchResult doc;
     if (store.get_document(0, doc)) {
         test_pass("Retrieved document 0");
         std::cout << "  ID: " << doc.id << "\n";

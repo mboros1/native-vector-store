@@ -2,6 +2,8 @@
 #include <unordered_set>
 #include <string>
 
+namespace nvs {
+
 class EnglishPunctuations {
 public:
     /// Returns the singleton instance
@@ -39,4 +41,4 @@ private:
     EnglishPunctuations& operator=(const EnglishPunctuations&) = delete;
 
     const std::unordered_set<std::string> dict_;
-};
+};} // namespace nvs

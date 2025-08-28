@@ -4,7 +4,7 @@
 #include "../simple_sentence_splitter.h"
 
 void test_basic_splitting() {
-    SimpleSentenceSplitter splitter;
+    nvs::SimpleSentenceSplitter splitter;
     
     std::cout << "Test 1: Basic sentence splitting\n";
     std::string text = "This is the first sentence. This is the second! Is this the third? Yes it is.";
@@ -19,7 +19,7 @@ void test_basic_splitting() {
 }
 
 void test_abbreviations() {
-    SimpleSentenceSplitter splitter;
+    nvs::SimpleSentenceSplitter splitter;
     
     std::cout << "Test 2: Handling abbreviations\n";
     std::string text = "Dr. Smith works at the U.S. Dept. of Defense. He arrived at 3 p.m. yesterday.";
@@ -34,7 +34,7 @@ void test_abbreviations() {
 }
 
 void test_missing_spaces() {
-    SimpleSentenceSplitter splitter;
+    nvs::SimpleSentenceSplitter splitter;
     
     std::cout << "Test 3: Missing spaces after punctuation\n";
     std::string text = "I believe.I think.Therefore I am! Really?Yes, really.";
@@ -49,7 +49,7 @@ void test_missing_spaces() {
 }
 
 void test_quotes_and_brackets() {
-    SimpleSentenceSplitter splitter;
+    nvs::SimpleSentenceSplitter splitter;
     
     std::cout << "Test 4: Quotes and brackets\n";
     std::string text = "He said \"Hello there!\" Then he left. (This was unexpected.) \"Why?\" she asked.";
@@ -64,7 +64,7 @@ void test_quotes_and_brackets() {
 }
 
 void test_complex_text() {
-    SimpleSentenceSplitter splitter;
+    nvs::SimpleSentenceSplitter splitter;
     
     std::cout << "Test 5: Complex real-world text\n";
     std::string text = "The company, founded in 1985 by Mr. John Smith Jr., specializes in A.I. "
