@@ -80,7 +80,7 @@ struct MetaIndex {
  * - meta.blocks: doc-aligned metadata blocks with block headers and fixed padding.
  * - meta.idx: per-doc block index entries (block_id, offset_in_block, doc_size).
  * - manifest.json: declarative bundle description.
- * - checksums.sha256: hex checksums of all bundle files (xxhash64 for speed).
+ * - checksums.xxhash64: hex xxhash64 checksums of all bundle files.
  */
 class NVSPacker {
 private:
@@ -95,6 +95,10 @@ public:
         
         // Step 1: Load documents using DocumentLoader
         std::cout << "Loading documents from " << opts_.input_path << "...\n";
+        if (opts_.quantize_f16) {
+            std::cerr << "Error: f16 quantization is currently disabled; please use f32." << std::endl;
+            return 1;
+        }
         data_ = DocumentLoader::loadDirectory(opts_.input_path, opts_.verbose);
         
         if (data_.documents.empty()) {
@@ -402,7 +406,7 @@ private:
     bool writeChecksums() {
         std::cout << "Computing checksums...\n";
         
-        std::string path = opts_.output_dir + "/checksums.sha256";
+        std::string path = opts_.output_dir + "/checksums.xxhash64";
         std::ofstream file(path);
         if (!file) return false;
         
@@ -810,7 +814,7 @@ TEST_CASE("NVSPacker end-to-end bundle build") {
     expect_exists("terms.dict");
     expect_exists("meta.idx");
     expect_exists("meta.blocks");
-    expect_exists("checksums.sha256");
+    expect_exists("checksums.xxhash64");
 
     // Verify manifest basics
     {
@@ -939,6 +943,24 @@ TEST_CASE("NVSPacker BM25 df and postings correctness") {
         CHECK(postings.back().second >= 1);
     }
 
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+}
+
+TEST_CASE("NVSPacker rejects f16 quantization") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+    auto tmp_in = fs::temp_directory_path() / "nvs_pack_f16_in";
+    auto tmp_out = fs::temp_directory_path() / "nvs_pack_f16_out";
+    fs::remove_all(tmp_in);
+    fs::create_directories(tmp_in);
+    {
+        std::ofstream f(tmp_in / "docs.json");
+        f << R"([{\"id\":\"d\",\"text\":\"t\",\"metadata\":{\"embedding\":[1,2,3]}}])";
+    }
+    PackerOptions opts; opts.input_path = tmp_in.string(); opts.output_dir = tmp_out.string(); opts.quantize_f16 = true;
+    NVSPacker packer(opts);
+    CHECK(packer.run() != 0);
     fs::remove_all(tmp_in);
     fs::remove_all(tmp_out);
 }

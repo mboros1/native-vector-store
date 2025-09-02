@@ -162,7 +162,7 @@ TEST_CASE("E2E block headers and checksums") {
 
     // Checksums format sanity
     {
-        std::ifstream in(tmp_out / "checksums.sha256");
+        std::ifstream in(tmp_out / "checksums.xxhash64");
         REQUIRE(in.good());
         std::string line;
         size_t seen = 0;

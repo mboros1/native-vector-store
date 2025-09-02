@@ -182,6 +182,21 @@ bool VectorStoreV2::load_manifest() {
     if (bm25["k1"].get_double().get(info_.bm25_k1)) return false;
     if (bm25["b"].get_double().get(info_.bm25_b)) return false;
     
+    // Optional: parse files.meta.block_size to validate blocks
+    try {
+        simdjson::ondemand::object files;
+        if (!doc["files"].get_object().get(files)) {
+            simdjson::ondemand::object meta;
+            if (!files["meta"].get_object().get(meta)) {
+                uint64_t bsz = 0;
+                if (!meta["block_size"].get_uint64().get(bsz)) {
+                    meta_block_size_ = static_cast<uint32_t>(bsz);
+                }
+            }
+        }
+    } catch (...) {
+        // Field optional; ignore parse errors here
+    }
     return true;
 }
 
@@ -231,7 +246,11 @@ bool VectorStoreV2::open_data_files() {
     if (meta_block_count_ == 0) return false;
     size_t remaining = meta_file_.size() > header_size ? (meta_file_.size() - header_size) : 0;
     if (remaining == 0) return false;
-    meta_block_size_ = static_cast<uint32_t>(remaining / meta_block_count_);
+    uint32_t derived = static_cast<uint32_t>(remaining / meta_block_count_);
+    if (meta_block_size_ != 0 && meta_block_size_ != derived) {
+        return false;
+    }
+    meta_block_size_ = derived;
     
     return true;
 }
