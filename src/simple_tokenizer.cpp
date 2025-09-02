@@ -24,19 +24,19 @@ static constexpr auto CONTRACTIONS3_PATTERN = ctll::fixed_string{R"(\b([Tt])'([I
 static constexpr auto CONTRACTIONS3_PATTERN2 = ctll::fixed_string{R"(\b([Tt])'([Ww])as\b)"};
 
 // Delimiter patterns
-// UNICODE LIMITATION: Currently using ASCII-only word patterns (\w matches [a-zA-Z0-9_]).
-// Full Unicode support would require using \p{Letter} patterns, but this requires
-// refactoring to handle negated Unicode character classes differently.
-// As a result, Unicode characters (é, ï, €, etc.) are treated as delimiters.
-static constexpr auto NON_WORD_PATTERN = ctll::fixed_string{"([^\\w\\.'\\-/,&])"};
+// Unicode-aware: treat all letters/numbers as part of words
+// Allow . ' - / , & inside tokens as before
+// Pragmatic UTF-8 support: treat all non-ASCII bytes (0x80-0xFF) as part of words
+// so multi-byte UTF-8 sequences don't get split. Also allow ASCII letters/digits and certain punctuation.
+static constexpr auto NON_WORD_PATTERN = ctll::fixed_string{R"(([^\x80-\xff\w\.'\-/,&]))"};
 static constexpr auto COMMA_PATTERN = ctll::fixed_string{R"((,)\s)"};
 static constexpr auto COMMA_NO_SPACE_PATTERN = ctll::fixed_string{R"((,)([^\s]))"};
 static constexpr auto APOSTROPHE_SPACE_PATTERN = ctll::fixed_string{R"(('\s))"};
 static constexpr auto PERIOD_EOL_PATTERN = ctll::fixed_string{R"(\.(\s*(\n|$)))"};
 static constexpr auto ELLIPSIS_PATTERN = ctll::fixed_string{R"((\.{3,}))"};
 
-// Whitespace pattern for tokenization - handles Unicode whitespace
-static constexpr auto WHITESPACE_PATTERN = ctll::fixed_string{R"(\s+)"};
+// Whitespace pattern for tokenization - include Unicode space separators
+static constexpr auto WHITESPACE_PATTERN = ctll::fixed_string{R"(([\p{Zs}\t\n\r]+))"};
 
 template <auto& Pat, class F>
 static inline void rewrite(std::string& s, F&& f) {
@@ -127,104 +127,87 @@ std::string SimpleTokenizer::process_contractions(std::string text) const {
 }
 
 std::string SimpleTokenizer::process_delimiters(std::string text) const {
-    // Apply delimiter rules to separate punctuation
+    // UTF-8 aware delimiter processing: surround delimiter codepoints with spaces,
+    // preserve word codepoints and allowed punctuation within tokens, and normalize
+    // whitespace to single spaces.
+    auto is_allowed_punct = [](uint32_t cp) {
+        // Punctuation allowed inside word tokens
+        return cp == '.' || cp == '\'' || cp == '-' || cp == '/' || cp == '&';
+    };
+    auto is_ascii_alnum = [](uint32_t cp) {
+        return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || (cp >= '0' && cp <= '9') || cp == '_';
+    };
+    auto is_whitespace = [](uint32_t cp) {
+        // ASCII whitespace + common Unicode space separator bytes will be handled by \s splitting too
+        return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r';
+    };
+    auto is_word = [&](uint32_t cp) {
+        // Treat any non-ASCII codepoint as part of words; plus ASCII alnum; plus certain punctuation.
+        if (cp >= 0x80) return true;
+        if (is_ascii_alnum(cp)) return true;
+        if (is_allowed_punct(cp)) return true;
+        return false;
+    };
     
-    // Non-word characters (except . ' - / , &)
-    {
-        std::string result;
-        result.reserve(text.size() * 2);
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<NON_WORD_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(" ");
-            result.append(match.template get<0>().to_view());
-            result.append(" ");
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
-
-    // Comma followed by space
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<COMMA_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(" ");
-            result.append(match.template get<1>().to_view());
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    std::string out;
+    out.reserve(text.size() * 2);
+    auto append_space = [&](){ if (out.empty() || out.back() != ' ') out.push_back(' '); };
     
-    // Comma without space - insert space after comma
-    {
-        std::string result;
-        result.reserve(text.size() * 2);
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<COMMA_NO_SPACE_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(" ");
-            result.append(match.template get<1>().to_view());  // comma
-            result.append(" ");
-            result.append(match.template get<2>().to_view());  // character after comma
-            last_pos = match.end() - text.begin();
+    size_t i = 0;
+    while (i < text.size()) {
+        unsigned char c = static_cast<unsigned char>(text[i]);
+        uint32_t cp = 0; size_t len = 1;
+        if (c < 0x80) {
+            cp = c;
+        } else if ((c >> 5) == 0x6 && i + 1 < text.size()) {
+            cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(text[i+1]) & 0x3F);
+            len = 2;
+        } else if ((c >> 4) == 0xE && i + 2 < text.size()) {
+            cp = ((c & 0x0F) << 12) | ((static_cast<unsigned char>(text[i+1]) & 0x3F) << 6) | (static_cast<unsigned char>(text[i+2]) & 0x3F);
+            len = 3;
+        } else if ((c >> 3) == 0x1E && i + 3 < text.size()) {
+            cp = ((c & 0x07) << 18) | ((static_cast<unsigned char>(text[i+1]) & 0x3F) << 12) |
+                 ((static_cast<unsigned char>(text[i+2]) & 0x3F) << 6) | (static_cast<unsigned char>(text[i+3]) & 0x3F);
+            len = 4;
+        } else {
+            // Invalid sequence - treat as delimiter
+            cp = c; len = 1;
         }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
-
-    // Apostrophe followed by space
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<APOSTROPHE_SPACE_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(" ");
-            result.append(match.template get<0>().to_view());
-            last_pos = match.end() - text.begin();
+        
+        if (is_whitespace(cp)) {
+            append_space();
+        } else if (cp == '.') {
+            // Handle ellipsis sequences: split each '.' as separate token
+            size_t j = i; size_t run = 0;
+            while (j < text.size() && static_cast<unsigned char>(text[j]) == '.') { ++j; ++run; }
+            if (run >= 3) {
+                for (size_t k = 0; k < run; ++k) { append_space(); out.push_back('.'); append_space(); }
+                i += run; // continue
+                continue;
+            } else {
+                // If period at end of line/text (optionally followed by whitespace/newline), separate it
+                size_t k = i + 1;
+                while (k < text.size()) {
+                    unsigned char nb = static_cast<unsigned char>(text[k]);
+                    if (nb == ' ' || nb == '\t' || nb == '\r') { ++k; continue; }
+                    break;
+                }
+                if (k >= text.size() || static_cast<unsigned char>(text[k]) == '\n') {
+                    append_space(); out.push_back('.'); append_space();
+                } else {
+                    out.append(text, i, 1);
+                }
+            }
+        } else if (is_word(cp)) {
+            out.append(text, i, len);
+        } else {
+            append_space();
+            out.append(text, i, len);
+            append_space();
         }
-        result.append(text, last_pos);
-        text = std::move(result);
+        i += len;
     }
-
-    // Multiple periods (ellipsis) - process BEFORE single periods
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<ELLIPSIS_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(" ");
-            result.append(match.template get<1>().to_view());  // The captured ellipsis
-            result.append(" ");
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
-
-    // Period at end of line or text (after ellipsis processing)
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<PERIOD_EOL_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(" . ");
-            // Append the whitespace/newline that was captured
-            result.append(match.template get<1>().to_view());
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
-
-    return text;
+    return out;
 }
 
 std::vector<std::string> SimpleTokenizer::split(const std::string& input) {
@@ -620,11 +603,11 @@ TEST_CASE("SimpleTokenizer edge cases") {
     
     SUBCASE("currency symbols") {
         auto tokens = tokenizer.split("$100 €50 £25");
-        // Unicode currency symbols get broken up due to ASCII-only patterns
-        CHECK(tokens.size() >= 6);  // Will be more due to Unicode splitting
+        CHECK(tokens.size() == 4);
         CHECK(tokens[0] == "$");
         CHECK(tokens[1] == "100");
-        // € and £ will be split into multiple tokens
+        CHECK(tokens[2] == "€50");
+        CHECK(tokens[3] == "£25");
     }
     
     SUBCASE("mathematical operators") {
@@ -739,11 +722,18 @@ TEST_CASE("SimpleTokenizer boundary conditions") {
         CHECK(tokens[2] == "#");
     }
     
-    SUBCASE("unicode characters") {
+    SUBCASE("unicode characters latin-1") {
         auto tokens = tokenizer.split("café naïve");
-        // Due to ASCII-only patterns, Unicode chars are treated as delimiters
-        CHECK(tokens.size() >= 4);  // Will split on é and ï
-        // Note: Full Unicode support would require pattern refactoring
+        CHECK(tokens.size() == 2);
+        CHECK(tokens[0] == "café");
+        CHECK(tokens[1] == "naïve");
+    }
+    
+    SUBCASE("unicode cyrillic") {
+        auto tokens = tokenizer.split("привет мир");
+        CHECK(tokens.size() == 2);
+        CHECK(tokens[0] == "привет");
+        CHECK(tokens[1] == "мир");
     }
     
     SUBCASE("multiple consecutive delimiters") {

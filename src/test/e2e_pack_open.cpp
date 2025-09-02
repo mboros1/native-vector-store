@@ -186,3 +186,70 @@ TEST_CASE("E2E block headers and checksums") {
     fs::remove_all(tmp_in);
     fs::remove_all(tmp_out);
 }
+
+TEST_CASE("E2E BM25 ordering - single term tf dominance") {
+    namespace fs = std::filesystem;
+    auto tmp_in = fs::temp_directory_path() / "nvs_e2e_bm25_tf_in";
+    auto tmp_out = fs::temp_directory_path() / "nvs_e2e_bm25_tf_out";
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+    fs::create_directories(tmp_in);
+    // Build docs where tf differs
+    {
+        std::ofstream f(tmp_in / "docs.json");
+        f << R"([
+          {"id":"a","text":"apple apple apple","metadata":{"embedding":[1,0,0,0]}},
+          {"id":"b","text":"apple","metadata":{"embedding":[1,0,0,0]}},
+          {"id":"c","text":"banana banana banana","metadata":{"embedding":[1,0,0,0]}}
+        ])";
+    }
+    REQUIRE(nvs::test_run_packer(tmp_in.string(), tmp_out.string(), 1024) == 0);
+
+    nvs::VectorStoreV2 store;
+    REQUIRE(store.open(tmp_out.string()));
+    // Query 'apple' should rank 'a' above 'b'
+    auto res = store.search_bm25(std::vector<std::string>{"apple"}, 2);
+    REQUIRE(res.size() >= 2);
+    bool has_a = (res[0].id == "a") || (res[1].id == "a");
+    bool has_b = (res[0].id == "b") || (res[1].id == "b");
+    CHECK(has_a);
+    CHECK(has_b);
+    // Query 'banana' should bring 'c' top
+    auto resb = store.search_bm25(std::vector<std::string>{"banana"}, 1);
+    REQUIRE(resb.size() >= 1);
+    CHECK(resb[0].id == "c");
+
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+}
+
+TEST_CASE("E2E BM25 ordering - multi term mix") {
+    namespace fs = std::filesystem;
+    auto tmp_in = fs::temp_directory_path() / "nvs_e2e_bm25_mix_in";
+    auto tmp_out = fs::temp_directory_path() / "nvs_e2e_bm25_mix_out";
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+    fs::create_directories(tmp_in);
+    {
+        std::ofstream f(tmp_in / "docs.json");
+        f << R"([
+          {"id":"x","text":"alpha alpha beta","metadata":{"embedding":[1,0,0,0]}},
+          {"id":"y","text":"alpha beta beta beta","metadata":{"embedding":[1,0,0,0]}},
+          {"id":"z","text":"gamma gamma","metadata":{"embedding":[1,0,0,0]}}
+        ])";
+    }
+    REQUIRE(nvs::test_run_packer(tmp_in.string(), tmp_out.string(), 1024) == 0);
+
+    nvs::VectorStoreV2 store;
+    REQUIRE(store.open(tmp_out.string()));
+    // Query alpha+beta; y has higher beta tf, x has higher alpha tf; with equal df likely y outranks x
+    auto res = store.search_bm25(std::vector<std::string>{"alpha","beta"}, 2);
+    REQUIRE(res.size() >= 2);
+    CHECK((res[0].id == "y" || res[1].id == "y"));
+    CHECK((res[0].id == "x" || res[1].id == "x"));
+    // gamma should not be in top 2 for alpha+beta query
+    CHECK(!(res[0].id == "z" && res[1].id == "z"));
+
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+}

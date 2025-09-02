@@ -168,10 +168,14 @@ public:
      * @brief Open a bundle directory.
      * @param bundle_path Path to bundle directory containing manifest and data files.
      * @return true on success, false on failure (is_open() remains false).
+     *
+     * Ownership:
+     * - The store memory-maps all data files; pointers remain valid while the store is open.
+     * - No copies of large arrays are made; closing the store invalidates all mapped pointers.
      */
     bool open(const std::string& bundle_path);
     
-    /** @brief Close the bundle and release all resources. */
+    /** @brief Close the bundle and release all resources (unmaps all files). */
     void close();
     
     /** @brief Whether the store is ready for queries. */
@@ -216,6 +220,8 @@ public:
      * @param doc_id Zero-based internal document ID.
      * @param result Output populated on success.
      * @return true if found; false if out of range or on error.
+     *
+     * Note: The returned strings (id, text, metadata_json) are freshly copied and owned by 'result'.
      */
     bool get_document(size_t doc_id, SearchResult& result) const;
     

@@ -21,6 +21,16 @@ namespace fs = std::filesystem;
 
 namespace nvs {
 
+/**
+ * @brief Options controlling bundle packing.
+ *
+ * Ownership:
+ * - NVSPacker holds a copy of PackerOptions; strings are copied by value.
+ *
+ * Behavior notes:
+ * - dim==0: dimension is auto-detected from the first loaded document; otherwise validated.
+ * - block_size: target uncompressed block size for doc-aligned metadata blocks in meta.blocks.
+ */
 struct PackerOptions {
     std::string input_path;
     std::string output_dir = "./nvs-bundle";
@@ -60,6 +70,18 @@ struct MetaIndex {
     uint32_t padding;
 };
 
+/**
+ * @brief Offline packer that writes block-aligned, read-only bundles.
+ *
+ * Outputs (in output_dir):
+ * - vectors.f32|f16: aligned float rows with per-row padding to 64 bytes.
+ * - doclen.u32: per-document token counts.
+ * - lexicon.bin, postings.bin, terms.dict: BM25 term index (delta-encoded postings).
+ * - meta.blocks: doc-aligned metadata blocks with block headers and fixed padding.
+ * - meta.idx: per-doc block index entries (block_id, offset_in_block, doc_size).
+ * - manifest.json: declarative bundle description.
+ * - checksums.sha256: hex checksums of all bundle files (xxhash64 for speed).
+ */
 class NVSPacker {
 private:
     PackerOptions opts_;
@@ -832,6 +854,94 @@ TEST_CASE("NVSPacker end-to-end bundle build") {
     fs::remove_all(tmp_out);
 }
 #endif
+TEST_CASE("NVSPacker BM25 df and postings correctness") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+    // Build 3-doc corpus with interleaved terms so df is known
+    auto tmp_in = fs::temp_directory_path() / "nvs_pack_df_in";
+    auto tmp_out = fs::temp_directory_path() / "nvs_pack_df_out";
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+    fs::create_directories(tmp_in);
+    {
+        std::ofstream f(tmp_in / "docs.json");
+        f << R"([
+          {"id":"d1","text":"apple banana","metadata":{"embedding":[1,0,0,0]}},
+          {"id":"d2","text":"banana cherry","metadata":{"embedding":[1,0,0,0]}},
+          {"id":"d3","text":"cherry apple","metadata":{"embedding":[1,0,0,0]}}
+        ])";
+    }
+    REQUIRE(nvs::test_run_packer(tmp_in.string(), tmp_out.string(), 1024) == 0);
+
+    // Read terms.dict to find term IDs
+    std::vector<std::string> terms;
+    {
+        std::ifstream in(tmp_out / "terms.dict", std::ios::binary);
+        REQUIRE(in.good());
+        while (true) {
+            uint32_t len=0; in.read(reinterpret_cast<char*>(&len), sizeof(len));
+            if (!in) break;
+            std::string t(len, '\0');
+            in.read(t.data(), len);
+            terms.push_back(t);
+        }
+    }
+    auto find_term = [&](const std::string& t){
+        for (size_t i=0;i<terms.size();++i) if (terms[i]==t) return (int)i; return -1; };
+    int id_apple = find_term("apple");
+    int id_banana = find_term("banana");
+    int id_cherry = find_term("cherry");
+    CHECK(id_apple >= 0);
+    CHECK(id_banana >= 0);
+    CHECK(id_cherry >= 0);
+
+    // Read lexicon
+    struct Lex { uint64_t offset; uint32_t length; uint32_t df; };
+    std::vector<Lex> lex;
+    {
+        std::ifstream in(tmp_out / "lexicon.bin", std::ios::binary);
+        REQUIRE(in.good());
+        in.seekg(0, std::ios::end);
+        size_t s = (size_t)in.tellg();
+        size_t n = s / sizeof(Lex);
+        lex.resize(n);
+        in.seekg(0, std::ios::beg);
+        in.read(reinterpret_cast<char*>(lex.data()), s);
+    }
+    REQUIRE((size_t)id_apple < lex.size());
+    REQUIRE((size_t)id_banana < lex.size());
+    REQUIRE((size_t)id_cherry < lex.size());
+    CHECK(lex[id_apple].df == 2);
+    CHECK(lex[id_banana].df == 2);
+    CHECK(lex[id_cherry].df == 2);
+
+    // Verify postings of one term decode to correct doc ids and tf
+    {
+        std::ifstream post(tmp_out / "postings.bin", std::ios::binary);
+        REQUIRE(post.good());
+        const auto& L = lex[id_apple];
+        post.seekg((std::streamoff)L.offset, std::ios::beg);
+        std::vector<std::pair<uint32_t,uint32_t>> postings; postings.reserve(L.length);
+        uint32_t prev = 0;
+        for (uint32_t i=0;i<L.length;++i) {
+            uint32_t delta=0, tf=0;
+            post.read(reinterpret_cast<char*>(&delta), sizeof(delta));
+            post.read(reinterpret_cast<char*>(&tf), sizeof(tf));
+            uint32_t doc = prev + delta;
+            postings.emplace_back(doc, tf);
+            prev = doc;
+        }
+        CHECK(postings.size() == L.length);
+        // In our small corpus apple appears in doc0 and doc2 once each
+        CHECK(postings[0].first == 0);
+        CHECK(postings.back().first == 2);
+        CHECK(postings[0].second >= 1);
+        CHECK(postings.back().second >= 1);
+    }
+
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+}
 TEST_CASE("NVSPacker vector quantization") {
     using namespace nvs;
     

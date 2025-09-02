@@ -1217,4 +1217,99 @@ TEST_CASE("VectorStoreV2 basic concurrency smoke") {
 }
 #endif // NVS_TEST_V2_CONCURRENCY
 #endif // NVS_TEST_V2_BUNDLE
+
+TEST_CASE("VectorStoreV2 block metadata robustness") {
+    using nvs::VectorStoreV2;
+    namespace fs = std::filesystem;
+
+    auto make_minimal_bundle = [](const fs::path& dir, uint32_t num_docs, uint32_t dim) {
+        fs::create_directories(dir);
+        std::ofstream mf(dir / "manifest.json");
+        mf << "{\n"
+              "  \"format\": \"nvs.v1\",\n"
+              "  \"num_docs\": " << num_docs << ",\n"
+              "  \"dim\": " << dim << ",\n"
+              "  \"embedding\": {\"model\": \"test\", \"dtype\": \"f32\"},\n"
+              "  \"bm25\": {\"avgdl\": 1.0, \"k1\": 1.2, \"b\": 0.75},\n"
+              "  \"files\": {\n"
+              "    \"vectors\": {\"path\": \"vectors.f32\", \"dtype\": \"f32\", \"rows\": " << num_docs << ", \"cols\": " << dim << "},\n"
+              "    \"doclen\": {\"path\": \"doclen.u32\", \"dtype\": \"u32\", \"rows\": " << num_docs << "},\n"
+              "    \"lexicon\": {\"path\": \"lexicon.bin\"},\n"
+              "    \"postings\": {\"path\": \"postings.bin\"},\n"
+              "    \"terms\": {\"path\": \"terms.dict\"},\n"
+              "    \"meta_idx\": {\"path\": \"meta.idx\", \"schema\": \"u32 block_id, u32 offset, u32 doc_size\"},\n"
+              "    \"meta\": {\"path\": \"meta.blocks\", \"block_size\": 128, \"doc_aligned\": true}\n"
+              "  }\n"
+              "}\n";
+        mf.close();
+        std::ofstream v(dir / "vectors.f32", std::ios::binary); v.close();
+        std::ofstream d(dir / "doclen.u32", std::ios::binary); d.close();
+        std::ofstream lx(dir / "lexicon.bin", std::ios::binary); lx.close();
+        std::ofstream po(dir / "postings.bin", std::ios::binary); po.close();
+        std::ofstream te(dir / "terms.dict", std::ios::binary); te.close();
+    };
+
+    SUBCASE("open fails on zero block_count") {
+        auto dir = fs::temp_directory_path() / "nvs_bad_blocks_0";
+        fs::remove_all(dir);
+        make_minimal_bundle(dir, 1, 1);
+        {
+            std::ofstream mb(dir / "meta.blocks", std::ios::binary);
+            uint32_t bc = 0; mb.write(reinterpret_cast<const char*>(&bc), sizeof(bc));
+        }
+        {
+            std::ofstream mi(dir / "meta.idx", std::ios::binary);
+            uint32_t idx[4] = {0, 0, 0, 0};
+            mi.write(reinterpret_cast<const char*>(idx), sizeof(idx));
+        }
+        VectorStoreV2 store;
+        CHECK_FALSE(store.open(dir.string()));
+        fs::remove_all(dir);
+    }
+
+    SUBCASE("open fails on inconsistent block sizing") {
+        auto dir = fs::temp_directory_path() / "nvs_bad_blocks_inconsistent";
+        fs::remove_all(dir);
+        make_minimal_bundle(dir, 1, 1);
+        {
+            std::ofstream mb(dir / "meta.blocks", std::ios::binary);
+            uint32_t bc = 2; mb.write(reinterpret_cast<const char*>(&bc), sizeof(bc));
+            uint32_t hdr[4] = {0,0,0,0};
+            mb.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+            mb.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+        }
+        {
+            std::ofstream mi(dir / "meta.idx", std::ios::binary);
+            uint32_t idx[4] = {0, 0, 0, 0};
+            mi.write(reinterpret_cast<const char*>(idx), sizeof(idx));
+        }
+        VectorStoreV2 store;
+        CHECK_FALSE(store.open(dir.string()));
+        fs::remove_all(dir);
+    }
+
+    SUBCASE("get_document fails with out-of-range index offset") {
+        auto dir = fs::temp_directory_path() / "nvs_bad_idx_offset";
+        fs::remove_all(dir);
+        make_minimal_bundle(dir, 1, 1);
+        {
+            std::ofstream mb(dir / "meta.blocks", std::ios::binary);
+            uint32_t bc = 1; mb.write(reinterpret_cast<const char*>(&bc), sizeof(bc));
+            uint32_t hdr[4] = {0, 0, 0, 0};
+            mb.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+            std::vector<char> block(128, 0);
+            mb.write(block.data(), block.size());
+        }
+        {
+            std::ofstream mi(dir / "meta.idx", std::ios::binary);
+            uint32_t idx[4] = {0, 1024, 16, 0};
+            mi.write(reinterpret_cast<const char*>(idx), sizeof(idx));
+        }
+        VectorStoreV2 store;
+        REQUIRE(store.open(dir.string()));
+        VectorStoreV2::SearchResult r;
+        CHECK_FALSE(store.get_document(0, r));
+        fs::remove_all(dir);
+    }
+}
 #endif // NVS_ENABLE_INLINE_TESTS

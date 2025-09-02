@@ -315,4 +315,41 @@ private:
 
 } // namespace nvs
 
+#if defined(NVS_ENABLE_INLINE_TESTS) && defined(NVS_TEST_SENT_SPLITTER)
+#include "doctest/doctest.h"
+
+TEST_CASE("SimpleSentenceSplitter basic splits") {
+    nvs::SimpleSentenceSplitter s;
+    auto v = s.split("Hello world. Next sentence!");
+    CHECK(v.size() == 2);
+    CHECK(v[0].find("Hello world") != std::string::npos);
+    CHECK(v[1].find("Next sentence") != std::string::npos);
+}
+
+TEST_CASE("SimpleSentenceSplitter abbreviations") {
+    nvs::SimpleSentenceSplitter s;
+    auto v = s.split("Dr. Smith went home. He slept.");
+    CHECK(v.size() >= 2);
+}
+
+TEST_CASE("SimpleSentenceSplitter missing spaces") {
+    nvs::SimpleSentenceSplitter s;
+    auto v = s.split("Hello.World!New line?");
+    CHECK(v.size() == 3);
+}
+
+TEST_CASE("SimpleSentenceSplitter colon rule") {
+    nvs::SimpleSentenceSplitter s;
+    // Ensure sufficient words before ':' to trigger split
+    auto v = s.split("This is a rather long example sentence: it should split here. And continue.");
+    CHECK(v.size() >= 2);
+}
+
+TEST_CASE("SimpleSentenceSplitter quotes and brackets") {
+    nvs::SimpleSentenceSplitter s;
+    auto v = s.split("\"Quoted.\" Next. (Paren.) Done?");
+    CHECK(v.size() >= 3);
+}
+#endif
+
 #endif // SIMPLE_SENTENCE_SPLITTER_H

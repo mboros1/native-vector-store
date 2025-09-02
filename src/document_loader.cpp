@@ -569,6 +569,174 @@ TEST_CASE("DocumentLoader JSON parsing" * doctest::skip(true)) {  // Skip due to
     }
 }
 
+TEST_CASE("DocumentLoader JSON parsing (lightweight)") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+
+    SUBCASE("Parse valid JSON with text field") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_text_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "one.json";
+        std::ofstream out(test_file);
+        out << R"([{"id":"doc1","text":"Hello world","metadata":{"embedding":[0.1,0.2,0.3]}}])";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.size() == 1);
+        if (!result.documents.empty()) {
+            CHECK(result.documents[0].id == "doc1");
+            CHECK(result.documents[0].text == "Hello world");
+            CHECK(result.documents[0].embedding.size() == 3);
+            CHECK(result.dimensions == 3);
+            CHECK(result.text_field == DocumentLoader::LoadResult::TextField::TEXT);
+        }
+
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Parse valid JSON with content field") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_content_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "one.json";
+        std::ofstream out(test_file);
+        out << R"([{"id":"doc2","content":"Content field","metadata":{"embedding":[1,2]}}])";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.size() == 1);
+        if (!result.documents.empty()) {
+            CHECK(result.documents[0].id == "doc2");
+            CHECK(result.documents[0].text == "Content field");
+            CHECK(result.documents[0].embedding.size() == 2);
+            CHECK(result.dimensions == 2);
+            CHECK(result.text_field == DocumentLoader::LoadResult::TextField::CONTENT);
+        }
+
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Malformed JSON is skipped") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_malformed_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "bad.json";
+        std::ofstream out(test_file);
+        out << R"([{"id":"broken","text":"oops","metadata":{"embedding":[1,2]}})"; // missing closing ]
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.empty());
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Non-array root is accepted as single doc") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_nonarray_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "one.json";
+        std::ofstream out(test_file);
+        out << R"({"id":"single","text":"not in array","metadata":{"embedding":[1]}})";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.size() == 1);
+        if (!result.documents.empty()) {
+            CHECK(result.documents[0].id == "single");
+            CHECK(result.dimensions == 1);
+        }
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Mixed embedding dimensions skips mismatched docs") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_mixed_dims_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto file1 = temp_dir / "a.json";
+        auto file2 = temp_dir / "b.json";
+        {
+            std::ofstream out(file1);
+            out << R"([{"id":"d1","text":"A","metadata":{"embedding":[1,0,0]}}])";
+        }
+        {
+            std::ofstream out(file2);
+            out << R"([{"id":"d2","text":"B","metadata":{"embedding":[1,0]}}])";
+        }
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        // One doc should load (first one sets dimensions=3); second should be skipped
+        CHECK(result.dimensions == 3);
+        CHECK(result.documents.size() >= 1);
+
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Missing metadata causes skip") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_missing_meta_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "bad.json";
+        std::ofstream out(test_file);
+        out << R"([{"id":"no_meta","text":"hello"}])";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.empty());
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Missing embedding in metadata causes skip") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_missing_embed_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "bad.json";
+        std::ofstream out(test_file);
+        out << R"([{"id":"no_emb","text":"hello","metadata":{}}])";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.empty());
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Missing id causes skip") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_missing_id_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "bad.json";
+        std::ofstream out(test_file);
+        out << R"([{"text":"hello","metadata":{"embedding":[1]}}])";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.empty());
+        fs::remove_all(temp_dir);
+    }
+
+    SUBCASE("Missing text/content causes skip") {
+        auto temp_dir = fs::temp_directory_path() / "nvs_loader_missing_text_sm";
+        fs::remove_all(temp_dir);
+        fs::create_directories(temp_dir);
+
+        auto test_file = temp_dir / "bad.json";
+        std::ofstream out(test_file);
+        out << R"([{"id":"doc","metadata":{"embedding":[1]}}])";
+        out.close();
+
+        auto result = DocumentLoader::loadDirectory(temp_dir.string(), false);
+        CHECK(result.documents.empty());
+        fs::remove_all(temp_dir);
+    }
+}
+
 TEST_CASE("DocumentLoader BM25 statistics" * doctest::skip(true)) {  // Skip due to threading complexity in tests
     using namespace nvs;
     namespace fs = std::filesystem;

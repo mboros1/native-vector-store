@@ -161,3 +161,69 @@ private:
 };
 
 } // namespace nvs
+
+#if defined(NVS_ENABLE_INLINE_TESTS) && defined(NVS_TEST_MMAP)
+#include "doctest/doctest.h"
+#include <filesystem>
+#include <fstream>
+
+TEST_CASE("MMapFile basic open/close") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "nvs_mmap_basic.bin";
+    {
+        std::ofstream out(tmp, std::ios::binary);
+        std::string s = "Hello mmap";
+        out.write(s.data(), s.size());
+    }
+    nvs::MMapFile mm;
+    CHECK(mm.open(tmp.string()));
+    CHECK(mm.size() == std::string("Hello mmap").size());
+    std::string read(mm.data(), mm.size());
+    CHECK(read == "Hello mmap");
+    mm.close();
+    CHECK(mm.size() == 0);
+    fs::remove(tmp);
+}
+
+TEST_CASE("MMapFile zero-size file") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "nvs_mmap_empty.bin";
+    {
+        std::ofstream out(tmp, std::ios::binary);
+    }
+    nvs::MMapFile mm;
+    CHECK(mm.open(tmp.string()));
+    CHECK(mm.size() == 0);
+    CHECK(mm.data() == nullptr);
+    mm.close();
+    fs::remove(tmp);
+}
+
+TEST_CASE("MMapFile non-existent path fails") {
+    nvs::MMapFile mm;
+    CHECK_FALSE(mm.open("/__does_not_exist__.bin"));
+    CHECK(mm.data() == nullptr);
+    CHECK(mm.size() == 0);
+}
+
+TEST_CASE("MMapFile move semantics") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "nvs_mmap_move.bin";
+    {
+        std::ofstream out(tmp, std::ios::binary);
+        std::string s = "move test";
+        out.write(s.data(), s.size());
+    }
+    nvs::MMapFile a;
+    REQUIRE(a.open(tmp.string()));
+    auto orig_data = a.data();
+    auto orig_size = a.size();
+    nvs::MMapFile b(std::move(a));
+    CHECK(b.data() == orig_data);
+    CHECK(b.size() == orig_size);
+    CHECK(a.data() == nullptr);
+    CHECK(a.size() == 0);
+    b.close();
+    fs::remove(tmp);
+}
+#endif
