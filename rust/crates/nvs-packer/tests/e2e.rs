@@ -1,6 +1,5 @@
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
 
 #[test]
 fn pack_then_open_bundle() {
@@ -60,4 +59,3 @@ fn uuid() -> String {
     let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     format!("{}", t)
 }
-

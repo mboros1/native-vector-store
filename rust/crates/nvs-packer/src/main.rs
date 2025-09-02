@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use rayon::prelude::*;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -52,7 +51,7 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
     let pb = indicatif::ProgressBar::new_spinner();
     pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
     pb.set_message("Scanning JSON files...");
-    let mut total = 0usize; let mut skipped = 0usize;
+    let mut _total = 0usize; let mut skipped = 0usize;
     for entry in WalkDir::new(input_dir).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() && entry.path().extension().map(|e| e == "json").unwrap_or(false) {
             let path = entry.path();
@@ -63,7 +62,7 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
             if s.trim_start().starts_with('[') {
                 let arr: Vec<serde_json::Value> = serde_json::from_str(&s).with_context(|| format!("parse array in {}", path.display()))?;
                 for (i, v) in arr.into_iter().enumerate() {
-                    total += 1;
+                    _total += 1;
                     match serde_json::from_value::<InputDocRaw>(v) {
                         Ok(r) => {
                             let text = r.text.or(r.content).unwrap_or_default();
@@ -82,7 +81,7 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                     }
                 }
             } else {
-                total += 1;
+                _total += 1;
                 match serde_json::from_str::<InputDocRaw>(&s) {
                     Ok(r) => {
                         let text = r.text.or(r.content).unwrap_or_default();

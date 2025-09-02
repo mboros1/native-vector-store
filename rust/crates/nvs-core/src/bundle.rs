@@ -609,7 +609,7 @@ mod tests {
         mb.extend_from_slice(&2u32.to_le_bytes());
         mb.extend_from_slice(&0u32.to_le_bytes());
         // block data
-        let mut write_rec = |id:&str, tx:&str, mj:&str, buf:&mut Vec<u8>| {
+        let write_rec = |id:&str, tx:&str, mj:&str, buf:&mut Vec<u8>| {
             buf.extend_from_slice(&(id.len() as u32).to_le_bytes()); buf.extend_from_slice(id.as_bytes());
             buf.extend_from_slice(&(tx.len() as u32).to_le_bytes()); buf.extend_from_slice(tx.as_bytes());
             buf.extend_from_slice(&(mj.len() as u32).to_le_bytes()); buf.extend_from_slice(mj.as_bytes());
@@ -618,7 +618,7 @@ mod tests {
         write_rec(id1, text1, meta1, &mut mb);
         // pad to block_size 128
         let block_size = 128usize;
-        let header_size = 4 + 1*16;
+        let _header_size = 4 + 1*16;
         let data_len = s0 + s1;
         let pad_len = block_size - data_len;
         mb.extend(std::iter::repeat(0u8).take(pad_len));
@@ -850,7 +850,7 @@ mod tests {
             let mut total_docs=0usize;
             for i in 0..block_count { let (id, usizeb, dcount, _)=hdrs[i]; let start = header_size + i*block_size; let mut consumed=0usize; let mut pos=start;
                 while consumed < usizeb as usize { let idl=u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize; pos+=4; consumed+=4; pos+=idl; consumed+=idl; let tl=u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize; pos+=4; consumed+=4; pos+=tl; consumed+=tl; let ml=u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize; pos+=4; consumed+=4; pos+=ml; consumed+=ml; total_docs+=1; }
-                assert_eq!(consumed, usizeb as usize); assert_eq!(total_docs as u32, hdrs.iter().map(|h| h.2).take(i+1).sum());
+                assert_eq!(consumed, usizeb as usize); assert_eq!(total_docs as u32, hdrs.iter().map(|h| h.2).take(i+1).sum::<u32>());
             }
             assert_eq!(total_docs, 10);
         }
