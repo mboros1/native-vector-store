@@ -90,7 +90,14 @@ private:
     // Parsed data pointers
     const float* vectors_ = nullptr;
     const uint32_t* doclen_ = nullptr;
-    const uint64_t* meta_offsets_ = nullptr;
+    // Metadata index (block-based)
+    struct MetaIdxEntry {
+        uint32_t block_id;
+        uint32_t offset_in_block;
+        uint32_t doc_size;
+        uint32_t padding;
+    };
+    const MetaIdxEntry* meta_idx_entries_ = nullptr;
     
     // BM25 structures
     struct LexiconEntry {
@@ -148,6 +155,9 @@ private:
     
     // State
     bool is_open_ = false;
+    // Metadata blocks info
+    uint32_t meta_block_size_ = 0;
+    uint32_t meta_block_count_ = 0;
     
 public:
     VectorStoreV2() = default;

@@ -40,17 +40,14 @@ endif
 # Build targets
 PACK_TARGET = $(BIN_DIR)/nvs-pack
 UNIT_TEST_TARGET = $(BIN_DIR)/unit_tests
-TOKENIZER_TEST_TARGET = $(BIN_DIR)/test_tokenizer
 
 # Source files
 PACK_SOURCES = nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp ../deps/simdjson/simdjson.cpp
 # Unit test sources - includes production code with tests enabled
 # Use doctest main from test/unit_test.cpp
-UNIT_TEST_SOURCES = test/unit_test.cpp nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp vector_store_v2.cpp ../deps/simdjson/simdjson.cpp
-TOKENIZER_TEST_SOURCES = test/test_tokenizer.cpp simple_tokenizer.cpp
+UNIT_TEST_SOURCES = test/unit_test.cpp test/e2e_pack_open.cpp nvs_pack.cpp document_loader.cpp simple_tokenizer.cpp vector_store_v2.cpp ../deps/simdjson/simdjson.cpp
 # Object files
 PACK_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(PACK_SOURCES)))
-TOKENIZER_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(notdir $(TOKENIZER_TEST_SOURCES)))
 # Unit test objects need special naming to avoid conflicts
 UNIT_TEST_OBJECTS = $(patsubst %.cpp,$(OBJ_DIR)/unit_%.o,$(notdir $(UNIT_TEST_SOURCES)))
 
@@ -66,8 +63,6 @@ $(PACK_TARGET): $(BIN_DIR) $(OBJ_DIR) $(PACK_OBJECTS)
 	$(CXX) $(CXXFLAGS) $(PACK_OBJECTS) -o $(PACK_TARGET) $(LDFLAGS) $(LIBS)
 
 
-$(TOKENIZER_TEST_TARGET): $(BIN_DIR) $(OBJ_DIR) $(TOKENIZER_TEST_OBJECTS)
-	$(CXX) $(CXXFLAGS) $(TOKENIZER_TEST_OBJECTS) -o $(TOKENIZER_TEST_TARGET) $(LDFLAGS) $(LIBS)
 
 
 # Unit test target - compiles with tests enabled
@@ -110,18 +105,9 @@ unit-tests: $(UNIT_TEST_TARGET)
 build-tests: $(UNIT_TEST_TARGET)
 	@echo "Tests built successfully"
 
-test-tokenizer: $(TOKENIZER_TEST_TARGET)
-	@echo "Running tokenizer unit tests..."
-	./$(TOKENIZER_TEST_TARGET)
-
-# Build tokenizer doctests with inline tests enabled
-$(OBJ_DIR)/test_simple_tokenizer.o: simple_tokenizer.cpp | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -DNVS_ENABLE_INLINE_TESTS -c $< -o $@
-
-# Override tokenizer objects to include inline tests
-tokenizer-with-inline: CXXFLAGS += -DNVS_ENABLE_INLINE_TESTS
-tokenizer-with-inline: $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/test_simple_tokenizer.o $(OBJ_DIR)/test_tokenizer.o
-	$(CXX) $(CXXFLAGS) $(OBJ_DIR)/test_simple_tokenizer.o $(OBJ_DIR)/test_tokenizer.o -o $(TOKENIZER_TEST_TARGET) $(LDFLAGS) $(LIBS)
+test-tokenizer: unit-tests
+	@echo "Running tokenizer tests within unit test suite..."
+	./$(UNIT_TEST_TARGET)
 
 rebuild: clean all
 

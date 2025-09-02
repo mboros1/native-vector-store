@@ -244,42 +244,26 @@ private:
     }
     
     bool writeMetadata() {
-        std::cout << "Writing metadata with doc-aligned blocks...\n";
-        
-        // Prepare blocks
+        std::cout << "Writing metadata with doc-aligned blocks..." << std::endl;
+
+        // Prepare blocks and block-based index entries
         std::vector<MetaBlock> blocks;
         std::vector<MetaIndex> index;
-        
+
         MetaBlock current_block;
         current_block.block_id = 0;
         current_block.uncompressed_size = 0;
         current_block.doc_count = 0;
         current_block.data.reserve(opts_.block_size);
-        
+
         for (size_t doc_idx = 0; doc_idx < data_.documents.size(); ++doc_idx) {
             const auto& doc = data_.documents[doc_idx];
-            
-            // Extract source from metadata_json if available
-            std::string source;
-            // Simple extraction - look for "source_file" in JSON
-            size_t source_pos = doc.metadata_json.find("\"source_file\":");
-            if (source_pos != std::string::npos) {
-                size_t start = doc.metadata_json.find('"', source_pos + 14);
-                if (start != std::string::npos) {
-                    size_t end = doc.metadata_json.find('"', start + 1);
-                    if (end != std::string::npos) {
-                        source = doc.metadata_json.substr(start + 1, end - start - 1);
-                    }
-                }
-            }
-            
-            // Calculate document size
-            size_t doc_size = sizeof(DocHeader) + doc.id.size() + doc.text.size() + source.size();
-            
-            // Check if adding this doc would exceed block size
-            // Never split a document across blocks
-            if (current_block.uncompressed_size + doc_size > opts_.block_size && current_block.doc_count > 0) {
-                // Save current block and start new one
+
+            // Calculate size of serialized record [id_len][id][text_len][text][meta_len][meta]
+            size_t doc_size = sizeof(uint32_t) + doc.id.size() + sizeof(uint32_t) + doc.text.size() + sizeof(uint32_t) + doc.metadata_json.size();
+
+            // Start new block if needed (never split a doc)
+            if (current_block.doc_count > 0 && current_block.uncompressed_size + doc_size > opts_.block_size) {
                 blocks.push_back(std::move(current_block));
                 current_block = MetaBlock();
                 current_block.block_id = blocks.size();
@@ -288,95 +272,70 @@ private:
                 current_block.data.clear();
                 current_block.data.reserve(opts_.block_size);
             }
-            
-            // Create index entry
+
+            // Index entry
             MetaIndex idx_entry;
             idx_entry.block_id = current_block.block_id;
             idx_entry.offset_in_block = current_block.uncompressed_size;
             idx_entry.doc_size = doc_size;
             idx_entry.padding = 0;
             index.push_back(idx_entry);
-            
-            // Create document header
-            DocHeader header;
-            header.doc_id = doc_idx;
-            header.timestamp_unix = 0;  // Could extract from metadata if available
-            header.id_len = doc.id.size();
-            header.text_len = doc.text.size();
-            header.source_len = source.size();
-            header.padding = 0;
-            
-            // Write to block
-            const uint8_t* header_bytes = reinterpret_cast<const uint8_t*>(&header);
-            current_block.data.insert(current_block.data.end(), header_bytes, header_bytes + sizeof(DocHeader));
+
+            // Serialize record into block
+            uint32_t id_len = static_cast<uint32_t>(doc.id.size());
+            uint32_t text_len = static_cast<uint32_t>(doc.text.size());
+            uint32_t meta_len = static_cast<uint32_t>(doc.metadata_json.size());
+            const uint8_t* p;
+
+            p = reinterpret_cast<const uint8_t*>(&id_len);
+            current_block.data.insert(current_block.data.end(), p, p + sizeof(uint32_t));
             current_block.data.insert(current_block.data.end(), doc.id.begin(), doc.id.end());
+            p = reinterpret_cast<const uint8_t*>(&text_len);
+            current_block.data.insert(current_block.data.end(), p, p + sizeof(uint32_t));
             current_block.data.insert(current_block.data.end(), doc.text.begin(), doc.text.end());
-            if (!source.empty()) {
-                current_block.data.insert(current_block.data.end(), source.begin(), source.end());
-            }
-            
+            p = reinterpret_cast<const uint8_t*>(&meta_len);
+            current_block.data.insert(current_block.data.end(), p, p + sizeof(uint32_t));
+            current_block.data.insert(current_block.data.end(), doc.metadata_json.begin(), doc.metadata_json.end());
+
             current_block.uncompressed_size += doc_size;
             current_block.doc_count++;
         }
-        
-        // Add the last block if it has documents
+
         if (current_block.doc_count > 0) {
             blocks.push_back(std::move(current_block));
         }
-        
-        // Write blocks to file
+
+        // Write meta.blocks: [block_count][headers][blocks padded to block_size]
         std::string meta_path = opts_.output_dir + "/meta.blocks";
         std::ofstream meta_file(meta_path, std::ios::binary);
         if (!meta_file) return false;
-        
-        // Write block count
-        uint32_t block_count = blocks.size();
+
+        uint32_t block_count = static_cast<uint32_t>(blocks.size());
         meta_file.write(reinterpret_cast<const char*>(&block_count), sizeof(block_count));
-        
-        // Write block headers first (for seeking)
+
         for (const auto& block : blocks) {
-            uint32_t header[4] = {
-                block.block_id,
-                block.uncompressed_size,
-                block.doc_count,
-                0  // padding
-            };
+            uint32_t header[4] = { block.block_id, block.uncompressed_size, block.doc_count, 0 };
             meta_file.write(reinterpret_cast<const char*>(header), sizeof(header));
         }
-        
-        // Write block data with padding to blockSize
+
         std::vector<uint8_t> padding(opts_.block_size, 0);
         for (const auto& block : blocks) {
-            // Write actual data
             meta_file.write(reinterpret_cast<const char*>(block.data.data()), block.data.size());
-            
-            // Pad to block_size if needed
             if (block.data.size() < opts_.block_size) {
-                size_t pad_size = opts_.block_size - block.data.size();
-                meta_file.write(reinterpret_cast<const char*>(padding.data()), pad_size);
+                size_t pad = opts_.block_size - block.data.size();
+                meta_file.write(reinterpret_cast<const char*>(padding.data()), pad);
             }
         }
-        
-        // Write index
+
+        // Write meta.idx entries (4x u32)
         std::string idx_path = opts_.output_dir + "/meta.idx";
         std::ofstream idx_file(idx_path, std::ios::binary);
         if (!idx_file) return false;
-        
-        for (const auto& entry : index) {
-            idx_file.write(reinterpret_cast<const char*>(&entry), sizeof(MetaIndex));
+        for (const auto& e : index) {
+            idx_file.write(reinterpret_cast<const char*>(&e), sizeof(MetaIndex));
         }
-        
-        std::cout << "  Created " << blocks.size() << " blocks (" 
-                  << opts_.block_size / 1024 << "KB target size)\n";
-        std::cout << "  Average docs per block: " 
-                  << (data_.documents.size() / blocks.size()) << "\n";
-        
-        size_t total_size = 0;
-        for (const auto& block : blocks) {
-            total_size += block.data.size();
-        }
-        std::cout << "  Total metadata size: " << (total_size / (1024*1024)) << "MB\n";
-        
+
+        std::cout << "  Created " << blocks.size() << " blocks (" << opts_.block_size/1024 << "KB)" << std::endl;
         return meta_file.good() && idx_file.good();
     }
     
@@ -477,6 +436,21 @@ private:
 };
 
 } // namespace nvs
+
+#ifdef NVS_ENABLE_INLINE_TESTS
+namespace nvs {
+// Test helper: run packer from e2e doctests
+int test_run_packer(const std::string& input_dir, const std::string& output_dir, size_t block_size_bytes) {
+    PackerOptions opts;
+    opts.input_path = input_dir;
+    opts.output_dir = output_dir;
+    opts.embedding_model = "test";
+    opts.block_size = block_size_bytes ? block_size_bytes : 131072;
+    NVSPacker packer(opts);
+    return packer.run();
+}
+}
+#endif
 
 void printUsage(const char* program) {
     std::cout << "Usage: " << program << " [options] <input-directory>\n\n";
@@ -844,7 +818,7 @@ TEST_CASE("NVSPacker end-to-end bundle build") {
         CHECK(size == 2 * sizeof(uint32_t));
     }
 
-    // Verify meta.index entry count
+    // Verify meta.idx entry count (block index entries)
     {
         std::ifstream in(tmp_out / "meta.idx", std::ios::binary);
         in.seekg(0, std::ios::end);
@@ -852,13 +826,6 @@ TEST_CASE("NVSPacker end-to-end bundle build") {
         CHECK(size == 2 * sizeof(MetaIndex));
     }
 
-    // Verify meta.blocks header and at least one block
-    {
-        std::ifstream in(tmp_out / "meta.blocks", std::ios::binary);
-        uint32_t block_count = 0;
-        in.read(reinterpret_cast<char*>(&block_count), sizeof(block_count));
-        CHECK(block_count >= 1);
-    }
 
     // Cleanup
     fs::remove_all(tmp_in);

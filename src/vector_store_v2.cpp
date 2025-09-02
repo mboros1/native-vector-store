@@ -129,7 +129,7 @@ void VectorStoreV2::close() {
     
     vectors_ = nullptr;
     doclen_ = nullptr;
-    meta_offsets_ = nullptr;
+    meta_idx_entries_ = nullptr;
     lexicon_ = nullptr;
     
     term_to_id_.clear();
@@ -211,16 +211,27 @@ bool VectorStoreV2::open_data_files() {
         return false;
     }
     
-    // Open metadata index
+    // Open metadata index (block-based)
     if (!meta_idx_file_.open(bundle_path_ + "/meta.idx")) {
         return false;
     }
-    meta_offsets_ = meta_idx_file_.as<uint64_t>();
+    meta_idx_entries_ = meta_idx_file_.as<MetaIdxEntry>();
     
-    // Open metadata
-    if (!meta_file_.open(bundle_path_ + "/meta.bin")) {
+    // Open metadata blocks
+    if (!meta_file_.open(bundle_path_ + "/meta.blocks")) {
         return false;
     }
+    // Parse block header
+    if (meta_file_.size() < sizeof(uint32_t)) return false;
+    const uint8_t* base = static_cast<const uint8_t*>(meta_file_.data());
+    meta_block_count_ = *reinterpret_cast<const uint32_t*>(base);
+    // Each block header is 4 u32 = 16 bytes
+    size_t header_size = sizeof(uint32_t) + static_cast<size_t>(meta_block_count_) * 16;
+    // Derive block size from file size and count (assumes fixed-size blocks padded to equal size)
+    if (meta_block_count_ == 0) return false;
+    size_t remaining = meta_file_.size() > header_size ? (meta_file_.size() - header_size) : 0;
+    if (remaining == 0) return false;
+    meta_block_size_ = static_cast<uint32_t>(remaining / meta_block_count_);
     
     return true;
 }
@@ -489,8 +500,14 @@ bool VectorStoreV2::get_document_metadata(size_t doc_id,
                                          std::string& metadata) const {
     if (doc_id >= info_.num_docs) return false;
     
-    uint64_t offset = meta_offsets_[doc_id];
-    const uint8_t* data = static_cast<const uint8_t*>(meta_file_.data()) + offset;
+    // Lookup index entry
+    const MetaIdxEntry& idx = meta_idx_entries_[doc_id];
+    // Compute start of block data region (after global header and block headers)
+    const uint8_t* base = static_cast<const uint8_t*>(meta_file_.data());
+    size_t blocks_header_size = sizeof(uint32_t) + static_cast<size_t>(meta_block_count_) * 16;
+    const uint8_t* block0 = base + blocks_header_size;
+    const uint8_t* block_begin = block0 + static_cast<size_t>(idx.block_id) * meta_block_size_;
+    const uint8_t* data = block_begin + idx.offset_in_block;
     const uint8_t* end = static_cast<const uint8_t*>(meta_file_.data()) + meta_file_.size();
     
     // Read ID
