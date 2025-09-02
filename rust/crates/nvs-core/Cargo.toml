@@ -18,11 +18,13 @@ memmap2 = "0.9"
 bytemuck = { version = "1", features = ["derive"] }
 rayon = "1"
 cpufeatures = "0.2"
+ordered-float = "4"
 
 [dev-dependencies]
 tempfile = "3"
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 rand = "0.8"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
 
 [[bench]]
 name = "vector_search"

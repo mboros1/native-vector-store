@@ -57,4 +57,3 @@ pub struct Manifest {
     pub bm25: ManifestBm25,
     pub files: ManifestFiles,
 }
-

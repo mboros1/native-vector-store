@@ -10,5 +10,6 @@ pub mod manifest;
 pub mod bundle;
 pub mod simd;
 pub mod search;
+pub mod tokenizer;
 
 pub use bundle::Bundle;
