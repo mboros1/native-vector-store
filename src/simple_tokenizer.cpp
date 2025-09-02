@@ -38,186 +38,90 @@ static constexpr auto ELLIPSIS_PATTERN = ctll::fixed_string{R"((\.{3,}))"};
 // Whitespace pattern for tokenization - handles Unicode whitespace
 static constexpr auto WHITESPACE_PATTERN = ctll::fixed_string{R"(\s+)"};
 
+template <auto& Pat, class F>
+static inline void rewrite(std::string& s, F&& f) {
+    std::string out; out.reserve(s.size() * 2);
+    size_t last = 0;
+    for (auto m : ctre::search_all<Pat>(s)) {
+        out.append(s, last, m.begin() - s.begin() - last);
+        f(out, m);
+        last = m.end() - s.begin();
+    }
+    out.append(s, last);
+    s.swap(out);
+}
+
 std::string SimpleTokenizer::process_contractions(std::string text) const {
     if (!splitContraction_) {
         return text;
     }
 
     // Process special contractions first
-    // Won't -> will not
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<WONT_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            std::string w = match.get<1>().str();
-            if (std::isupper(w[0])) {
-                result.append("Will not");
-            } else {
-                result.append("will not");
-            }
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<WONT_PATTERN>(text, [](std::string& out, const auto& m) {
+        auto v = m.template get<1>().to_view();
+        const bool cap = !v.empty() && std::isupper(static_cast<unsigned char>(v.front()));
+        out += cap ? "Will not" : "will not";
+    });
 
-    // Shan't -> shall not
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<SHANT_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            std::string s = match.get<1>().str();
-            if (std::isupper(s[0])) {
-                result.append("Shall not");
-            } else {
-                result.append("shall not");
-            }
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<SHANT_PATTERN>(text, [](std::string& out, const auto& m) {
+        auto v = m.template get<1>().to_view();
+        const bool cap = !v.empty() && std::isupper(static_cast<unsigned char>(v.front()));
+        out += cap ? "Shall not" : "shall not";
+    });
 
-    // Ain't -> is not
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<AINT_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            std::string a = match.get<1>().str();
-            if (std::isupper(a[0])) {
-                result.append("Is not");
-            } else {
-                result.append("is not");
-            }
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<AINT_PATTERN>(text, [](std::string& out, const auto& m) {
+        auto v = m.template get<1>().to_view();
+        const bool cap = !v.empty() && std::isupper(static_cast<unsigned char>(v.front()));
+        out += cap ? "Is not" : "is not";
+    });
 
-    // Can't -> can not
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<CANT_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            std::string c = match.get<1>().str();
-            if (std::isupper(c[0])) {
-                result.append("Can not");
-            } else {
-                result.append("can not");
-            }
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<CANT_PATTERN>(text, [](std::string& out, const auto& m) {
+        auto v = m.template get<1>().to_view();
+        const bool cap = !v.empty() && std::isupper(static_cast<unsigned char>(v.front()));
+        out += cap ? "Can not" : "can not";
+    });
 
-    // Cannot -> can not
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<CANNOT_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            std::string c = match.get<1>().str();
-            if (std::isupper(c[0])) {
-                result.append("Can not");
-            } else {
-                result.append("can not");
-            }
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<CANNOT_PATTERN>(text, [](std::string& out, const auto& m) {
+        auto v = m.template get<1>().to_view();
+        const bool cap = !v.empty() && std::isupper(static_cast<unsigned char>(v.front()));
+        out += cap ? "Can not" : "can not";
+    });
 
     // Other n't contractions -> word + not
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<NT_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(match.get<1>().str());
-            result.append(" not");
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<NT_PATTERN>(text, [](std::string& out, const auto& m) {
+        auto v = m.template get<1>().to_view();
+        out.append(v.data(), v.size());
+        out +=  " not";
+    });
 
     // Two-part contractions ('ll, 're, 've, 's, 'm, 'd)
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<CONTRACTIONS2_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(match.get<1>().str());
-            result.append(" ");
-            result.append(match.get<2>().str());
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<CONTRACTIONS2_PATTERN>(text, [](std::string& out, const auto& m) {
+        out.append(m.template get<1>().to_view());
+        out.append(" ");
+        out.append(m.template get<2>().to_view());
+    });
 
     // D'ye special case
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<DYE_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(match.get<1>().str());
-            result.append(" ");
-            result.append(match.get<2>().str());
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<DYE_PATTERN>(text, [](std::string& out, const auto& m) {
+        out.append(m.template get<1>().to_view());
+        out.append(" ");
+        out.append(m.template get<2>().to_view());
+    });
 
     // Three-part contractions (t'is -> it is, t'was -> it was)
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<CONTRACTIONS3_PATTERN>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(match.get<1>().str());
-            result.append(" ");
-            result.append(match.get<2>().str());
-            result.append("s");
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<CONTRACTIONS3_PATTERN>(text, [](std::string& out, const auto& m) {
+        out.append(m.template get<1>().to_view());
+        out.append(" ");
+        out.append(m.template get<2>().to_view());
+        out.append("s");
+    });
 
-    {
-        std::string result;
-        result.reserve(text.size());
-        size_t last_pos = 0;
-        for (auto match : ctre::search_all<CONTRACTIONS3_PATTERN2>(text)) {
-            result.append(text, last_pos, match.begin() - text.begin() - last_pos);
-            result.append(match.get<1>().str());
-            result.append(" ");
-            result.append(match.get<2>().str());
-            result.append("as");
-            last_pos = match.end() - text.begin();
-        }
-        result.append(text, last_pos);
-        text = std::move(result);
-    }
+    rewrite<CONTRACTIONS3_PATTERN2>(text, [](std::string& out, const auto& m) {
+        out.append(m.template get<1>().to_view());
+        out.append(" ");
+        out.append(m.template get<2>().to_view());
+        out.append("as");
+    });
 
     return text;
 }
@@ -233,7 +137,7 @@ std::string SimpleTokenizer::process_delimiters(std::string text) const {
         for (auto match : ctre::search_all<NON_WORD_PATTERN>(text)) {
             result.append(text, last_pos, match.begin() - text.begin() - last_pos);
             result.append(" ");
-            result.append(match.get<0>().str());
+            result.append(match.template get<0>().to_view());
             result.append(" ");
             last_pos = match.end() - text.begin();
         }
@@ -249,7 +153,7 @@ std::string SimpleTokenizer::process_delimiters(std::string text) const {
         for (auto match : ctre::search_all<COMMA_PATTERN>(text)) {
             result.append(text, last_pos, match.begin() - text.begin() - last_pos);
             result.append(" ");
-            result.append(match.get<1>().str());
+            result.append(match.template get<1>().to_view());
             last_pos = match.end() - text.begin();
         }
         result.append(text, last_pos);
@@ -264,9 +168,9 @@ std::string SimpleTokenizer::process_delimiters(std::string text) const {
         for (auto match : ctre::search_all<COMMA_NO_SPACE_PATTERN>(text)) {
             result.append(text, last_pos, match.begin() - text.begin() - last_pos);
             result.append(" ");
-            result.append(match.get<1>().str());  // comma
+            result.append(match.template get<1>().to_view());  // comma
             result.append(" ");
-            result.append(match.get<2>().str());  // character after comma
+            result.append(match.template get<2>().to_view());  // character after comma
             last_pos = match.end() - text.begin();
         }
         result.append(text, last_pos);
@@ -281,7 +185,7 @@ std::string SimpleTokenizer::process_delimiters(std::string text) const {
         for (auto match : ctre::search_all<APOSTROPHE_SPACE_PATTERN>(text)) {
             result.append(text, last_pos, match.begin() - text.begin() - last_pos);
             result.append(" ");
-            result.append(match.get<0>().str());
+            result.append(match.template get<0>().to_view());
             last_pos = match.end() - text.begin();
         }
         result.append(text, last_pos);
@@ -296,7 +200,7 @@ std::string SimpleTokenizer::process_delimiters(std::string text) const {
         for (auto match : ctre::search_all<ELLIPSIS_PATTERN>(text)) {
             result.append(text, last_pos, match.begin() - text.begin() - last_pos);
             result.append(" ");
-            result.append(match.get<1>().str());  // The captured ellipsis
+            result.append(match.template get<1>().to_view());  // The captured ellipsis
             result.append(" ");
             last_pos = match.end() - text.begin();
         }
@@ -313,7 +217,7 @@ std::string SimpleTokenizer::process_delimiters(std::string text) const {
             result.append(text, last_pos, match.begin() - text.begin() - last_pos);
             result.append(" . ");
             // Append the whitespace/newline that was captured
-            result.append(match.get<1>().str());
+            result.append(match.template get<1>().to_view());
             last_pos = match.end() - text.begin();
         }
         result.append(text, last_pos);
@@ -409,7 +313,7 @@ bool SimpleTokenizer::isAbbreviation(const std::string& tok) {
 
 } // namespace nvs
 
-#ifdef DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#ifdef NVS_ENABLE_INLINE_TESTS
 #include "doctest/doctest.h"
 
 TEST_CASE("SimpleTokenizer basic tokenization") {

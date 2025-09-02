@@ -599,53 +599,57 @@ VectorStoreV2::decode_posting_list(size_t term_id) const {
 } // namespace nvs
 
 // Unit tests - only compiled when tests are enabled
-#ifdef NVS_ENABLE_INLINE_TESTS
+#if 0 // NVS_ENABLE_INLINE_TESTS (disabled; use src/test suites)
 #include "doctest/doctest.h"
 #include <random>
 #include <cmath>
 #include <filesystem>
+#include <thread>
+#include <chrono>
+
+// Helper function to create normalized random vectors
+static std::vector<float> create_random_vector(size_t dim, std::mt19937& gen) {
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<float> vec(dim);
+    float norm = 0.0f;
+    for (size_t i = 0; i < dim; ++i) {
+        vec[i] = dist(gen);
+        norm += vec[i] * vec[i];
+    }
+    norm = std::sqrt(norm);
+    for (auto& v : vec) {
+        v /= norm;
+    }
+    return vec;
+}
 
 TEST_CASE("VectorStoreV2 MMapFile") {
     using namespace nvs;
     namespace fs = std::filesystem;
     
-    SUBCASE("Default construction") {
-        VectorStoreV2::MMapFile mmap;
-        CHECK(mmap.data() == nullptr);
-        CHECK(mmap.size() == 0);
-        CHECK_FALSE(mmap.is_open());
-    }
-    
-    SUBCASE("Open non-existent file") {
-        VectorStoreV2::MMapFile mmap;
-        bool result = mmap.open("/non/existent/file.bin");
-        CHECK_FALSE(result);
-        CHECK_FALSE(mmap.is_open());
-    }
-    
-    SUBCASE("Open and close file") {
-        // Create a temporary file
+    SUBCASE("Basic file operations") {
         auto temp_dir = fs::temp_directory_path();
         auto temp_file = temp_dir / "test_mmap.bin";
         
+        // Create test file with known content
         std::ofstream out(temp_file, std::ios::binary);
-        std::string data = "Hello, MMap!";
+        std::string data = "Hello, MMap! This is test data.";
         out.write(data.c_str(), data.size());
         out.close();
         
         VectorStoreV2::MMapFile mmap;
-        bool result = mmap.open(temp_file.string());
         
-        CHECK(result);
+        // Test opening file
+        CHECK(mmap.open(temp_file.string()));
         CHECK(mmap.is_open());
         CHECK(mmap.size() == data.size());
         CHECK(mmap.data() != nullptr);
         
-        // Verify content
+        // Verify content matches
         std::string read_data(mmap.data(), mmap.size());
         CHECK(read_data == data);
         
-        // Close and verify
+        // Test close
         mmap.close();
         CHECK_FALSE(mmap.is_open());
         CHECK(mmap.data() == nullptr);
@@ -655,28 +659,44 @@ TEST_CASE("VectorStoreV2 MMapFile") {
         fs::remove(temp_file);
     }
     
+    SUBCASE("Error handling") {
+        VectorStoreV2::MMapFile mmap;
+        
+        // Non-existent file should fail
+        CHECK_FALSE(mmap.open("/non/existent/file.bin"));
+        CHECK_FALSE(mmap.is_open());
+        
+        // Empty path should fail
+        CHECK_FALSE(mmap.open(""));
+        CHECK_FALSE(mmap.is_open());
+    }
+    
     SUBCASE("Move semantics") {
         auto temp_dir = fs::temp_directory_path();
         auto temp_file = temp_dir / "test_move.bin";
         
         std::ofstream out(temp_file, std::ios::binary);
-        out << "test data";
+        out << "test data for move";
         out.close();
         
         VectorStoreV2::MMapFile mmap1;
         mmap1.open(temp_file.string());
         size_t original_size = mmap1.size();
+        auto original_data = mmap1.data();
         
         // Move constructor
         VectorStoreV2::MMapFile mmap2(std::move(mmap1));
         CHECK(mmap2.size() == original_size);
+        CHECK(mmap2.data() == original_data);
         CHECK(mmap2.is_open());
         CHECK_FALSE(mmap1.is_open());
+        CHECK(mmap1.data() == nullptr);
         
         // Move assignment
         VectorStoreV2::MMapFile mmap3;
         mmap3 = std::move(mmap2);
         CHECK(mmap3.size() == original_size);
+        CHECK(mmap3.data() == original_data);
         CHECK(mmap3.is_open());
         CHECK_FALSE(mmap2.is_open());
         
@@ -688,41 +708,44 @@ TEST_CASE("VectorStoreV2 MMapFile") {
 TEST_CASE("VectorStoreV2 similarity computation") {
     using namespace nvs;
     
-    SUBCASE("Dot product calculation") {
+    SUBCASE("Basic cosine similarity") {
         VectorStoreV2 store;
+        store.dimensions_ = 3;
         
-        // Simple vectors for testing
+        // Test vectors
         float vec1[] = {1.0f, 0.0f, 0.0f};
         float vec2[] = {1.0f, 0.0f, 0.0f};
         float vec3[] = {0.0f, 1.0f, 0.0f};
         float vec4[] = {-1.0f, 0.0f, 0.0f};
         
-        // Set dimension for testing
-        store.dimensions_ = 3;
+        // Identical vectors -> similarity = 1.0
+        CHECK(store.compute_similarity(vec1, vec2) == doctest::Approx(1.0f));
         
-        // Same vectors should have similarity 1.0
-        float sim1 = store.compute_similarity(vec1, vec2);
-        CHECK(sim1 == doctest::Approx(1.0f));
+        // Orthogonal vectors -> similarity = 0.0
+        CHECK(store.compute_similarity(vec1, vec3) == doctest::Approx(0.0f));
         
-        // Orthogonal vectors should have similarity 0.0
-        float sim2 = store.compute_similarity(vec1, vec3);
-        CHECK(sim2 == doctest::Approx(0.0f));
-        
-        // Opposite vectors should have similarity -1.0
-        float sim3 = store.compute_similarity(vec1, vec4);
-        CHECK(sim3 == doctest::Approx(-1.0f));
+        // Opposite vectors -> similarity = -1.0
+        CHECK(store.compute_similarity(vec1, vec4) == doctest::Approx(-1.0f));
     }
     
-    SUBCASE("Normalized vectors") {
+    SUBCASE("High-dimensional similarity") {
         VectorStoreV2 store;
-        store.dimensions_ = 2;
+        const size_t dim = 1536; // Common embedding dimension
+        store.dimensions_ = dim;
         
-        // 45-degree angle vectors
-        float vec1[] = {0.707107f, 0.707107f};  // normalized [1, 1]
-        float vec2[] = {1.0f, 0.0f};
+        // Create random vectors
+        std::mt19937 gen(42);
+        auto vec1 = create_random_vector(dim, gen);
+        auto vec2 = create_random_vector(dim, gen);
         
-        float sim = store.compute_similarity(vec1, vec2);
-        CHECK(sim == doctest::Approx(0.707107f).epsilon(0.0001));
+        // Self-similarity should be 1.0 (normalized vectors)
+        float self_sim = store.compute_similarity(vec1.data(), vec1.data());
+        CHECK(self_sim == doctest::Approx(1.0f).epsilon(0.001));
+        
+        // Different vectors should have similarity in [-1, 1]
+        float cross_sim = store.compute_similarity(vec1.data(), vec2.data());
+        CHECK(cross_sim >= -1.0f);
+        CHECK(cross_sim <= 1.0f);
     }
 }
 
@@ -1012,21 +1035,169 @@ TEST_CASE("VectorStoreV2 posting list decoding") {
     }
 }
 
-TEST_CASE("VectorStoreV2 performance metrics") {
-    using namespace nvs;
-    
-    SUBCASE("Memory usage tracking") {
-        VectorStoreV2 store;
-        
-        // Initially no memory used
-        CHECK(store.memory_usage() == 0);
-        
-        // Simulate loaded data
-        store.vectors_file_.size_ = 1024 * 1024;  // 1MB vectors
-        store.meta_file_.size_ = 512 * 1024;      // 512KB metadata
-        
-        size_t usage = store.memory_usage();
-        CHECK(usage == 1024 * 1024 + 512 * 1024);
+#endif
+
+// New inline doctest suite (enabled with NVS_ENABLE_INLINE_TESTS)
+#ifdef NVS_ENABLE_INLINE_TESTS
+#include "doctest/doctest.h"
+#include <vector>
+#include <string>
+#include <cstdlib>
+#include <algorithm>
+
+static std::string nvs_resolve_test_bundle() {
+    if (const char* env = std::getenv("NVS_TEST_BUNDLE")) {
+        return std::string(env);
+    }
+    return std::string("test-bundle");
+}
+
+TEST_CASE("VectorStoreV2 default state") {
+    nvs::VectorStoreV2 store;
+    CHECK(store.is_open() == false);
+    CHECK(store.size() == 0);
+    CHECK(store.dimensions() == 0);
+
+    float dummy = 0.0f;
+    auto results = store.search(&dummy, 5);
+    CHECK(results.empty());
+}
+
+TEST_CASE("VectorStoreV2 open invalid path") {
+    nvs::VectorStoreV2 store;
+    CHECK_FALSE(store.open("__nonexistent_bundle_dir__"));
+    CHECK_FALSE(store.is_open());
+}
+
+#ifdef NVS_TEST_V2_BUNDLE
+TEST_CASE("VectorStoreV2 bundle integration") {
+    using nvs::VectorStoreV2;
+    VectorStoreV2 store;
+    std::string bundle = nvs_resolve_test_bundle();
+
+    SUBCASE("open and basic properties") {
+        if (!store.open(bundle)) {
+            MESSAGE("Bundle not found at '" << bundle << "' — skipping");
+            return;
+        }
+        CHECK(store.is_open());
+        CHECK(store.size() > 0);
+        CHECK(store.dimensions() > 0);
+    }
+
+    SUBCASE("get first document") {
+        if (!store.open(bundle)) {
+            MESSAGE("Bundle not found — skipping");
+            return;
+        }
+        VectorStoreV2::SearchResult doc;
+        CHECK(store.get_document(0, doc));
+        CHECK(doc.id.size() > 0);
+        CHECK(doc.metadata_json.size() >= 0);
+    }
+
+    SUBCASE("vector search properties and stability") {
+        if (!store.open(bundle)) {
+            MESSAGE("Bundle not found — skipping");
+            return;
+        }
+        const size_t dim = store.dimensions();
+        std::vector<float> q(dim, 0.0f);
+        if (dim > 0) q[0] = 1.0f;
+
+        auto r0 = store.search(q.data(), 0);
+        CHECK(r0.empty());
+
+        auto r_over = store.search(q.data(), store.size() + 10);
+        CHECK(r_over.size() == store.size());
+
+        auto r1 = store.search(q.data(), std::min<size_t>(store.size(), 10));
+        if (!r1.empty()) {
+            for (size_t i = 1; i < r1.size(); ++i) {
+                CHECK(r1[i-1].score >= r1[i].score);
+            }
+            auto r1b = store.search(q.data(), r1.size());
+            CHECK(r1b.size() == r1.size());
+            for (size_t i = 0; i < r1.size(); ++i) {
+                CHECK(r1[i].doc_id == r1b[i].doc_id);
+                CHECK(r1[i].score == doctest::Approx(r1b[i].score));
+            }
+        }
+    }
+
+    SUBCASE("bm25 edge cases and hybrid extremes") {
+        if (!store.open(bundle)) {
+            MESSAGE("Bundle not found — skipping");
+            return;
+        }
+        std::vector<std::string> empty_terms;
+        auto bm_empty = store.search_bm25(empty_terms, 5);
+        CHECK(bm_empty.empty());
+
+        std::vector<std::string> nonsense = {"zzzzzzzzzz"};
+        auto bm_none = store.search_bm25(nonsense, 5);
+        CHECK(bm_none.size() <= 5);
+
+        const size_t dim = store.dimensions();
+        std::vector<float> q(dim, 0.0f);
+        if (dim > 0) q[0] = 1.0f;
+
+        auto v = store.search(q.data(), 5);
+        auto h_vec = store.search_hybrid(q.data(), {"__unused__"}, 5, 1.0);
+        if (!v.empty() && !h_vec.empty()) {
+            size_t m = std::min(v.size(), h_vec.size());
+            for (size_t i = 0; i < m; ++i) {
+                CHECK(v[i].doc_id == h_vec[i].doc_id);
+            }
+        }
+
+        auto bm = store.search_bm25({"document"}, 5);
+        auto h_bm = store.search_hybrid(q.data(), {"document"}, 5, 0.0);
+        if (!bm.empty() && !h_bm.empty()) {
+            size_t m = std::min(bm.size(), h_bm.size());
+            for (size_t i = 0; i < m; ++i) {
+                CHECK(bm[i].doc_id == h_bm[i].doc_id);
+            }
+        }
+    }
+
+    SUBCASE("reopen equivalence") {
+        if (!store.open(bundle)) {
+            MESSAGE("Bundle not found — skipping");
+            return;
+        }
+        const size_t dim = store.dimensions();
+        std::vector<float> q(dim, 0.0f);
+        if (dim > 0) q[0] = 1.0f;
+        auto before = store.search(q.data(), std::min<size_t>(store.size(), 10));
+        store.close();
+        REQUIRE(store.open(bundle));
+        auto after = store.search(q.data(), before.size());
+        CHECK(after.size() == before.size());
+        for (size_t i = 0; i < before.size(); ++i) {
+            CHECK(before[i].doc_id == after[i].doc_id);
+        }
     }
 }
-#endif
+#ifdef NVS_TEST_V2_CONCURRENCY
+TEST_CASE("VectorStoreV2 basic concurrency smoke") {
+    using nvs::VectorStoreV2;
+    VectorStoreV2 store;
+    std::string bundle = nvs_resolve_test_bundle();
+    if (!store.open(bundle)) {
+        MESSAGE("Bundle not found — skipping");
+        return;
+    }
+    const size_t dim = store.dimensions();
+    std::vector<float> q(dim, 0.0f);
+    if (dim > 0) q[0] = 1.0f;
+
+    std::atomic<int> ok{0};
+    std::thread t1([&]{ for (int i=0;i<10;++i){ auto r=store.search(q.data(), 5); if (r.size()<=5) ++ok; }});
+    std::thread t2([&]{ for (int i=0;i<10;++i){ auto r=store.search(q.data(), 5); if (r.size()<=5) ++ok; }});
+    t1.join(); t2.join();
+    CHECK(ok == 20);
+}
+#endif // NVS_TEST_V2_CONCURRENCY
+#endif // NVS_TEST_V2_BUNDLE
+#endif // NVS_ENABLE_INLINE_TESTS

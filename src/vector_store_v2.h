@@ -16,6 +16,16 @@ namespace nvs {
 // Works exclusively with pre-built bundles for optimal performance
 // No JSON parsing at runtime, direct mmap access to all data
 
+/**
+ * @brief Read-only vector store backed by an immutable on-disk bundle.
+ *
+ * Loads a bundle directory created by the packer and exposes:
+ * - vector similarity search over normalized embeddings
+ * - BM25 text search over a term index
+ * - a simple hybrid that fuses both signals
+ *
+ * All bundle files are memory-mapped and never modified at runtime.
+ */
 class VectorStoreV2 {
 public:
     // Search result structure
@@ -144,18 +154,42 @@ public:
     explicit VectorStoreV2(const std::string& bundle_path);
     ~VectorStoreV2() = default;
     
-    // Open a bundle (can be called after default construction)
+    /**
+     * @brief Open a bundle directory.
+     * @param bundle_path Path to bundle directory containing manifest and data files.
+     * @return true on success, false on failure (is_open() remains false).
+     */
     bool open(const std::string& bundle_path);
     
-    // Close the bundle and release resources
+    /** @brief Close the bundle and release all resources. */
     void close();
     
-    // Check if store is ready
+    /** @brief Whether the store is ready for queries. */
     bool is_open() const { return is_open_; }
     
     // Search functions
+    /**
+     * @brief Search top-k most similar vectors using cosine similarity.
+     * @param query Pointer to a query vector of length dimensions().
+     * @param k Number of results to return (clamped to size()).
+     * @return Results sorted by descending score; empty if store not open or k==0.
+     */
     std::vector<SearchResult> search(const float* query, size_t k) const;
+    /**
+     * @brief BM25 text search over tokenized document terms.
+     * @param query_terms Pre-tokenized terms to search for.
+     * @param k Number of results to return (clamped to size()).
+     * @return Results sorted by descending BM25 score; may be empty.
+     */
     std::vector<SearchResult> search_bm25(const std::vector<std::string>& query_terms, size_t k) const;
+    /**
+     * @brief Hybrid search combining vector similarity and BM25 via a simple weighted fusion.
+     * @param query_vector Pointer to query vector.
+     * @param query_terms Pre-tokenized terms.
+     * @param k Number of results to return.
+     * @param vector_weight Weight in [0,1] for vector similarity; (1 - vector_weight) used for BM25.
+     * @return Results sorted by combined score.
+     */
     std::vector<SearchResult> search_hybrid(const float* query_vector, 
                                            const std::vector<std::string>& query_terms,
                                            size_t k = 10,
@@ -167,7 +201,12 @@ public:
     const std::string& bundle_path() const { return bundle_path_; }
     const BundleInfo& info() const { return info_; }
     
-    // Get document by ID (for compatibility)
+    /**
+     * @brief Retrieve a document by internal doc ID.
+     * @param doc_id Zero-based internal document ID.
+     * @param result Output populated on success.
+     * @return true if found; false if out of range or on error.
+     */
     bool get_document(size_t doc_id, SearchResult& result) const;
     
 private:

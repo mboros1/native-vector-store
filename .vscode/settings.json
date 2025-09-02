@@ -7,5 +7,12 @@
     "C_Cpp.default.cppStandard": "c++17",
     "C_Cpp.default.cStandard": "c17",
     "C_Cpp.default.compilerPath": "/usr/bin/clang++",
-    "C_Cpp.default.intelliSenseMode": "macos-clang-arm64"
+    "C_Cpp.default.intelliSenseMode": "macos-clang-arm64",
+    // show logs while wiring this up
+    "testMate.cpp.log.logpanel": true,
+    // simplest: tell it exactly where your exe is
+    "testMate.cpp.test.executables": 
+        "${workspaceFolder}/src/bin/test_*",
+    // optional: auto-load on startup
+    "testMate.cpp.discovery.loadOnStartup": true
 }
