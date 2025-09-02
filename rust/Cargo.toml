@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/nvs-core",
+    "crates/nvs-packer",
 ]
 
 resolver = "2"
-

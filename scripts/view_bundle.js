@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 function printUsage() {
     console.log('Usage: view_bundle.js [bundle_dir] [file_type]');
@@ -41,63 +41,45 @@ function viewManifest(bundleDir) {
 
 function viewTerms(bundleDir) {
     const termsPath = path.join(bundleDir, 'terms.dict');
-    if (!fs.existsSync(termsPath)) {
-        throw new Error('terms.dict not found');
-    }
-    
+    if (!fs.existsSync(termsPath)) throw new Error('terms.dict not found');
     const buffer = fs.readFileSync(termsPath);
-    let offset = 0;
-    let termId = 0;
-    
-    console.log('Term Dictionary');
-    console.log('===============');
+    let offset = 0, termId = 0;
+    console.log('Term Dictionary (v2)');
+    console.log('=====================');
     console.log('ID\tTerm');
     console.log('---\t----');
-    
-    while (offset < buffer.length) {
-        const nullIdx = buffer.indexOf(0, offset);
-        if (nullIdx === -1) break;
-        
-        const term = buffer.toString('utf8', offset, nullIdx);
+    while (offset + 4 <= buffer.length) {
+        const len = buffer.readUInt32LE(offset); offset += 4;
+        if (offset + len > buffer.length) break;
+        const term = buffer.toString('utf8', offset, offset + len);
+        offset += len;
         console.log(`${termId}\t${term}`);
-        
         termId++;
-        offset = nullIdx + 1;
     }
-    
     console.log(`\nTotal terms: ${termId}`);
 }
 
 function viewLexicon(bundleDir) {
     const lexPath = path.join(bundleDir, 'lexicon.bin');
-    if (!fs.existsSync(lexPath)) {
-        throw new Error('lexicon.bin not found');
-    }
-    
+    if (!fs.existsSync(lexPath)) throw new Error('lexicon.bin not found');
     const buffer = fs.readFileSync(lexPath);
-    const numEntries = buffer.readUInt32LE(0);
-    
-    console.log('Lexicon Entries');
-    console.log('===============');
-    console.log(`Total entries: ${numEntries}`);
+    if (buffer.length % 16 !== 0) console.warn('Warning: lexicon.bin size is not multiple of 16 bytes');
+    const n = Math.floor(buffer.length / 16);
+    console.log('Lexicon Entries (v2)');
+    console.log('====================');
+    console.log(`Total entries: ${n}`);
     console.log('');
-    console.log('Term ID\tDoc Freq\tPostings Offset\tPostings Size');
-    console.log('-------\t--------\t--------------\t-------------');
-    
-    let offset = 4;
-    for (let i = 0; i < numEntries && i < 1000; i++) {  // Show first 1000
-        const termId = buffer.readUInt32LE(offset);
-        const docFreq = buffer.readUInt32LE(offset + 4);
-        const postingsOffset = buffer.readBigUInt64LE(offset + 8);
-        const postingsSize = buffer.readUInt32LE(offset + 16);
-        
-        console.log(`${termId}\t${docFreq}\t${postingsOffset}\t${postingsSize}`);
-        offset += 20;
+    console.log('TermID\tDF\tOffset\tLength');
+    console.log('-----\t--\t------\t------');
+    let offset = 0;
+    for (let i = 0; i < n && i < 1000; i++) {
+        const postingsOffset = Number(buffer.readBigUInt64LE(offset));
+        const length = buffer.readUInt32LE(offset + 8);
+        const df = buffer.readUInt32LE(offset + 12);
+        console.log(`${i}\t${df}\t${postingsOffset}\t${length}`);
+        offset += 16;
     }
-    
-    if (numEntries > 1000) {
-        console.log(`... (${numEntries - 1000} more entries)`);
-    }
+    if (n > 1000) console.log(`... (${n - 1000} more entries)`);
 }
 
 function viewPostings(bundleDir) {
@@ -113,39 +95,30 @@ function viewPostings(bundleDir) {
     console.log('=============');
     console.log(`File size: ${fileSize.toLocaleString()} bytes`);
     console.log('');
-    console.log('Note: Postings are stored as compressed arrays of (doc_id, term_freq) pairs.');
-    console.log('Use lexicon.bin to find specific posting list offsets.');
+    console.log('Note: v2 postings are delta-encoded pairs (doc_delta, term_freq).');
+    console.log('Use lexicon.bin to find offsets; sample below uses term_id=0.');
     console.log('');
-    
-    // Show a sample posting list (the first one)
     const lexPath = path.join(bundleDir, 'lexicon.bin');
     if (fs.existsSync(lexPath)) {
-        const lexBuffer = fs.readFileSync(lexPath);
-        const numEntries = lexBuffer.readUInt32LE(0);
-        
-        if (numEntries > 0) {
-            // Read first lexicon entry
-            const firstTermId = lexBuffer.readUInt32LE(4);
-            const firstDocFreq = lexBuffer.readUInt32LE(8);
-            const firstOffset = Number(lexBuffer.readBigUInt64LE(12));
-            const firstSize = lexBuffer.readUInt32LE(20);
-            
-            console.log(`Sample: First posting list (term_id=${firstTermId}, doc_freq=${firstDocFreq})`);
+        const lex = fs.readFileSync(lexPath);
+        const n = Math.floor(lex.length / 16);
+        if (n > 0) {
+            const sampleTermId = 0;
+            const off = sampleTermId * 16;
+            const postingsOffset = Number(lex.readBigUInt64LE(off));
+            const length = lex.readUInt32LE(off + 8);
+            const df = lex.readUInt32LE(off + 12);
+            console.log(`Sample postings for term_id=${sampleTermId} (df=${df}, length=${length})`);
             console.log('Doc ID\tTerm Freq');
             console.log('------\t---------');
-            
-            let offset = firstOffset;
-            for (let i = 0; i < firstDocFreq && offset < firstOffset + firstSize; i++) {
-                const docId = buffer.readUInt32LE(offset);
-                const termFreq = buffer.readUInt32LE(offset + 4);
-                console.log(`${docId}\t${termFreq}`);
-                offset += 8;
-                
-                if (i >= 10) {
-                    console.log(`... (${firstDocFreq - i - 1} more documents)`);
-                    break;
-                }
+            let p = postingsOffset; let prev = 0;
+            for (let i = 0; i < Math.min(length, 25); i++) {
+                const delta = buffer.readUInt32LE(p);
+                const tf = buffer.readUInt32LE(p + 4);
+                const docId = prev + delta; prev = docId; p += 8;
+                console.log(`${docId}\t${tf}`);
             }
+            if (length > 25) console.log(`... (${length - 25} more)`);
         }
     }
 }
@@ -160,21 +133,14 @@ function viewMetadata(bundleDir) {
     
     const buffer = fs.readFileSync(metaPath);
     const blockSize = manifest.files.meta.block_size || 131072;
-    
-    // Read the block count first
     const blockCount = buffer.readUInt32LE(0);
-    
-    console.log('Metadata Blocks');
-    console.log('===============');
+    console.log('Metadata Blocks (v2)');
+    console.log('====================');
     console.log(`Block size: ${blockSize.toLocaleString()} bytes`);
-    console.log(`Doc aligned: ${manifest.files.meta.doc_aligned || false}`);
     console.log(`Total file size: ${buffer.length.toLocaleString()} bytes`);
     console.log(`Total blocks: ${blockCount}`);
-    console.log('');
-    
-    // Read all block headers first
     const headers = [];
-    let headerOffset = 4; // Start after block count
+    let headerOffset = 4;
     for (let i = 0; i < blockCount; i++) {
         headers.push({
             blockId: buffer.readUInt32LE(headerOffset),
@@ -184,58 +150,28 @@ function viewMetadata(bundleDir) {
         });
         headerOffset += 16;
     }
-    
-    // Now read block data
-    let dataOffset = 4 + (blockCount * 16); // Start after headers
-    
+    let dataOffset = 4 + blockCount * 16;
+    const inferredBlockSize = Math.floor((buffer.length - dataOffset) / blockCount);
     for (let blockIdx = 0; blockIdx < Math.min(3, blockCount); blockIdx++) {
         const header = headers[blockIdx];
-        
-        console.log(`\nBlock ${blockIdx}:`);
-        console.log(`  Block ID: ${header.blockId}`);
+        console.log(`\nBlock ${blockIdx} (id=${header.blockId}):`);
         console.log(`  Uncompressed size: ${header.uncompressedSize.toLocaleString()} bytes`);
         console.log(`  Document count: ${header.docCount}`);
-        console.log(`  Documents:`);
-        
-        let blockOffset = 0;
-        for (let i = 0; i < Math.min(5, header.docCount); i++) {  // Show first 5 docs per block
-            // Read DocHeader
-            const docId = buffer.readBigUInt64LE(dataOffset + blockOffset);
-            const timestamp = buffer.readBigUInt64LE(dataOffset + blockOffset + 8);
-            const idLen = buffer.readUInt32LE(dataOffset + blockOffset + 16);
-            const textLen = buffer.readUInt32LE(dataOffset + blockOffset + 20);
-            const sourceLen = buffer.readUInt32LE(dataOffset + blockOffset + 24);
-            
-            blockOffset += 32; // DocHeader size
-            
-            // Read strings
-            const id = buffer.toString('utf8', dataOffset + blockOffset, dataOffset + blockOffset + idLen);
-            blockOffset += idLen;
-            
-            const textPreview = buffer.toString('utf8', dataOffset + blockOffset, dataOffset + blockOffset + Math.min(100, textLen));
-            blockOffset += textLen;
-            
-            const source = buffer.toString('utf8', dataOffset + blockOffset, dataOffset + blockOffset + sourceLen);
-            blockOffset += sourceLen;
-            
-            console.log(`    Doc ${docId}:`);
-            console.log(`      ID: ${id}`);
-            console.log(`      Timestamp: ${new Date(Number(timestamp) * 1000).toISOString()}`);
-            console.log(`      Text size: ${textLen.toLocaleString()} bytes`);
-            console.log(`      Text preview: ${textPreview}${textLen > 100 ? '...' : ''}`);
-            console.log(`      Source: ${source}`);
+        let pos = dataOffset + blockIdx * inferredBlockSize;
+        let consumed = 0;
+        for (let i = 0; i < Math.min(5, header.docCount); i++) {
+            if (consumed + 4 > header.uncompressedSize) break;
+            const idLen = buffer.readUInt32LE(pos); pos += 4; consumed += 4;
+            const id = buffer.toString('utf8', pos, pos + idLen); pos += idLen; consumed += idLen;
+            if (consumed + 4 > header.uncompressedSize) break;
+            const textLen = buffer.readUInt32LE(pos); pos += 4; consumed += 4;
+            const textPrev = buffer.toString('utf8', pos, pos + Math.min(100, textLen)); pos += textLen; consumed += textLen;
+            if (consumed + 4 > header.uncompressedSize) break;
+            const metaLen = buffer.readUInt32LE(pos); pos += 4; consumed += 4;
+            const metaPrev = buffer.toString('utf8', pos, pos + Math.min(80, metaLen)); pos += metaLen; consumed += metaLen;
+            console.log(`  Doc ${i}: id=${id} text(${textLen})='${textPrev}${textLen>100?'...':''}' meta(${metaLen})='${metaPrev}${metaLen>80?'...':''}'`);
         }
-        
-        if (header.docCount > 5) {
-            console.log(`    ... (${header.docCount - 5} more documents in this block)`);
-        }
-        
-        // Move to next block (blocks are padded to blockSize)
-        dataOffset += blockSize;
-    }
-    
-    if (blockCount > 3) {
-        console.log(`\n... (${blockCount - 3} more blocks)`);
+        if (header.docCount > 5) console.log(`  ... (${header.docCount - 5} more)`);
     }
 }
 
@@ -350,56 +286,25 @@ function viewDocLen(bundleDir) {
 
 function viewVectors(bundleDir) {
     const manifest = readManifest(bundleDir);
-    const vectorsPath = path.join(bundleDir, 'vectors.f32');
-    
-    if (!fs.existsSync(vectorsPath)) {
-        throw new Error('vectors.f32 not found');
-    }
-    
+    const dtype = (manifest.embedding && manifest.embedding.dtype) || 'f32';
+    const vectorsPath = path.join(bundleDir, `vectors.${dtype}`);
+    if (!fs.existsSync(vectorsPath)) throw new Error(`vectors.${dtype} not found`);
     const stats = fs.statSync(vectorsPath);
     const numDocs = manifest.num_docs;
     const dim = manifest.dim;
-    const expectedSize = numDocs * dim * 4;
-    
+    const elemSize = dtype === 'f16' ? 2 : 4;
+    const rowSize = dim * elemSize;
+    const alignedRowSize = Math.ceil(rowSize / 64) * 64;
+    const expectedSize = numDocs * alignedRowSize;
     console.log('Vector Embeddings');
     console.log('=================');
     console.log(`Number of documents: ${numDocs.toLocaleString()}`);
     console.log(`Embedding dimensions: ${dim}`);
-    console.log(`Data type: float32`);
-    console.log(`File size: ${stats.size.toLocaleString()} bytes`);
+    console.log(`Data type: ${dtype}`);
+    console.log(`Row size (aligned): ${alignedRowSize} bytes`);
     console.log(`Expected size: ${expectedSize.toLocaleString()} bytes`);
-    console.log(`Size per vector: ${(dim * 4).toLocaleString()} bytes`);
-    console.log('');
-    
-    if (stats.size !== expectedSize) {
-        console.log('WARNING: File size does not match expected size!');
-    }
-    
-    // Show first few vectors (just dimensions, not all values)
-    const buffer = fs.readFileSync(vectorsPath);
-    console.log('Sample vectors (showing first and last 5 dimensions):');
-    console.log('Doc ID\tFirst 5 dims\t\t\t\t\tLast 5 dims');
-    console.log('------\t------------\t\t\t\t\t-----------');
-    
-    for (let i = 0; i < Math.min(10, numDocs); i++) {
-        const offset = i * dim * 4;
-        const first5 = [];
-        const last5 = [];
-        
-        for (let j = 0; j < 5; j++) {
-            first5.push(buffer.readFloatLE(offset + j * 4).toFixed(3));
-        }
-        
-        for (let j = dim - 5; j < dim; j++) {
-            last5.push(buffer.readFloatLE(offset + j * 4).toFixed(3));
-        }
-        
-        console.log(`${i}\t[${first5.join(', ')}...]\t[...${last5.join(', ')}]`);
-    }
-    
-    if (numDocs > 10) {
-        console.log(`... (${numDocs - 10} more vectors)`);
-    }
+    console.log(`Actual size: ${stats.size.toLocaleString()} bytes`);
+    if (stats.size !== expectedSize) console.log('WARNING: File size does not match expected aligned size!');
 }
 
 // Main CLI
@@ -413,6 +318,7 @@ function main() {
     
     const bundleDir = args[0] || '.';
     const fileType = args[1];
+    const extra = args[2];
     
     if (!fileType) {
         printUsage();
@@ -436,7 +342,7 @@ function main() {
                 viewLexicon(bundleDir);
                 break;
             case 'postings':
-                viewPostings(bundleDir);
+                viewPostings(bundleDir, extra ? parseInt(extra, 10) : 0);
                 break;
             case 'meta':
                 viewMetadata(bundleDir);
