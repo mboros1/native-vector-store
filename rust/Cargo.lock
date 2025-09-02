@@ -467,6 +467,7 @@ dependencies = [
  "bytemuck",
  "cpufeatures",
  "criterion",
+ "half",
  "memmap2",
  "ordered-float",
  "rand",

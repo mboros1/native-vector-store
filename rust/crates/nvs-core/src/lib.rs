@@ -11,5 +11,12 @@ pub mod bundle;
 pub mod simd;
 pub mod search;
 pub mod tokenizer;
+pub mod bm25;
+pub mod hybrid;
+pub mod vector_store;
+pub mod english_stop_words;
+pub mod english_abbreviations;
+pub mod english_punctuations;
 
 pub use bundle::Bundle;
+pub use vector_store::VectorStore;

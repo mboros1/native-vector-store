@@ -215,15 +215,30 @@ fn write_manifest(out: &Path, n: usize, dim: usize, block_size: usize, avgdl: f6
 }
 
 fn write_checksums(out: &Path) -> Result<()> {
-    let files = [
-        "manifest.json","vectors.f32","doclen.u32","lexicon.bin","postings.bin","terms.dict","meta.idx","meta.blocks"
+    let candidates = [
+        "manifest.json",
+        "vectors.f32",
+        "vectors.f16",
+        "doclen.u32",
+        "lexicon.bin",
+        "postings.bin",
+        "terms.dict",
+        "meta.idx",
+        "meta.blocks",
     ];
     let mut s = String::new();
-    for name in files {
-        let path = out.join(name); let mut buf=Vec::new(); File::open(&path)?.read_to_end(&mut buf)?; let h = xxh64(&buf, 0);
-        s.push_str(&format!("{h:016x}  {name}\n"));
+    for name in candidates {
+        let path = out.join(name);
+        if path.exists() {
+            let mut buf = Vec::new();
+            File::open(&path)?.read_to_end(&mut buf)?;
+            let h = xxh64(&buf, 0);
+            s.push_str(&format!("{h:016x}  {name}\n"));
+        }
     }
-    let mut f = File::create(out.join("checksums.xxhash64"))?; f.write_all(s.as_bytes())?; Ok(())
+    let mut f = File::create(out.join("checksums.xxhash64"))?;
+    f.write_all(s.as_bytes())?;
+    Ok(())
 }
 
 fn main() -> Result<()> {

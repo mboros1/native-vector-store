@@ -6,14 +6,35 @@
 // - Ellipsis '...' split into individual '.' tokens
 // - Single period at end-of-line/text is split as '.'; internal periods remain in-word
 
-pub struct SimpleTokenizer;
+#[derive(Clone, Copy, Debug)]
+pub struct TokenizerOptions {
+    pub lowercase: bool,
+    pub split_contractions: bool,
+    pub remove_stopwords: bool,
+}
+
+impl Default for TokenizerOptions {
+    fn default() -> Self {
+        Self { lowercase: false, split_contractions: false, remove_stopwords: false }
+    }
+}
+
+pub struct SimpleTokenizer {
+    opts: TokenizerOptions,
+}
 
 impl SimpleTokenizer {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self { Self { opts: TokenizerOptions::default() } }
+
+    pub fn with_options(opts: TokenizerOptions) -> Self { Self { opts } }
 
     pub fn split(&self, input: &str) -> Vec<String> {
         if input.is_empty() { return Vec::new(); }
-        let pre = self.process_delimiters(input);
+        // optional lowercase
+        let mut text = if self.opts.lowercase { input.to_lowercase() } else { input.to_string() };
+        // optional contractions
+        if self.opts.split_contractions { text = self.process_contractions(&text); }
+        let pre = self.process_delimiters(&text);
         // split on ASCII whitespace
         let mut tokens: Vec<String> = pre.split_whitespace().map(|s| s.to_string()).collect();
         // Post-processing: if a token ends with '.', split it unless abbreviation
@@ -29,7 +50,12 @@ impl SimpleTokenizer {
                     }
                 }
             }
-            out.push(t);
+            // optional stopwords removal
+            if self.opts.remove_stopwords {
+                if !is_stopword(&t) { out.push(t); }
+            } else {
+                out.push(t);
+            }
         }
         out
     }
@@ -72,6 +98,26 @@ impl SimpleTokenizer {
         }
         out
     }
+
+    fn process_contractions(&self, text: &str) -> String {
+        // Very simple, ASCII-focused; mirrors C++ intent
+        // Expand special cases
+        let mut s = text.replace("won't", "will not")
+                        .replace("Won't", "Will not")
+                        .replace("shan't", "shall not")
+                        .replace("Shan't", "Shall not")
+                        .replace("can't", "can not")
+                        .replace("Can't", "Can not")
+                        .replace("ain't", "is not")
+                        .replace("Ain't", "Is not")
+                        .replace("cannot", "can not")
+                        .replace("Cannot", "Can not");
+        // Split n't -> not
+        s = s.replace("n't", " not");
+        // Split 'll, 're, 've, 's, 'm, 'd to separate tokens
+        for suf in ["'ll","'re","'ve","'s","'m","'d"] { s = s.replace(suf, &format!(" {}", suf)); }
+        s
+    }
 }
 
 fn decode_utf8(s: &[u8]) -> (u32, usize) {
@@ -106,18 +152,13 @@ fn is_word(cp: u32) -> bool {
 }
 
 fn is_abbreviation(tok: &str) -> bool {
-    // Match the C++ minimal set for parity
-    const ABBRS: &[&str] = &[
-        "Dr","Mr","Mrs","Ms","Prof","Sr","Jr",
-        "Ph","M","B","D",
-        "Inc","Corp","Co","Ltd",
-        "Jan","Feb","Mar","Apr","Jun","Jul","Aug","Sep","Sept","Oct","Nov","Dec",
-        "Mon","Tue","Wed","Thu","Fri","Sat","Sun",
-        "St","Ave","Rd","Blvd",
-        "U","S","N","E","W",
-        "vs","etc","al","eg","ie","cf",
-    ];
-    ABBRS.contains(&tok)
+    // Case-insensitive check using imported list (lowercase)
+    crate::english_abbreviations::contains(tok)
+}
+
+fn is_stopword(tok: &str) -> bool {
+    // Use the comprehensive embedded list
+    crate::english_stop_words::contains(tok)
 }
 
 #[cfg(test)]
@@ -137,6 +178,14 @@ mod tests {
         let t = SimpleTokenizer::new();
         assert_eq!(t.split("café naïve").as_slice(), ["café","naïve"]);
         assert_eq!(t.split("привет мир").as_slice(), ["привет","мир"]);
+    }
+
+    #[test]
+    fn contractions_and_stopwords() {
+        let t = SimpleTokenizer::with_options(TokenizerOptions{ lowercase: true, split_contractions: true, remove_stopwords: true });
+        // With the comprehensive English stopword list, all resulting tokens are stopwords
+        let toks = t.split("I can't and won't do it");
+        assert_eq!(toks.as_slice(), [] as [&str; 0]);
     }
 
     #[test]

@@ -30,10 +30,10 @@ pub struct Bundle {
     meta_blocks: Mmap,
     meta_idx: Vec<MetaIdxEntry>,
     // BM25 (internal)
-    doclen: Vec<u32>,
-    terms: HashMap<String, usize>,
-    lexicon: Vec<LexiconEntry>,
-    postings: Vec<u8>,
+    pub(crate) doclen: Vec<u32>,
+    pub(crate) terms: HashMap<String, usize>,
+    pub(crate) lexicon: Vec<LexiconEntry>,
+    pub(crate) postings: Vec<u8>,
 }
 
 impl Bundle {
@@ -111,15 +111,12 @@ impl Bundle {
         }
         let meta_blocks = unsafe { Mmap::map(&meta_blocks_file)? };
 
-        // Map vectors
+        // Map vectors (f32 or f16)
         let vectors_path = root.join(&manifest.files.vectors.path);
-        // Only f32 supported for now
-        if manifest.embedding.dtype.to_lowercase() != "f32" {
-            return Err(NvsError::InvalidBundle("only f32 vectors supported"));
-        }
         let vec_file = File::open(&vectors_path)?;
         let vectors = unsafe { Mmap::map(&vec_file)? };
-        let row_bytes = (manifest.dim as usize) * 4;
+        let elem_size = if manifest.embedding.dtype.to_lowercase() == "f16" { 2 } else { 4 };
+        let row_bytes = (manifest.dim as usize) * elem_size;
         let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
         let expected = (manifest.num_docs as usize) * aligned_row_bytes;
         if vectors.len() != expected {
@@ -200,115 +197,35 @@ impl Bundle {
         Some((id, text, meta))
     }
 
-    pub fn search_hybrid(&self, query_vec: &[f32], query_text: &str, k: usize, mut vector_weight: f32) -> Vec<(u32, f32)> {
-        if k == 0 { return Vec::new(); }
-        if query_vec.len() != self.manifest.dim as usize { return Vec::new(); }
-        if vector_weight.is_nan() { vector_weight = 0.5; }
-        if vector_weight < 0.0 { vector_weight = 0.0; }
-        if vector_weight > 1.0 { vector_weight = 1.0; }
-
-        let kk = std::cmp::min(k * 2, self.manifest.num_docs as usize);
-        let vres = self.search_vector(query_vec, kk);
-        let bres = self.search_bm25(query_text, kk);
-
-        let mut combined: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
-        // RRF with constant 60 like C++
-        let c = 60.0f32;
-        for (i, (doc, _s)) in vres.iter().enumerate() {
-            let rrf = 1.0f32 / (c + (i as f32) + 1.0);
-            *combined.entry(*doc).or_insert(0.0) += vector_weight * rrf;
-        }
-        let one_minus = 1.0f32 - vector_weight;
-        for (i, (doc, _s)) in bres.iter().enumerate() {
-            let rrf = 1.0f32 / (c + (i as f32) + 1.0);
-            *combined.entry(*doc).or_insert(0.0) += one_minus * rrf;
-        }
-
-        let mut items: Vec<(u32, f32)> = combined.into_iter().collect();
-        items.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
-        if items.len() > k { items.truncate(k); }
-        items
-    }
+    // Hybrid search moved to vector_store + hybrid
 
     #[inline]
-    fn row_stride_f32(&self) -> usize {
+    pub(crate) fn row_stride_f32(&self) -> usize {
         let row_bytes = (self.manifest.dim as usize) * 4;
         let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
         aligned_row_bytes / 4
     }
 
-    pub fn search_vector(&self, query: &[f32], k: usize) -> Vec<(u32, f32)> {
-        if k == 0 { return Vec::new(); }
-        if query.len() != self.manifest.dim as usize { return Vec::new(); }
-        // Cast mapped bytes into f32 slice
-        let store_f32: &[f32] = bytemuck::cast_slice(&self.vectors);
-        let mut res = crate::search::search_parallel(
-            query,
-            self.manifest.num_docs as usize,
-            self.manifest.dim as usize,
-            self.row_stride_f32(),
-            store_f32,
-            k,
-        );
-        // Stable tie-breaking by doc id ascending
-        res.sort_by(|a,b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
-        res
+    // Vector search moved to vector_store
+
+    // Internal accessors for VectorStore
+    pub(crate) fn vectors_as_f32(&self) -> &[f32] {
+        bytemuck::cast_slice(&self.vectors)
+    }
+    pub(crate) fn vectors_raw(&self) -> &[u8] { &self.vectors }
+    pub(crate) fn num_docs_usize(&self) -> usize { self.manifest.num_docs as usize }
+    pub(crate) fn dim_usize(&self) -> usize { self.manifest.dim as usize }
+    pub(crate) fn row_stride_bytes(&self) -> usize {
+        let elem = if self.manifest.embedding.dtype.to_lowercase() == "f16" { 2 } else { 4 };
+        let row = (self.manifest.dim as usize) * elem;
+        ((row + 63) / 64) * 64
     }
 
-    // Public API: accept a raw query string; tokenize and dispatch
-    pub fn search_bm25(&self, query: &str, k: usize) -> Vec<(u32, f32)> {
-        let tok = crate::tokenizer::SimpleTokenizer::new();
-        let terms = tok.split(query);
-        let view: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
-        self.search_bm25_terms(&view, k)
-    }
-
-    // Internal: accept pre-tokenized terms
-    fn search_bm25_terms(&self, query_terms: &[&str], k: usize) -> Vec<(u32, f32)> {
-        let n = self.manifest.num_docs as usize;
-        if n == 0 || k == 0 || query_terms.is_empty() { return Vec::new(); }
-        let avgdl = self.manifest.bm25.avgdl as f32;
-        let k1 = self.manifest.bm25.k1 as f32;
-        let b = self.manifest.bm25.b as f32;
-
-        let mut acc: HashMap<u32, f32> = HashMap::with_capacity(1024);
-        for &qt in query_terms {
-            if let Some(&tid) = self.terms.get(qt) {
-                if tid >= self.lexicon.len() { continue; }
-                let lex = &self.lexicon[tid];
-                let idf = ((self.manifest.num_docs as f32 - lex.df as f32 + 0.5) / (lex.df as f32 + 0.5)).ln();
-                let mut prev = 0u32;
-                let mut off = lex.offset as usize;
-                for _ in 0..lex.length {
-                    if off + 8 > self.postings.len() { break; }
-                    let delta = u32::from_le_bytes(self.postings[off..off+4].try_into().unwrap());
-                    let tf = u32::from_le_bytes(self.postings[off+4..off+8].try_into().unwrap());
-                    off += 8;
-                    let doc = prev.wrapping_add(delta);
-                    prev = doc;
-                    let dl = self.doclen.get(doc as usize).copied().unwrap_or(0) as f32;
-                    let tfc = (tf as f32 * (k1 + 1.0)) / (tf as f32 + k1 * (1.0 - b + b * dl / avgdl));
-                    *acc.entry(doc).or_insert(0.0) += idf * tfc;
-                }
-            }
-        }
-        // Top-k extraction with a min-heap
-        use ordered_float::OrderedFloat;
-        type HeapItem = std::cmp::Reverse<(OrderedFloat<f32>, u32)>;
-        let mut heap: std::collections::BinaryHeap<HeapItem> = std::collections::BinaryHeap::new();
-        for (&doc, &score) in acc.iter() {
-            let item = std::cmp::Reverse((OrderedFloat(score), doc));
-            if heap.len() < k { heap.push(item); }
-            else if let Some(mut top) = heap.peek_mut() { if item.0 .0 > top.0 .0 { *top = item; } }
-        }
-        let mut v: Vec<(OrderedFloat<f32>,u32)> = heap.into_sorted_vec().into_iter().map(|r| r.0).collect();
-        v.reverse();
-        v.into_iter().map(|(s,d)|(d,s.0)).collect()
-    }
+    // BM25 search has moved to crate::bm25
 }
 
 #[derive(Debug, Clone, Copy)]
-struct LexiconEntry { offset: u64, length: u32, df: u32 }
+pub(crate) struct LexiconEntry { pub(crate) offset: u64, pub(crate) length: u32, pub(crate) df: u32 }
 
 fn load_lexicon(path: &Path) -> Result<Vec<LexiconEntry>> {
     let mut f = File::open(path)?;
@@ -523,13 +440,13 @@ mod tests {
         write_meta_idx(&dir, 3);
         write_meta_blocks(&dir, 1, 128);
 
-        let b = Bundle::open(&dir).unwrap();
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir).unwrap());
         // Query apple should bring doc0 before doc2
-        let res = b.search_bm25("apple", 3);
+        let res = store.search_bm25("apple", 3);
         assert!(!res.is_empty());
         assert_eq!(res[0].0, 0);
         // Multi-term apple+banana likely keeps doc1 and doc0 in top 2
-        let res2 = b.search_bm25("apple banana", 3);
+        let res2 = store.search_bm25("apple banana", 3);
         assert!(res2.iter().any(|&(id,_)| id==0));
         assert!(res2.iter().any(|&(id,_)| id==1));
     }
@@ -565,16 +482,16 @@ mod tests {
         write_meta_idx(&dir, num_docs as usize);
         write_meta_blocks(&dir, 1, 128);
 
-        let b = Bundle::open(&dir).unwrap();
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir).unwrap());
         let q = [1f32, 0f32, 0f32, 0f32];
-        let res = b.search_vector(&q, 3);
+        let res = store.search_vector(&q, 3);
         assert!(!res.is_empty());
         // Top-1 should be doc 0
         assert_eq!(res[0].0, 0);
         // Scores should be non-increasing
         for i in 1..res.len() { assert!(res[i-1].1 >= res[i].1); }
         // Determinism
-        let res2 = b.search_vector(&q, 3);
+        let res2 = store.search_vector(&q, 3);
         assert_eq!(res, res2);
     }
 
@@ -666,9 +583,9 @@ mod tests {
             pf.write_all(&1u32.to_le_bytes()).unwrap(); pf.write_all(&1u32.to_le_bytes()).unwrap();
         }
         write_meta_idx(&dir, 3); write_meta_blocks(&dir, 1, 128);
-        let b = Bundle::open(&dir).unwrap();
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir).unwrap());
         let v = [1f32];
-        let hv = b.search_hybrid(&v, "apple", 2, 0.0);
+        let hv = store.search_hybrid(&v, "apple", 2, 0.0);
         assert_eq!(hv[0].0, 1, "bm25 extreme should rank doc1 first");
 
         // Build a bundle where BM25 is empty and vectors are identity; weight 1.0 follows vectors
@@ -682,9 +599,9 @@ mod tests {
         { let mut f = File::create(dir2.join("doclen.u32")).unwrap(); for _ in 0..3 { f.write_all(&0u32.to_le_bytes()).unwrap(); } }
         File::create(dir2.join("lexicon.bin")).unwrap(); File::create(dir2.join("postings.bin")).unwrap(); File::create(dir2.join("terms.dict")).unwrap();
         write_meta_idx(&dir2, 3); write_meta_blocks(&dir2, 1, 128);
-        let b2 = Bundle::open(&dir2).unwrap();
+        let store2 = crate::VectorStore::from_bundle(Bundle::open(&dir2).unwrap());
         let q = [1f32,0f32,0f32];
-        let hv2 = b2.search_hybrid(&q, "unused", 2, 1.0);
+        let hv2 = store2.search_hybrid(&q, "unused", 2, 1.0);
         assert_eq!(hv2[0].0, 0, "vector extreme should rank doc0 first");
     }
 
@@ -815,12 +732,12 @@ mod tests {
             TDoc{ id: "doc2".into(), text: "doc text number 2".into(), embedding: vec![1.0,0.0,0.0,0.0] },
         ];
         pack_bundle(&dir_in, &docs, 4, 131072);
-        let b = Bundle::open(&dir_in).unwrap();
-        assert_eq!(b.manifest.num_docs, 3);
-        assert_eq!(b.manifest.dim, 4);
-        let d0 = b.get_document(0).unwrap(); assert_eq!(d0.0, "doc0"); assert!(d0.1.contains("doc text number 0")); assert!(d0.2.contains("\"embedding\""));
-        let d2 = b.get_document(2).unwrap(); assert_eq!(d2.0, "doc2"); assert!(d2.1.contains("doc text number 2"));
-        let q = [1f32,0f32,0f32,0f32]; let res = b.search_vector(&q, 2); assert!(!res.is_empty());
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir_in).unwrap());
+        assert_eq!(store.size(), 3);
+        assert_eq!(store.dimensions(), 4);
+        let d0 = store.get_document(0).unwrap(); assert_eq!(d0.0, "doc0"); assert!(d0.1.contains("doc text number 0")); assert!(d0.2.contains("\"embedding\""));
+        let d2 = store.get_document(2).unwrap(); assert_eq!(d2.0, "doc2"); assert!(d2.1.contains("doc text number 2"));
+        let q = [1f32,0f32,0f32,0f32]; let res = store.search_vector(&q, 2); assert!(!res.is_empty());
     }
 
     #[test]
@@ -828,9 +745,10 @@ mod tests {
         let dir_in = temp_dir("nvs_rust_e2e_in_multi");
         let mut docs = Vec::new(); for i in 0..10 { docs.push(TDoc{ id: format!("m{i}"), text: format!("m text number {i}"), embedding: vec![1.0,0.0,0.0,0.0] }); }
         pack_bundle(&dir_in, &docs, 4, 256);
-        let b = Bundle::open(&dir_in).unwrap(); assert_eq!(b.manifest.num_docs, 10);
-        let d0 = b.get_document(0).unwrap(); assert_eq!(d0.0, "m0"); let d9 = b.get_document(9).unwrap(); assert_eq!(d9.0, "m9");
-        for i in 0..10 { let d = b.get_document(i).unwrap(); assert_eq!(d.0, format!("m{i}")); }
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir_in).unwrap());
+        assert_eq!(store.size(), 10);
+        let d0 = store.get_document(0).unwrap(); assert_eq!(d0.0, "m0"); let d9 = store.get_document(9).unwrap(); assert_eq!(d9.0, "m9");
+        for i in 0..10 { let d = store.get_document(i).unwrap(); assert_eq!(d.0, format!("m{i}")); }
     }
 
     #[test]
@@ -860,5 +778,80 @@ mod tests {
             let mut seen=0; for line in s.lines() { if line.is_empty() { continue; } let mut parts = line.split("  "); let hex = parts.next().unwrap(); let fname = parts.next().unwrap_or(""); assert_eq!(hex.len(), 16); assert!(hex.chars().all(|c| c.is_ascii_hexdigit() && c.is_lowercase() || c.is_ascii_digit())); assert!(Path::new(&dir_in).join(fname).exists()); seen+=1; }
             assert!(seen>=5);
         }
+    }
+
+    #[test]
+    fn e2e_vector_search_f16() {
+        use half::f16;
+        // Build a minimal f16 bundle and ensure vector search works
+        let dir = temp_dir("nvs_rust_e2e_f16");
+        let num_docs = 3usize;
+        let dim = 4usize;
+        let block_size = 128u32;
+
+        // Write vectors.f16 with identity-like rows, 64B aligned
+        {
+            let row_bytes = dim * 2; // f16
+            let aligned = ((row_bytes + 63) / 64) * 64;
+            let mut data = vec![0u8; num_docs * aligned];
+            for i in 0..num_docs {
+                for j in 0..dim {
+                    let v = if i == j { 1.0f32 } else { 0.0f32 };
+                    let h = f16::from_f32(v);
+                    let off = i * aligned + j * 2;
+                    data[off..off + 2].copy_from_slice(&h.to_le_bytes());
+                }
+            }
+            let mut f = File::create(dir.join("vectors.f16")).unwrap();
+            f.write_all(&data).unwrap();
+        }
+
+        // doclen for num_docs (zeros)
+        {
+            let mut f = File::create(dir.join("doclen.u32")).unwrap();
+            for _ in 0..num_docs { f.write_all(&0u32.to_le_bytes()).unwrap(); }
+        }
+        // Empty bm25 files
+        File::create(dir.join("lexicon.bin")).unwrap();
+        File::create(dir.join("postings.bin")).unwrap();
+        File::create(dir.join("terms.dict")).unwrap();
+
+        // Minimal meta files (no actual doc content needed for this test)
+        write_meta_idx(&dir, num_docs);
+        write_meta_blocks(&dir, 1, block_size);
+
+        // Write manifest pointing to f16 vectors
+        {
+            let manifest = format!(
+                r#"{{
+  "format": "nvs.v1",
+  "num_docs": {},
+  "dim": {},
+  "embedding": {{"model": "test", "dtype": "f16"}},
+  "bm25": {{"avgdl": 0.0, "k1": 1.2, "b": 0.75}},
+  "files": {{
+    "vectors": {{"path": "vectors.f16", "dtype": "f16", "rows": {}, "cols": {}}},
+    "doclen": {{"path": "doclen.u32", "dtype": "u32", "rows": {}}},
+    "lexicon": {{"path": "lexicon.bin"}},
+    "postings": {{"path": "postings.bin"}},
+    "terms": {{"path": "terms.dict"}},
+    "meta_idx": {{"path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size"}},
+    "meta": {{"path": "meta.blocks", "block_size": {}, "doc_aligned": true}}
+  }}
+}}"#,
+                num_docs, dim, num_docs, dim, num_docs, block_size
+            );
+            let mut f = File::create(dir.join("manifest.json")).unwrap();
+            f.write_all(manifest.as_bytes()).unwrap();
+        }
+
+        // Open and run vector search
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir).unwrap());
+        assert_eq!(store.size(), num_docs);
+        assert_eq!(store.dimensions(), dim);
+        let q = [1f32, 0f32, 0f32, 0f32];
+        let res = store.search_vector(&q, 3);
+        assert!(!res.is_empty());
+        assert_eq!(res[0].0, 0);
     }
 }
