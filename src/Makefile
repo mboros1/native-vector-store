@@ -118,3 +118,14 @@ unit-tests-bundle: unit-tests
 .PHONY: unit-tests-pack
 unit-tests-pack: EXTRA_TEST_FLAGS += -DNVS_TEST_PACK_BUNDLE
 unit-tests-pack: unit-tests
+
+# Benchmarks
+.PHONY: bench-cpp bench-cpp-nano
+bench-cpp: $(BIN_DIR) $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) bench/vector_bench.cpp -o $(BIN_DIR)/vector_bench $(LDFLAGS) $(LIBS)
+	@echo "Built C++ vector bench at src/bin/vector_bench (chrono timing)"
+
+bench-cpp-nano: CXXFLAGS += -DNVS_USE_NANOBENCH
+bench-cpp-nano: $(BIN_DIR) $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) bench/vector_bench.cpp -o $(BIN_DIR)/vector_bench $(LDFLAGS) $(LIBS)
+	@echo "Built C++ vector bench at src/bin/vector_bench (nanobench)"

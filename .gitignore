@@ -50,3 +50,10 @@ docs/
 
 samples/
 bin/
+
+# Rust build artifacts
+rust/target/
+rust/**/target/
+rust/**/.cargo-ok
+rust/**/.rustc_info.json
+rust/**/.criterion/

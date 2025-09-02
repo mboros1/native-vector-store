@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::errors::*;
@@ -205,4 +205,3 @@ mod tests {
         match err { NvsError::InvalidBundle(_) => {}, _ => panic!("unexpected err") }
     }
 }
-

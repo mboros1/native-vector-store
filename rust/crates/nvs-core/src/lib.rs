@@ -8,5 +8,7 @@
 pub mod errors;
 pub mod manifest;
 pub mod bundle;
+pub mod simd;
+pub mod search;
 
 pub use bundle::Bundle;
