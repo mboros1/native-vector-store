@@ -762,6 +762,109 @@ TEST_CASE("NVSPacker checksums") {
     }
 }
 
+// End-to-end packer test: builds a tiny bundle and validates outputs
+#ifdef NVS_TEST_PACK_BUNDLE
+TEST_CASE("NVSPacker end-to-end bundle build") {
+    using namespace nvs;
+    namespace fs = std::filesystem;
+
+    // Create temporary input directory with two docs
+    auto tmp_in = fs::temp_directory_path() / "nvs_pack_e2e_in";
+    auto tmp_out = fs::temp_directory_path() / "nvs_pack_e2e_out";
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+    fs::create_directories(tmp_in);
+
+    // Two small documents with 4-dim embeddings
+    {
+        std::ofstream f(tmp_in / "docs.json");
+        f << R"([
+          {
+            "id": "doc-1",
+            "text": "alpha beta gamma",
+            "metadata": { "embedding": [0.5, 0.5, 0.5, 0.5] }
+          },
+          {
+            "id": "doc-2",
+            "text": "beta gamma delta",
+            "metadata": { "embedding": [1.0, 0.0, 0.0, 0.0] }
+          }
+        ])";
+    }
+
+    // Run packer
+    PackerOptions opts;
+    opts.input_path = tmp_in.string();
+    opts.output_dir = tmp_out.string();
+    opts.embedding_model = "test";
+    opts.block_size = 1024; // small block size
+    NVSPacker packer(opts);
+    int rc = packer.run();
+    CHECK(rc == 0);
+
+    // Validate files exist
+    auto expect_exists = [&](const char* name) {
+        CHECK(fs::exists(tmp_out / name));
+    };
+    expect_exists("manifest.json");
+    expect_exists("vectors.f32");
+    expect_exists("doclen.u32");
+    expect_exists("lexicon.bin");
+    expect_exists("postings.bin");
+    expect_exists("terms.dict");
+    expect_exists("meta.idx");
+    expect_exists("meta.blocks");
+    expect_exists("checksums.sha256");
+
+    // Verify manifest basics
+    {
+        std::ifstream in(tmp_out / "manifest.json");
+        std::string s((std::istreambuf_iterator<char>(in)), {});
+        CHECK(s.find("\"format\": \"nvs.v1\"") != std::string::npos);
+        CHECK(s.find("\"num_docs\": 2") != std::string::npos);
+        CHECK(s.find("\"dim\": 4") != std::string::npos);
+        CHECK(s.find("\"dtype\": \"f32\"") != std::string::npos);
+    }
+
+    // Verify vectors layout and alignment
+    {
+        std::ifstream in(tmp_out / "vectors.f32", std::ios::binary);
+        in.seekg(0, std::ios::end);
+        size_t size = static_cast<size_t>(in.tellg());
+        const size_t row = 4 * sizeof(float);
+        const size_t aligned = ((row + 63) / 64) * 64;
+        CHECK(size == aligned * 2);
+    }
+
+    // Verify doc lengths
+    {
+        std::ifstream in(tmp_out / "doclen.u32", std::ios::binary);
+        in.seekg(0, std::ios::end);
+        size_t size = static_cast<size_t>(in.tellg());
+        CHECK(size == 2 * sizeof(uint32_t));
+    }
+
+    // Verify meta.index entry count
+    {
+        std::ifstream in(tmp_out / "meta.idx", std::ios::binary);
+        in.seekg(0, std::ios::end);
+        size_t size = static_cast<size_t>(in.tellg());
+        CHECK(size == 2 * sizeof(MetaIndex));
+    }
+
+    // Verify meta.blocks header and at least one block
+    {
+        std::ifstream in(tmp_out / "meta.blocks", std::ios::binary);
+        uint32_t block_count = 0;
+        in.read(reinterpret_cast<char*>(&block_count), sizeof(block_count));
+        CHECK(block_count >= 1);
+    }
+
+    // Cleanup
+    fs::remove_all(tmp_in);
+    fs::remove_all(tmp_out);
+}
+#endif
 TEST_CASE("NVSPacker vector quantization") {
     using namespace nvs;
     

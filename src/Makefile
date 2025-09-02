@@ -128,3 +128,7 @@ rebuild: clean all
 .PHONY: unit-tests-bundle
 unit-tests-bundle: EXTRA_TEST_FLAGS += -DNVS_TEST_V2_BUNDLE
 unit-tests-bundle: unit-tests
+
+.PHONY: unit-tests-pack
+unit-tests-pack: EXTRA_TEST_FLAGS += -DNVS_TEST_PACK_BUNDLE
+unit-tests-pack: unit-tests
