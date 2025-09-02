@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/nvs-core",
+]
+
+resolver = "2"
+

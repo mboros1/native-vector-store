@@ -231,6 +231,14 @@ bool VectorStoreV2::open_data_files() {
         return false;
     }
     meta_idx_entries_ = meta_idx_file_.as<MetaIdxEntry>();
+    // Validate meta.idx entry count matches manifest.num_docs
+    if (meta_idx_file_.size() % sizeof(MetaIdxEntry) != 0) {
+        return false;
+    }
+    size_t idx_entries = meta_idx_file_.size() / sizeof(MetaIdxEntry);
+    if (idx_entries != info_.num_docs) {
+        return false;
+    }
     
     // Open metadata blocks
     if (!meta_file_.open(bundle_path_ + "/meta.blocks")) {
@@ -1328,6 +1336,106 @@ TEST_CASE("VectorStoreV2 block metadata robustness") {
         REQUIRE(store.open(dir.string()));
         VectorStoreV2::SearchResult r;
         CHECK_FALSE(store.get_document(0, r));
+        fs::remove_all(dir);
+    }
+
+    SUBCASE("manifest block_size mismatch triggers open failure") {
+        auto dir = fs::temp_directory_path() / "nvs_bad_blocksize_manifest";
+        fs::remove_all(dir);
+        // Write manifest with block_size=128, but build meta.blocks with 256-byte block
+        fs::create_directories(dir);
+        {
+            std::ofstream mf(dir / "manifest.json");
+            mf << "{\n"
+                  "  \"format\": \"nvs.v1\",\n"
+                  "  \"num_docs\": 1,\n"
+                  "  \"dim\": 1,\n"
+                  "  \"embedding\": {\"model\": \"test\", \"dtype\": \"f32\"},\n"
+                  "  \"bm25\": {\"avgdl\": 1.0, \"k1\": 1.2, \"b\": 0.75},\n"
+                  "  \"files\": {\n"
+                  "    \"vectors\": {\"path\": \"vectors.f32\", \"dtype\": \"f32\", \"rows\": 1, \"cols\": 1},\n"
+                  "    \"doclen\": {\"path\": \"doclen.u32\", \"dtype\": \"u32\", \"rows\": 1},\n"
+                  "    \"lexicon\": {\"path\": \"lexicon.bin\"},\n"
+                  "    \"postings\": {\"path\": \"postings.bin\"},\n"
+                  "    \"terms\": {\"path\": \"terms.dict\"},\n"
+                  "    \"meta_idx\": {\"path\": \"meta.idx\", \"schema\": \"u32 block_id, u32 offset, u32 doc_size\"},\n"
+                  "    \"meta\": {\"path\": \"meta.blocks\", \"block_size\": 128, \"doc_aligned\": true}\n"
+                  "  }\n"
+                  "}\n";
+        }
+        // Minimal other files
+        std::ofstream(dir / "vectors.f32", std::ios::binary).close();
+        std::ofstream(dir / "doclen.u32", std::ios::binary).close();
+        std::ofstream(dir / "lexicon.bin", std::ios::binary).close();
+        std::ofstream(dir / "postings.bin", std::ios::binary).close();
+        std::ofstream(dir / "terms.dict", std::ios::binary).close();
+        // meta.blocks: 1 block of 256 bytes
+        {
+            std::ofstream mb(dir / "meta.blocks", std::ios::binary);
+            uint32_t bc = 1; mb.write(reinterpret_cast<const char*>(&bc), sizeof(bc));
+            uint32_t hdr[4] = {0, 0, 0, 0};
+            mb.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+            std::vector<char> block(256, 0);
+            mb.write(block.data(), block.size());
+        }
+        // meta.idx with one entry
+        {
+            std::ofstream mi(dir / "meta.idx", std::ios::binary);
+            uint32_t idx[4] = {0, 0, 0, 0};
+            mi.write(reinterpret_cast<const char*>(idx), sizeof(idx));
+        }
+        VectorStoreV2 store;
+        CHECK_FALSE(store.open(dir.string()));
+        fs::remove_all(dir);
+    }
+
+    SUBCASE("open fails when meta.idx entry count != num_docs") {
+        auto dir = fs::temp_directory_path() / "nvs_bad_meta_idx_count";
+        fs::remove_all(dir);
+        // num_docs = 2 in manifest but write only 1 meta.idx entry
+        fs::create_directories(dir);
+        {
+            std::ofstream mf(dir / "manifest.json");
+            mf << "{\n"
+                  "  \"format\": \"nvs.v1\",\n"
+                  "  \"num_docs\": 2,\n"
+                  "  \"dim\": 1,\n"
+                  "  \"embedding\": {\"model\": \"test\", \"dtype\": \"f32\"},\n"
+                  "  \"bm25\": {\"avgdl\": 1.0, \"k1\": 1.2, \"b\": 0.75},\n"
+                  "  \"files\": {\n"
+                  "    \"vectors\": {\"path\": \"vectors.f32\", \"dtype\": \"f32\", \"rows\": 2, \"cols\": 1},\n"
+                  "    \"doclen\": {\"path\": \"doclen.u32\", \"dtype\": \"u32\", \"rows\": 2},\n"
+                  "    \"lexicon\": {\"path\": \"lexicon.bin\"},\n"
+                  "    \"postings\": {\"path\": \"postings.bin\"},\n"
+                  "    \"terms\": {\"path\": \"terms.dict\"},\n"
+                  "    \"meta_idx\": {\"path\": \"meta.idx\", \"schema\": \"u32 block_id, u32 offset, u32 doc_size\"},\n"
+                  "    \"meta\": {\"path\": \"meta.blocks\", \"block_size\": 128, \"doc_aligned\": true}\n"
+                  "  }\n"
+                  "}\n";
+        }
+        // Minimal files
+        std::ofstream(dir / "vectors.f32", std::ios::binary).close();
+        std::ofstream(dir / "doclen.u32", std::ios::binary).close();
+        std::ofstream(dir / "lexicon.bin", std::ios::binary).close();
+        std::ofstream(dir / "postings.bin", std::ios::binary).close();
+        std::ofstream(dir / "terms.dict", std::ios::binary).close();
+        // meta.blocks with 1 block of 128 bytes
+        {
+            std::ofstream mb(dir / "meta.blocks", std::ios::binary);
+            uint32_t bc = 1; mb.write(reinterpret_cast<const char*>(&bc), sizeof(bc));
+            uint32_t hdr[4] = {0, 0, 0, 0};
+            mb.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+            std::vector<char> block(128, 0);
+            mb.write(block.data(), block.size());
+        }
+        // meta.idx with only 1 entry instead of 2
+        {
+            std::ofstream mi(dir / "meta.idx", std::ios::binary);
+            uint32_t idx[4] = {0, 0, 0, 0};
+            mi.write(reinterpret_cast<const char*>(idx), sizeof(idx));
+        }
+        VectorStoreV2 store;
+        CHECK_FALSE(store.open(dir.string()));
         fs::remove_all(dir);
     }
 }
