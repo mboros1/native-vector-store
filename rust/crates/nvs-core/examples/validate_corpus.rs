@@ -4,7 +4,7 @@ use std::fs;
 
 #[derive(Deserialize)]
 struct Q {
-    topic: Option<String>,
+    _topic: Option<String>,
     query: String,
     embedding: Vec<f32>,
 }

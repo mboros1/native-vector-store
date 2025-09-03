@@ -20,10 +20,13 @@ const META_IDX_ENTRY_SIZE: usize = std::mem::size_of::<MetaIdxEntry>();
 
 #[derive(Debug)]
 pub struct Bundle {
+    #[allow(dead_code)]
     root: PathBuf,
     pub manifest: Manifest,
     pub meta_block_size: u32,
     pub meta_block_count: u32,
+    pub meta_codec: Option<String>,
+    pub meta_block_headers: Vec<(u32, u32, u32, u32)>, // (comp_size, decomp_size, doc_count, codec)
     // Vectors
     vectors: Mmap,
     // Metadata
@@ -109,6 +112,17 @@ impl Bundle {
                 return Err(NvsError::InvalidBundle("manifest block_size mismatch"));
             }
         }
+        // Read per-block headers
+        let mut headers: Vec<(u32,u32,u32,u32)> = Vec::with_capacity(block_count as usize);
+        for _ in 0..block_count {
+            let mut b = [0u8; 16];
+            f.read_exact(&mut b)?;
+            let csz = u32::from_le_bytes(b[0..4].try_into().unwrap());
+            let dsz = u32::from_le_bytes(b[4..8].try_into().unwrap());
+            let dct = u32::from_le_bytes(b[8..12].try_into().unwrap());
+            let cod = u32::from_le_bytes(b[12..16].try_into().unwrap());
+            headers.push((csz, dsz, dct, cod));
+        }
         let meta_blocks = unsafe { Mmap::map(&meta_blocks_file)? };
 
         // Map vectors (f32 or f16)
@@ -154,11 +168,14 @@ impl Bundle {
             buf
         };
 
+        let meta_codec = manifest.files.meta.compression.clone();
         Ok(Self {
             root,
             manifest,
             meta_block_size: derived_block,
             meta_block_count: block_count,
+            meta_codec,
+            meta_block_headers: headers,
             vectors,
             meta_blocks,
             meta_idx: meta_idx_entries,
@@ -177,24 +194,59 @@ impl Bundle {
         let blocks_start = header_size;
         let block0 = blocks_start;
         let block_begin = block0 + (idx.block_id as usize) * block_size;
-        // Bounds checks
-        if (idx.offset_in_block as usize) > block_size { return None; }
-        if (idx.offset_in_block as usize) + (idx.doc_size as usize) > block_size { return None; }
-        let mut p = block_begin + idx.offset_in_block as usize;
-        let end = block_begin + block_size;
-        if p + 4 > end { return None; }
-        let id_len = u32::from_le_bytes(base[p..p+4].try_into().ok()?) as usize; p += 4;
-        if p + id_len > end { return None; }
-        let id = String::from_utf8(base[p..p+id_len].to_vec()).ok()?; p += id_len;
-        if p + 4 > end { return None; }
-        let text_len = u32::from_le_bytes(base[p..p+4].try_into().ok()?) as usize; p += 4;
-        if p + text_len > end { return None; }
-        let text = String::from_utf8(base[p..p+text_len].to_vec()).ok()?; p += text_len;
-        if p + 4 > end { return None; }
-        let meta_len = u32::from_le_bytes(base[p..p+4].try_into().ok()?) as usize; p += 4;
-        if p + meta_len > end { return None; }
-        let meta = String::from_utf8(base[p..p+meta_len].to_vec()).ok()?;
-        Some((id, text, meta))
+        let header = self.meta_block_headers.get(idx.block_id as usize).copied().unwrap_or((0,0,0,0));
+        let codec = header.3; // 0=none, 1=zstd
+        if codec == 0 {
+            // Uncompressed, read directly from mmap
+            if (idx.offset_in_block as usize) > block_size { return None; }
+            if (idx.offset_in_block as usize) + (idx.doc_size as usize) > block_size { return None; }
+            let mut p = block_begin + idx.offset_in_block as usize;
+            let end = block_begin + block_size;
+            if p + 4 > end { return None; }
+            let id_len = u32::from_le_bytes(base[p..p+4].try_into().ok()?) as usize; p += 4;
+            if p + id_len > end { return None; }
+            let id = String::from_utf8(base[p..p+id_len].to_vec()).ok()?; p += id_len;
+            if p + 4 > end { return None; }
+            let text_len = u32::from_le_bytes(base[p..p+4].try_into().ok()?) as usize; p += 4;
+            if p + text_len > end { return None; }
+            let text = String::from_utf8(base[p..p+text_len].to_vec()).ok()?; p += text_len;
+            if p + 4 > end { return None; }
+            let meta_len = u32::from_le_bytes(base[p..p+4].try_into().ok()?) as usize; p += 4;
+            if p + meta_len > end { return None; }
+            let meta = String::from_utf8(base[p..p+meta_len].to_vec()).ok()?;
+            Some((id, text, meta))
+        } else {
+            // Zstd compressed block: decompress and then parse at offset
+            let comp_size = header.0 as usize;
+            let decomp_size = header.1 as usize;
+            let comp_start = block_begin;
+            let comp_end = comp_start + comp_size.min(block_size);
+            if comp_end > base.len() { return None; }
+            let comp_slice = &base[comp_start..comp_end];
+            // Decompress
+            let mut buf = vec![0u8; decomp_size];
+            match zstd::bulk::decompress_to_buffer(comp_slice, &mut buf) {
+                Ok(_) => {
+                    if (idx.offset_in_block as usize) + (idx.doc_size as usize) > buf.len() { return None; }
+                    let mut p = idx.offset_in_block as usize;
+                    let end = buf.len();
+                    if p + 4 > end { return None; }
+                    let id_len = u32::from_le_bytes(buf[p..p+4].try_into().ok()?) as usize; p += 4;
+                    if p + id_len > end { return None; }
+                    let id = String::from_utf8(buf[p..p+id_len].to_vec()).ok()?; p += id_len;
+                    if p + 4 > end { return None; }
+                    let text_len = u32::from_le_bytes(buf[p..p+4].try_into().ok()?) as usize; p += 4;
+                    if p + text_len > end { return None; }
+                    let text = String::from_utf8(buf[p..p+text_len].to_vec()).ok()?; p += text_len;
+                    if p + 4 > end { return None; }
+                    let meta_len = u32::from_le_bytes(buf[p..p+4].try_into().ok()?) as usize; p += 4;
+                    if p + meta_len > end { return None; }
+                    let meta = String::from_utf8(buf[p..p+meta_len].to_vec()).ok()?;
+                    Some((id, text, meta))
+                }
+                Err(_) => None,
+            }
+        }
     }
 
     // Hybrid search moved to vector_store + hybrid
@@ -213,7 +265,9 @@ impl Bundle {
         bytemuck::cast_slice(&self.vectors)
     }
     pub(crate) fn vectors_raw(&self) -> &[u8] { &self.vectors }
+    #[allow(dead_code)]
     pub(crate) fn num_docs_usize(&self) -> usize { self.manifest.num_docs as usize }
+    #[allow(dead_code)]
     pub(crate) fn dim_usize(&self) -> usize { self.manifest.dim as usize }
     pub(crate) fn row_stride_bytes(&self) -> usize {
         let elem = if self.manifest.embedding.dtype.to_lowercase() == "f16" { 2 } else { 4 };
@@ -475,7 +529,7 @@ mod tests {
         {
             let mut postings = Vec::<u8>::new();
             let mut lexicon = Vec::<u8>::new();
-            let mut offset: u64 = 0;
+            let offset: u64 = 0;
             let add = |delta: u32, tf: u32, buf: &mut Vec<u8>| { buf.extend_from_slice(&delta.to_le_bytes()); buf.extend_from_slice(&tf.to_le_bytes()); };
             add(0,1,&mut postings); // doc0
             add(1,1,&mut postings); // doc1
@@ -695,7 +749,7 @@ mod tests {
         }
         // Build postings.bin and lexicon.bin
         {
-            let mut postings = Vec::<u8>::new(); let mut lexicon = Vec::<u8>::new(); let mut offset: u64 = 0;
+        let mut postings = Vec::<u8>::new(); let mut lexicon = Vec::<u8>::new(); let mut offset: u64 = 0;
             for t in &terms {
                 let mut list = postings_map.get(t).cloned().unwrap_or_default();
                 list.sort_by_key(|&(doc, _)| doc);
@@ -914,7 +968,7 @@ mod tests {
             let total_size = buf.len();
             let header_size = 4 + block_count*16; let block_size = (total_size - header_size)/block_count; assert!(block_size>0);
             let mut total_docs=0usize;
-            for i in 0..block_count { let (id, usizeb, dcount, _)=hdrs[i]; let start = header_size + i*block_size; let mut consumed=0usize; let mut pos=start;
+            for i in 0..block_count { let (_id, usizeb, _dcount, _)=hdrs[i]; let start = header_size + i*block_size; let mut consumed=0usize; let mut pos=start;
                 while consumed < usizeb as usize { let idl=u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize; pos+=4; consumed+=4; pos+=idl; consumed+=idl; let tl=u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize; pos+=4; consumed+=4; pos+=tl; consumed+=tl; let ml=u32::from_le_bytes(buf[pos..pos+4].try_into().unwrap()) as usize; pos+=4; consumed+=4; pos+=ml; consumed+=ml; total_docs+=1; }
                 assert_eq!(consumed, usizeb as usize); assert_eq!(total_docs as u32, hdrs.iter().map(|h| h.2).take(i+1).sum::<u32>());
             }

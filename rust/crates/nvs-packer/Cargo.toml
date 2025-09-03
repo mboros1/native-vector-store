@@ -17,3 +17,6 @@ nvs-core = { path = "../nvs-core" }
 indicatif = "0.17"
 console = "0.15"
 half = "2"
+zstd = "0.13"
+rustc-hash = "1.1"
+dashmap = "5"

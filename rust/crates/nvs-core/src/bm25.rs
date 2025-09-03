@@ -26,7 +26,8 @@ pub fn search_terms(bundle: &Bundle, query_terms: &[&str], k: usize) -> Vec<(u32
         if let Some(&tid) = bundle.terms.get(qt) {
             if tid >= bundle.lexicon.len() { continue; }
             let lex = &bundle.lexicon[tid];
-            let idf = ((bundle.manifest.num_docs as f32 - lex.df as f32 + 0.5) / (lex.df as f32 + 0.5)).ln();
+            // Use BM25 IDF with +1 to keep values positive, aligning with common IR practice (e.g., Lucene)
+            let idf = (1.0 + (bundle.manifest.num_docs as f32 - lex.df as f32 + 0.5) / (lex.df as f32 + 0.5)).ln();
             let mut prev = 0u32;
             let mut off = lex.offset as usize;
             for _ in 0..lex.length {

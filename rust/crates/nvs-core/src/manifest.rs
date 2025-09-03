@@ -7,6 +7,8 @@ pub struct ManifestFilesMeta {
     pub block_size: Option<u32>,
     #[serde(default)]
     pub doc_aligned: Option<bool>,
+    #[serde(default)]
+    pub compression: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

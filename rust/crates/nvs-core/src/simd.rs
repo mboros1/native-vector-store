@@ -23,6 +23,7 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
 }
 
 #[inline]
+#[allow(dead_code)]
 fn dot_scalar(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
