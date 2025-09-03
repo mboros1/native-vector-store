@@ -3,7 +3,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use rustc_hash::FxHashMap;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{Read, Write, BufWriter};
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh64::xxh64;
 use dashmap::DashMap;
@@ -196,20 +196,51 @@ fn write_meta_and_index(docs: &[Doc], block_size: usize, out: &Path, compress: &
     let mut cur = Vec::<u8>::with_capacity(block_size); let mut cur_usize=0u32; let mut cur_docs=0u32; let mut block_id=0u32;
     #[derive(Serialize)]
     struct Meta<'a> { embedding: &'a [f32] }
-    let mut meta_buf: Vec<u8> = Vec::with_capacity(2048);
+
+    // Lightweight counter to measure JSON length without allocating a buffer
+    struct CountWriter { count: usize }
+    impl CountWriter { fn new() -> Self { Self { count: 0 } } }
+    impl Write for CountWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> { self.count += buf.len(); Ok(buf.len()) }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+
     for d in docs {
-        meta_buf.clear();
         let meta = Meta { embedding: &d.embedding };
-        serde_json::to_writer(&mut meta_buf, &meta)?;
-        let m = &meta_buf;
-        let rec_size = 4 + d.id.len() + 4 + d.text.len() + 4 + m.len();
-        if cur_docs>0 && cur_usize as usize + rec_size > block_size { headers.push((block_id, cur_usize, cur_docs, 0)); blocks.push(std::mem::take(&mut cur)); cur = Vec::with_capacity(block_size); cur_usize=0; cur_docs=0; block_id+=1; }
+        // First pass: count JSON bytes to determine record size and block fit
+        let mut cw = CountWriter::new();
+        serde_json::to_writer(&mut cw, &meta)?;
+        let meta_len = cw.count;
+
+        let rec_size = 4 + d.id.len() + 4 + d.text.len() + 4 + meta_len;
+        if cur_docs>0 && (cur_usize as usize + rec_size) > block_size {
+            headers.push((block_id, cur_usize, cur_docs, 0));
+            blocks.push(std::mem::take(&mut cur));
+            cur = Vec::with_capacity(block_size);
+            cur_usize = 0;
+            cur_docs = 0;
+            block_id += 1;
+        }
         // idx entry
-        idx.extend_from_slice(&block_id.to_le_bytes()); idx.extend_from_slice(&(cur_usize).to_le_bytes()); idx.extend_from_slice(&((rec_size as u32)).to_le_bytes()); idx.extend_from_slice(&0u32.to_le_bytes());
-        // write record
-        cur.extend_from_slice(&(d.id.len() as u32).to_le_bytes()); cur.extend_from_slice(d.id.as_bytes());
-        cur.extend_from_slice(&(d.text.len() as u32).to_le_bytes()); cur.extend_from_slice(d.text.as_bytes());
-        cur.extend_from_slice(&(m.len() as u32).to_le_bytes()); cur.extend_from_slice(m);
+        idx.extend_from_slice(&block_id.to_le_bytes());
+        idx.extend_from_slice(&(cur_usize).to_le_bytes());
+        idx.extend_from_slice(&((rec_size as u32)).to_le_bytes());
+        idx.extend_from_slice(&0u32.to_le_bytes());
+        // write record directly into current block buffer
+        cur.extend_from_slice(&(d.id.len() as u32).to_le_bytes());
+        cur.extend_from_slice(d.id.as_bytes());
+        cur.extend_from_slice(&(d.text.len() as u32).to_le_bytes());
+        cur.extend_from_slice(d.text.as_bytes());
+        // Reserve space for meta length, then serialize JSON directly and back-patch length
+        let len_pos = cur.len();
+        cur.extend_from_slice(&0u32.to_le_bytes());
+        let start = cur.len();
+        serde_json::to_writer(&mut cur, &meta)?;
+        let written = cur.len() - start;
+        debug_assert_eq!(written, meta_len, "meta length changed between count and write");
+        let meta_len_le = (written as u32).to_le_bytes();
+        cur[len_pos..len_pos+4].copy_from_slice(&meta_len_le);
+
         cur_usize += rec_size as u32; cur_docs += 1;
     }
     if cur_docs>0 { headers.push((block_id, cur_usize, cur_docs, 0)); blocks.push(cur); }
@@ -261,33 +292,40 @@ fn write_meta_and_index(docs: &[Doc], block_size: usize, out: &Path, compress: &
             }
         }
     }
-    // meta.idx
-    { let mut f = File::create(out.join("meta.idx"))?; f.write_all(&idx)?; }
+    // meta.idx (buffered)
+    {
+        let f = File::create(out.join("meta.idx"))?;
+        let mut bw = BufWriter::new(f);
+        bw.write_all(&idx)?;
+        bw.flush()?;
+    }
     Ok(headers.len())
 }
 
 fn write_manifest(out: &Path, n: usize, dim: usize, block_size: usize, avgdl: f64, model: &str, dtype: &str, compress: &str) -> Result<()> {
-    let meta_extra = if compress == "zstd" { ", \"compression\": \"zstd\"" } else { "" };
-    let manifest = format!(
-        r#"{{
-  "format": "nvs.v1",
-  "num_docs": {},
-  "dim": {},
-  "embedding": {{"model": "{}", "dtype": "{}"}},
-  "bm25": {{"avgdl": {}, "k1": 1.2, "b": 0.75}},
-  "files": {{
-    "vectors": {{"path": "vectors.{}", "dtype": "{}", "rows": {}, "cols": {}}},
-    "doclen": {{"path": "doclen.u32", "dtype": "u32", "rows": {}}},
-    "lexicon": {{"path": "lexicon.bin"}},
-    "postings": {{"path": "postings.bin"}},
-    "terms": {{"path": "terms.dict"}},
-    "meta_idx": {{"path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size"}},
-    "meta": {{"path": "meta.blocks", "block_size": {}, "doc_aligned": true{}}}
-  }}
-}}"#,
-        n, dim, model, dtype, avgdl, dtype, dtype, n, dim, n, block_size, meta_extra
-    );
-    let mut f = File::create(out.join("manifest.json"))?; f.write_all(manifest.as_bytes())?; Ok(())
+    use nvs_core::manifest as m;
+    let files = m::ManifestFiles {
+        vectors: m::ManifestFilesEntry { path: format!("vectors.{}", dtype), dtype: Some(dtype.to_string()), rows: Some(n as u64), cols: Some(dim as u64), schema: None },
+        doclen: m::ManifestFilesEntry { path: "doclen.u32".into(), dtype: Some("u32".into()), rows: Some(n as u64), cols: None, schema: None },
+        lexicon: m::ManifestFilesEntry { path: "lexicon.bin".into(), dtype: None, rows: None, cols: None, schema: None },
+        postings: m::ManifestFilesEntry { path: "postings.bin".into(), dtype: None, rows: None, cols: None, schema: None },
+        terms: m::ManifestFilesEntry { path: "terms.dict".into(), dtype: None, rows: None, cols: None, schema: None },
+        meta_idx: m::ManifestFilesEntry { path: "meta.idx".into(), dtype: None, rows: None, cols: None, schema: Some("u32 block_id, u32 offset, u32 doc_size".into()) },
+        meta: m::ManifestFilesMeta { path: "meta.blocks".into(), block_size: Some(block_size as u32), doc_aligned: Some(true), compression: if compress == "zstd" { Some("zstd".into()) } else { None } },
+    };
+    let manifest = m::Manifest {
+        format: "nvs.v1".into(),
+        num_docs: n as u64,
+        dim: dim as u64,
+        embedding: m::ManifestEmbedding { model: model.into(), dtype: dtype.into() },
+        bm25: m::ManifestBm25 { avgdl, k1: 1.2, b: 0.75 },
+        files,
+    };
+    let f = File::create(out.join("manifest.json"))?;
+    let mut bw = BufWriter::new(f);
+    serde_json::to_writer_pretty(&mut bw, &manifest)?;
+    bw.flush()?;
+    Ok(())
 }
 
 fn write_checksums(out: &Path) -> Result<()> {
@@ -364,6 +402,15 @@ fn main() -> Result<()> {
     let bundle_size: u64 = [
         "manifest.json","vectors.f32","vectors.f16","doclen.u32","lexicon.bin","postings.bin","terms.dict","meta.idx","meta.blocks"
     ].iter().filter_map(|name| { let p = cli.out.join(name); fs::metadata(&p).ok().map(|m| m.len()) }).sum();
+    // Allocated (physical) size on disk
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    #[cfg(unix)]
+    let allocated_size: u64 = [
+        "manifest.json","vectors.f32","vectors.f16","doclen.u32","lexicon.bin","postings.bin","terms.dict","meta.idx","meta.blocks"
+    ].iter().filter_map(|name| { let p = cli.out.join(name); fs::metadata(&p).ok().map(|m| m.blocks() * 512) }).sum();
+    #[cfg(not(unix))]
+    let allocated_size: u64 = 0;
     println!("{} {}", console::style("✔").green(), console::style("Bundle created").bold());
     println!("  Output: {}", console::style(cli.out.display()).bold());
     println!("  Docs: {}  Tokens: {}", docs_len, total_tokens);
@@ -372,6 +419,8 @@ fn main() -> Result<()> {
     println!("  Blocks: {}  Block size: {} bytes", block_count, cli.block_size);
     println!("  Vectors: rows={} stride={}B", docs_len, aligned);
     println!("  Bundle size: {:.2} MB", (bundle_size as f64) / (1024.0*1024.0));
+    #[cfg(unix)]
+    println!("  Allocated size: {:.2} MB", (allocated_size as f64) / (1024.0*1024.0));
     println!("  Time: read {:?}  vectors {:?}  bm25 {:?}  meta {:?}  manifest {:?}  checksums {:?}", t_read, t_vec, t_bm25, t_meta, t_manifest, t_checksums);
     Ok(())
 }
