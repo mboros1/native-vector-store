@@ -52,7 +52,10 @@ unsafe fn dot_avx2(a: &[f32], b: &[f32]) -> f32 {
     let mut tmp = [0f32; 8];
     _mm256_storeu_ps(tmp.as_mut_ptr(), acc);
     let mut sum: f32 = tmp.iter().sum();
-    while i < a.len() { sum += *a.get_unchecked(i) * *b.get_unchecked(i); i += 1; }
+    while i < a.len() {
+        sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+        i += 1;
+    }
     sum
 }
 
@@ -71,7 +74,10 @@ unsafe fn dot_avx2_fma(a: &[f32], b: &[f32]) -> f32 {
     let mut tmp = [0f32; 8];
     _mm256_storeu_ps(tmp.as_mut_ptr(), acc);
     let mut sum: f32 = tmp.iter().sum();
-    while i < a.len() { sum += *a.get_unchecked(i) * *b.get_unchecked(i); i += 1; }
+    while i < a.len() {
+        sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+        i += 1;
+    }
     sum
 }
 
@@ -91,7 +97,10 @@ unsafe fn dot_sse2(a: &[f32], b: &[f32]) -> f32 {
     let mut tmp = [0f32; 4];
     _mm_storeu_ps(tmp.as_mut_ptr(), acc);
     let mut sum: f32 = tmp.iter().sum();
-    while i < a.len() { sum += *a.get_unchecked(i) * *b.get_unchecked(i); i += 1; }
+    while i < a.len() {
+        sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+        i += 1;
+    }
     sum
 }
 
@@ -108,6 +117,9 @@ unsafe fn dot_neon(a: &[f32], b: &[f32]) -> f32 {
         i += 4;
     }
     let mut sum: f32 = vaddvq_f32(acc);
-    while i < a.len() { sum += *a.get_unchecked(i) * *b.get_unchecked(i); i += 1; }
+    while i < a.len() {
+        sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+        i += 1;
+    }
     sum
 }

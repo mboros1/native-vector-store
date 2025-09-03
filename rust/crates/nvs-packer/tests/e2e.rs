@@ -25,13 +25,17 @@ fn pack_then_open_bundle() {
     let exe = env!("CARGO_BIN_EXE_nvs-packer");
     let status = std::process::Command::new(exe)
         .arg(&input)
-        .arg("--out").arg(&output)
-        .arg("--model").arg("test")
-        .status().unwrap();
+        .arg("--out")
+        .arg(&output)
+        .arg("--model")
+        .arg("test")
+        .status()
+        .unwrap();
     assert!(status.success());
 
     // Open with nvs-core reader
-    let store = nvs_core::VectorStore::from_bundle(nvs_core::Bundle::open(&output).expect("open bundle"));
+    let store =
+        nvs_core::VectorStore::from_bundle(nvs_core::Bundle::open(&output).expect("open bundle"));
     assert_eq!(store.size(), 3);
     assert_eq!(store.dimensions(), 4);
     // Read a document
@@ -41,7 +45,7 @@ fn pack_then_open_bundle() {
     assert!(d0.2.contains("\"embedding\""));
 
     // Basic vector search
-    let q = [1f32,0f32,0f32,0f32];
+    let q = [1f32, 0f32, 0f32, 0f32];
     let res = store.search_vector(&q, 2);
     assert!(!res.is_empty());
 
@@ -78,18 +82,23 @@ fn pack_then_open_bundle_f16() {
     let exe = env!("CARGO_BIN_EXE_nvs-packer");
     let status = std::process::Command::new(exe)
         .arg(&input)
-        .arg("--out").arg(&output)
-        .arg("--model").arg("test")
-        .arg("--quantize").arg("f16")
-        .status().unwrap();
+        .arg("--out")
+        .arg(&output)
+        .arg("--model")
+        .arg("test")
+        .arg("--quantize")
+        .arg("f16")
+        .status()
+        .unwrap();
     assert!(status.success());
 
     // Open with nvs-core reader
-    let store = nvs_core::VectorStore::from_bundle(nvs_core::Bundle::open(&output).expect("open bundle"));
+    let store =
+        nvs_core::VectorStore::from_bundle(nvs_core::Bundle::open(&output).expect("open bundle"));
     assert_eq!(store.size(), 3);
     assert_eq!(store.dimensions(), 4);
     // Basic vector search (query matches first vector best)
-    let q = [1f32,0f32,0f32,0f32];
+    let q = [1f32, 0f32, 0f32, 0f32];
     let res = store.search_vector(&q, 3);
     assert!(!res.is_empty());
     assert_eq!(res[0].0, 0);
@@ -101,7 +110,9 @@ fn pack_then_open_bundle_f16() {
 
 fn uuid() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     format!("{}", t)
 }
-

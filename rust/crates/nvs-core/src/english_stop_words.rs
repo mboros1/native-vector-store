@@ -395,7 +395,9 @@ yourselves
     let mut set = HashSet::new();
     for line in BLOB.lines() {
         let w = line.trim();
-        if !w.is_empty() { set.insert(w.to_string()); }
+        if !w.is_empty() {
+            set.insert(w.to_string());
+        }
     }
     set
 }
@@ -404,5 +406,6 @@ pub fn contains(word: &str) -> bool {
     STOPWORDS.get_or_init(build).contains(word)
 }
 
-pub fn size() -> usize { STOPWORDS.get_or_init(build).len() }
-
+pub fn size() -> usize {
+    STOPWORDS.get_or_init(build).len()
+}

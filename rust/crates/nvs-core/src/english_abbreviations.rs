@@ -161,7 +161,9 @@ sun
     let mut set = HashSet::new();
     for line in BLOB.lines() {
         let w = line.trim();
-        if !w.is_empty() { set.insert(w.to_string()); }
+        if !w.is_empty() {
+            set.insert(w.to_string());
+        }
     }
     set
 }
@@ -171,5 +173,6 @@ pub fn contains(abbr: &str) -> bool {
     ABBR.get_or_init(build).contains(&abbr.to_ascii_lowercase())
 }
 
-pub fn size() -> usize { ABBR.get_or_init(build).len() }
-
+pub fn size() -> usize {
+    ABBR.get_or_init(build).len()
+}
