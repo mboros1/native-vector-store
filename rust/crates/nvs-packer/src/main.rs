@@ -521,34 +521,39 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result
     });
     let t_merge = t_merge_start.elapsed();
 
-    // Final merge of bucket terms, write outputs
-    let mut heads = vec![0usize; buckets];
-    let mut terms: Vec<String> = Vec::new();
-    let mut postings = Vec::<u8>::new();
-    let mut lexicon = Vec::<u8>::new();
-    let mut global_off: u64 = 0;
-    let t_write_start = std::time::Instant::now();
-    loop {
-        let mut best_b = usize::MAX; let mut best_term: Option<String> = None;
-        for b in 0..buckets {
-            let guard = bucket_out[b].lock().unwrap();
-            if let Some(ref outb) = *guard {
-                let h = heads[b]; if h < outb.terms.len() {
-                    let t = &outb.terms[h]; if best_term.as_ref().map_or(true, |cur| t < cur) { best_term = Some(t.clone()); best_b = b; }
-                }
-            }
-        }
-        if best_b == usize::MAX { break; }
-        let guard = bucket_out[best_b].lock().unwrap(); let outb = guard.as_ref().unwrap(); let idx = heads[best_b];
-        let term = outb.terms[idx].clone(); let (off_rel, len, df) = outb.lex[idx];
-        terms.push(term);
-        lexicon.extend_from_slice(&global_off.to_le_bytes()); lexicon.extend_from_slice(&len.to_le_bytes()); lexicon.extend_from_slice(&df.to_le_bytes());
-        let start = off_rel as usize; let bytes = (len as usize) * 8; postings.extend_from_slice(&outb.postings[start..start+bytes]); global_off += bytes as u64; heads[best_b] += 1;
-    }
+    // Move buckets out and compute capacities
+    let mut buckets_vec: Vec<BucketOut> = Vec::with_capacity(buckets);
+    let mut total_terms = 0usize; let mut total_post_bytes = 0usize;
+    for b in 0..buckets { if let Some(outb) = bucket_out[b].lock().unwrap().take() { total_terms += outb.terms.len(); if let Some((off, len, _)) = outb.lex.last().copied() { total_post_bytes += (off as usize) + (len as usize)*8; } buckets_vec.push(outb); } else { buckets_vec.push(BucketOut{terms:Vec::new(), postings:Vec::new(), lex:Vec::new()}); } }
 
-    { let mut f = File::create(out.join("terms.dict"))?; for t in &terms { let l=t.len() as u32; f.write_all(&l.to_le_bytes())?; f.write_all(t.as_bytes())?; } }
+    // Assemble: final merge, coalesced copies, stream terms
+    let t_assemble_start = std::time::Instant::now();
+    let mut heads = vec![0usize; buckets];
+    let mut postings = Vec::<u8>::with_capacity(total_post_bytes);
+    let mut lexicon = Vec::<u8>::with_capacity(total_terms * 16);
+    let mut terms_writer = std::io::BufWriter::new(File::create(out.join("terms.dict"))?);
+    let mut global_off: u64 = 0;
+    let mut run_bucket: Option<usize> = None; let mut run_start = 0usize; let mut run_bytes = 0usize; let mut run_expected_next_off = 0usize;
+    loop {
+        let mut best_b = usize::MAX; let mut best_term: Option<&str> = None;
+        for b in 0..buckets { let h = heads[b]; let outb = &buckets_vec[b]; if h < outb.terms.len() { let t = &outb.terms[h]; if best_term.map_or(true, |cur| t.as_str() < cur) { best_term = Some(t.as_str()); best_b = b; } } }
+        if best_b == usize::MAX { break; }
+        let outb = &buckets_vec[best_b]; let idx = heads[best_b]; let (off_rel, len, df) = outb.lex[idx]; let start = off_rel as usize; let bytes = (len as usize)*8;
+        // write term
+        let term = outb.terms[idx].as_str(); let l = term.len() as u32; terms_writer.write_all(&l.to_le_bytes())?; terms_writer.write_all(term.as_bytes())?;
+        // lex entry
+        lexicon.extend_from_slice(&global_off.to_le_bytes()); lexicon.extend_from_slice(&len.to_le_bytes()); lexicon.extend_from_slice(&df.to_le_bytes());
+        // coalesce copy
+        if run_bucket == Some(best_b) && start == run_expected_next_off { run_bytes += bytes; run_expected_next_off += bytes; } else { if let Some(rb) = run_bucket { let src = &buckets_vec[rb].postings[run_start..run_start+run_bytes]; postings.extend_from_slice(src); } run_bucket = Some(best_b); run_start = start; run_bytes = bytes; run_expected_next_off = start + bytes; }
+        global_off += bytes as u64; heads[best_b] += 1;
+    }
+    if let Some(rb) = run_bucket { let src = &buckets_vec[rb].postings[run_start..run_start+run_bytes]; postings.extend_from_slice(src); }
+    terms_writer.flush()?;
+    let t_assemble = t_assemble_start.elapsed();
+
+    let t_io_start = std::time::Instant::now();
     { let mut pf = File::create(out.join("postings.bin"))?; pf.write_all(&postings)?; let mut lf = File::create(out.join("lexicon.bin"))?; lf.write_all(&lexicon)?; }
-    let t_write = t_write_start.elapsed();
+    let t_io = t_io_start.elapsed();
     let postings_entries_count: usize = postings.len()/8;
     let avgdl = if docs.is_empty() {
         0.0
@@ -556,7 +561,9 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result
         (total_tokens as f64) / (docs.len() as f64)
     };
     let postings_entries: usize = postings_entries_count;
-    Ok((avgdl, terms, postings_entries, total_tokens, Bm25Stats { tf: t_tf, local: t_local, merge: t_merge, write: t_write }))
+    // For signature compatibility, flatten terms if needed
+    let terms: Vec<String> = buckets_vec.into_iter().flat_map(|b| b.terms).collect();
+    Ok((avgdl, terms, postings_entries, total_tokens, Bm25Stats { tf: t_tf, local: t_local, merge: t_merge, write: t_assemble + t_io }))
 }
 
 // Fast BM25 tokenizer: lowercases ASCII, splits on whitespace and most punctuation,

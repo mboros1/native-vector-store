@@ -221,8 +221,8 @@ async function main() {
       const r = await runOnce({ bin, input, outDir: `${opts.outDir}_${label}`, compress, level, blockSize, ...opts });
   const t = r.times;
   console.log(`  Wall: ${r.wallMs.toFixed(1)} ms  Size: ${isNaN(r.sizeMb)?'n/a':r.sizeMb.toFixed(2)+' MB'}`);
-  const bm25Extra = (t['bm25_tokenize']!=null || t['bm25_local']!=null || t['bm25_merge']!=null || t['bm25_write']!=null)
-    ? `  bm25_tokenize=${(t['bm25_tokenize']||0).toFixed(2)}  bm25_local=${(t['bm25_local']||0).toFixed(2)}  bm25_merge=${(t['bm25_merge']||0).toFixed(2)}  bm25_write=${(t['bm25_write']||0).toFixed(2)}`
+  const bm25Extra = (t['bm25_tokenize']!=null || t['bm25_local']!=null || t['bm25_merge']!=null)
+    ? `  bm25_tokenize=${(t['bm25_tokenize']||0).toFixed(2)}  bm25_local=${(t['bm25_local']||0).toFixed(2)}  bm25_merge=${(t['bm25_merge']||0).toFixed(2)}`
     : '';
   console.log(`  Stages (ms): read=${t.read?.toFixed(2)}  vectors=${t.vectors?.toFixed(2)}  bm25=${t.bm25?.toFixed(2)}${bm25Extra}  meta=${t.meta?.toFixed(2)}  manifest=${t.manifest?.toFixed(2)}  checksums=${t.checksums?.toFixed(2)}`);
       if (r.monitor) {
