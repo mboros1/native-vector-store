@@ -46,6 +46,9 @@ struct Cli {
     /// Threshold in bytes below which JSON files are mmapped (used with --fast-loader)
     #[arg(long = "mmap-threshold", default_value_t = 5_000_000)]
     mmap_threshold: usize,
+    /// Parallel BM25 merge buckets (0=auto, recommend 16-32)
+    #[arg(long = "bm25-buckets", default_value_t = 0)]
+    bm25_buckets: usize,
     // Pipeline removed: sequential flow only
 }
 
@@ -416,22 +419,25 @@ fn write_vectors(docs: &[Doc], dim: usize, out: &Path, dtype: &str) -> Result<()
     }
 }
 
-fn write_bm25_and_terms(docs: &[Doc], out: &Path) -> Result<(f64, Vec<String>, usize, usize)> {
+struct Bm25Stats { tf: std::time::Duration, local: std::time::Duration, merge: std::time::Duration, write: std::time::Duration }
+
+fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result<(f64, Vec<String>, usize, usize, Bm25Stats)> {
     use rayon::prelude::*;
     // Phase 1: per-doc tokenization and TF maps in parallel; record doc lengths
     let doc_lens: Vec<AtomicUsize> = (0..docs.len()).map(|_| AtomicUsize::new(0)).collect();
     let mut doc_tfs: Vec<FxHashMap<String, u32>> = (0..docs.len()).map(|_| FxHashMap::default()).collect();
 
+    let t_tf_start = std::time::Instant::now();
     doc_tfs
         .par_iter_mut()
         .enumerate()
         .for_each(|(i, tfmap)| {
             let d = &docs[i];
-            let tok = nvs_core::tokenizer::SimpleTokenizer::new();
-            let tokens = tok.split(&d.text);
-            doc_lens[i].store(tokens.len(), Ordering::Relaxed);
-            for t in tokens.into_iter() { *tfmap.entry(t).or_insert(0) += 1; }
+            let clean = nvs_core::tokenizer::preprocess_bm25(&d.text);
+            let kept = tokenize_bm25_into(&clean, tfmap);
+            doc_lens[i].store(kept, Ordering::Relaxed);
         });
+    let t_tf = t_tf_start.elapsed();
 
     // Write doc lengths
     {
@@ -444,62 +450,159 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path) -> Result<(f64, Vec<String>, u
 
     let total_tokens: usize = doc_lens.iter().map(|x| x.load(Ordering::Relaxed)).sum();
 
-    // Phase 2: single-threaded merge of TF maps into postings per term
-    let mut postings_map: FxHashMap<String, Vec<(usize, u32)>> = FxHashMap::default();
-    for (i, tfmap) in doc_tfs.into_iter().enumerate() {
-        for (term, count) in tfmap.into_iter() {
-            postings_map.entry(term).or_default().push((i, count));
-        }
-    }
-
-    // terms sorted
-    let mut terms: Vec<String> = postings_map.keys().cloned().collect();
-    terms.sort();
-    {
-        let mut f = File::create(out.join("terms.dict"))?;
-        for t in &terms {
-            let len = t.len() as u32;
-            f.write_all(&len.to_le_bytes())?;
-            f.write_all(t.as_bytes())?;
-        }
-    }
-    // postings + lexicon (deterministic)
-    let postings_entries_count: usize = {
-        let mut postings = Vec::<u8>::new();
-        let mut lexicon = Vec::<u8>::new();
-        let mut offset: u64 = 0;
-        for t in &terms {
-            if let Some(mut list) = postings_map.remove(t) {
-                list.sort_by_key(|&(doc, _)| doc);
-                let mut prev = 0usize;
-                let mut length = 0u32;
-                for (doc, tf) in list.into_iter() {
-                    let delta = (doc - prev) as u32;
-                    prev = doc;
-                    length += 1;
-                    postings.extend_from_slice(&delta.to_le_bytes());
-                    postings.extend_from_slice(&tf.to_le_bytes());
+    // Phase 2: build per-thread postings maps over contiguous doc ranges
+    let t_local_start = std::time::Instant::now();
+    let n = docs.len();
+    let threads = std::thread::available_parallelism().map(|x| x.get()).unwrap_or(4);
+    let chunks = std::cmp::max(threads, 1);
+    let chunk_size = (n + chunks - 1) / chunks;
+    let mut local_maps: Vec<FxHashMap<String, Vec<(usize, u32)>>> = Vec::new();
+    local_maps.resize_with(chunks, FxHashMap::default);
+    local_maps
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(ci, local)| {
+            let start = ci * chunk_size;
+            if start >= n { return; }
+            let end = std::cmp::min(n, start + chunk_size);
+            for i in start..end {
+                for (term, count) in doc_tfs[i].iter() {
+                    local.entry(term.clone()).or_default().push((i, *count));
                 }
-                let df = length;
-                lexicon.extend_from_slice(&offset.to_le_bytes());
-                lexicon.extend_from_slice(&length.to_le_bytes());
-                lexicon.extend_from_slice(&df.to_le_bytes());
-                offset += (length as u64) * 8;
+            }
+        });
+    let t_local = t_local_start.elapsed();
+
+    // Phase 3: bucketed k-way merge and write outputs
+    let buckets = if bm25_buckets > 0 { bm25_buckets } else { std::cmp::max(1, std::cmp::min(32, threads * 2)) };
+    struct BucketOut { terms: Vec<String>, postings: Vec<u8>, lex: Vec<(u64, u32, u32)> }
+    let bucket_out: Vec<std::sync::Mutex<Option<BucketOut>>> = (0..buckets).map(|_| std::sync::Mutex::new(None)).collect();
+    let t_merge_start = std::time::Instant::now();
+    (0..buckets).into_par_iter().for_each(|b| {
+        let mask = buckets.next_power_of_two() - 1;
+        let use_mask = (mask + 1) == buckets;
+        let mut uniq: FxHashMap<String, ()> = FxHashMap::default();
+        for loc in &local_maps {
+            for k in loc.keys() {
+                let h = fxhash::hash64(k);
+                let bi = if use_mask { (h as usize) & mask } else { (h as usize) % buckets };
+                if bi == b { uniq.entry(k.clone()).or_insert(()); }
             }
         }
-        let mut pf = File::create(out.join("postings.bin"))?;
-        pf.write_all(&postings)?;
-        let mut lf = File::create(out.join("lexicon.bin"))?;
-        lf.write_all(&lexicon)?;
-        (offset / 8) as usize
-    };
+        let mut terms_b: Vec<String> = uniq.into_keys().collect();
+        terms_b.sort();
+        let mut postings_b: Vec<u8> = Vec::new();
+        let mut lex_b: Vec<(u64, u32, u32)> = Vec::with_capacity(terms_b.len());
+        for term in &terms_b {
+            // collect slices
+            let mut slices: Vec<&[(usize, u32)]> = Vec::new();
+            let mut pos: Vec<usize> = Vec::new();
+            for loc in &local_maps {
+                if let Some(vec) = loc.get(term) { slices.push(vec); pos.push(0); }
+            }
+            let mut prev = 0usize; let mut len: u32 = 0; let start = postings_b.len() as u64;
+            loop {
+                let mut best = usize::MAX; let mut which = usize::MAX;
+                for i in 0..slices.len() {
+                    if pos[i] < slices[i].len() {
+                        let d = slices[i][pos[i]].0;
+                        if d < best { best = d; which = i; }
+                    }
+                }
+                if which == usize::MAX { break; }
+                let (doc, tf) = slices[which][pos[which]]; pos[which] += 1;
+                let delta = (doc - prev) as u32; prev = doc;
+                postings_b.extend_from_slice(&delta.to_le_bytes()); postings_b.extend_from_slice(&tf.to_le_bytes()); len += 1;
+            }
+            let df = len; lex_b.push((start, len, df));
+        }
+        let mut g = bucket_out[b].lock().unwrap();
+        *g = Some(BucketOut { terms: terms_b, postings: postings_b, lex: lex_b });
+    });
+    let t_merge = t_merge_start.elapsed();
+
+    // Final merge of bucket terms, write outputs
+    let mut heads = vec![0usize; buckets];
+    let mut terms: Vec<String> = Vec::new();
+    let mut postings = Vec::<u8>::new();
+    let mut lexicon = Vec::<u8>::new();
+    let mut global_off: u64 = 0;
+    let t_write_start = std::time::Instant::now();
+    loop {
+        let mut best_b = usize::MAX; let mut best_term: Option<String> = None;
+        for b in 0..buckets {
+            let guard = bucket_out[b].lock().unwrap();
+            if let Some(ref outb) = *guard {
+                let h = heads[b]; if h < outb.terms.len() {
+                    let t = &outb.terms[h]; if best_term.as_ref().map_or(true, |cur| t < cur) { best_term = Some(t.clone()); best_b = b; }
+                }
+            }
+        }
+        if best_b == usize::MAX { break; }
+        let guard = bucket_out[best_b].lock().unwrap(); let outb = guard.as_ref().unwrap(); let idx = heads[best_b];
+        let term = outb.terms[idx].clone(); let (off_rel, len, df) = outb.lex[idx];
+        terms.push(term);
+        lexicon.extend_from_slice(&global_off.to_le_bytes()); lexicon.extend_from_slice(&len.to_le_bytes()); lexicon.extend_from_slice(&df.to_le_bytes());
+        let start = off_rel as usize; let bytes = (len as usize) * 8; postings.extend_from_slice(&outb.postings[start..start+bytes]); global_off += bytes as u64; heads[best_b] += 1;
+    }
+
+    { let mut f = File::create(out.join("terms.dict"))?; for t in &terms { let l=t.len() as u32; f.write_all(&l.to_le_bytes())?; f.write_all(t.as_bytes())?; } }
+    { let mut pf = File::create(out.join("postings.bin"))?; pf.write_all(&postings)?; let mut lf = File::create(out.join("lexicon.bin"))?; lf.write_all(&lexicon)?; }
+    let t_write = t_write_start.elapsed();
+    let postings_entries_count: usize = postings.len()/8;
     let avgdl = if docs.is_empty() {
         0.0
     } else {
         (total_tokens as f64) / (docs.len() as f64)
     };
     let postings_entries: usize = postings_entries_count;
-    Ok((avgdl, terms, postings_entries, total_tokens))
+    Ok((avgdl, terms, postings_entries, total_tokens, Bm25Stats { tf: t_tf, local: t_local, merge: t_merge, write: t_write }))
+}
+
+// Fast BM25 tokenizer: lowercases ASCII, splits on whitespace and most punctuation,
+// keeps internal hyphens, and normalizes tokens via bm25_normalize_token.
+fn tokenize_bm25_into(text: &str, tf: &mut FxHashMap<String, u32>) -> usize {
+    use nvs_core::tokenizer::bm25_normalize_token;
+    let mut buf = String::with_capacity(32);
+    let mut kept = 0usize;
+    let mut flush = |buf: &mut String| {
+        if buf.is_empty() { return; }
+        // Lowercase ASCII in-place
+        for b in unsafe { buf.as_bytes_mut() } { if (b'A'..=b'Z').contains(b) { *b = *b + 32; } }
+        if let Some(norm) = bm25_normalize_token(&buf) {
+            if !nvs_core::tokenizer::is_stopword(&norm) {
+                *tf.entry(norm).or_insert(0) += 1; kept += 1;
+            }
+        }
+        buf.clear();
+    };
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            // whitespace and control
+            '\r' | '\t' | '\n' | '\x0C' => { flush(&mut buf); },
+            // remove soft hyphen/zero-width/BOM
+            '\u{00AD}' | '\u{200B}' | '\u{FEFF}' => { /* skip */ }
+            '-' => {
+                // dehyphenate: - followed by optional ws and newline
+                let mut it = chars.clone();
+                let mut consumed = 0; let mut is_break = false;
+                while let Some(nc) = it.next() {
+                    if nc == '\n' { is_break = true; consumed += 1; break; }
+                    else if nc == '\r' || nc == '\t' || nc == ' ' { consumed += 1; continue; }
+                    else { break; }
+                }
+                if is_break { for _ in 0..consumed { let _ = chars.next(); } flush(&mut buf); }
+                else { buf.push('-'); }
+            }
+            c if c.is_alphanumeric() || c == '_' || c >= '\u{80}' => { buf.push(c); }
+            // allowed internal punct: keep as part of token
+            '\'' | '/' | '&' | '.' => { buf.push(ch); }
+            _ => { flush(&mut buf); }
+        }
+    }
+    flush(&mut buf);
+    kept
 }
 
 fn write_meta_and_index(
@@ -824,7 +927,7 @@ fn main() -> Result<()> {
     let lvl = cli.zstd_level.clamp(1, 22);
     pb.set_message("Building BM25 index...");
     let t2 = std::time::Instant::now();
-    let (avgdl, terms, postings_entries, total_tokens) = write_bm25_and_terms(&docs, &cli.out)?;
+    let (avgdl, terms, postings_entries, total_tokens, bm_stats) = write_bm25_and_terms(&docs, &cli.out, cli.bm25_buckets)?;
     let t_bm25 = t2.elapsed();
     let unique_terms = terms.len();
     pb.set_message("Writing metadata blocks...");
@@ -920,8 +1023,8 @@ fn main() -> Result<()> {
         (allocated_size as f64) / (1024.0 * 1024.0)
     );
     println!(
-        "  Time: read {:?}  vectors {:?}  bm25 {:?}  meta {:?}  manifest {:?}  checksums {:?}",
-        t_read, t_vec, t_bm25, t_meta, t_manifest, t_checksums
+        "  Time: read {:?}  vectors {:?}  bm25 {:?}  bm25_tokenize {:?}  bm25_local {:?}  bm25_merge {:?}  bm25_write {:?}  meta {:?}  manifest {:?}  checksums {:?}",
+        t_read, t_vec, t_bm25, bm_stats.tf, bm_stats.local, bm_stats.merge, bm_stats.write, t_meta, t_manifest, t_checksums
     );
     Ok(())
 }

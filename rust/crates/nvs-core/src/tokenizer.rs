@@ -167,6 +167,137 @@ impl SimpleTokenizer {
     }
 }
 
+// Normalize text for BM25:
+// - Convert control chars (\r, \f, \t, etc.) to spaces/newlines
+// - Remove soft hyphen (U+00AD) and zero-width/BOM characters
+// - Dehyphenate line breaks: "word-\nnext" -> "word next"
+// - Collapse multiple whitespace into single spaces
+pub fn preprocess_bm25(input: &str) -> String {
+    if input.is_empty() { return String::new(); }
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\u{00AD}' | '\u{200B}' | '\u{FEFF}' => { /* skip soft hyphen/zero-width/BOM */ }
+            '\r' | '\t' => { out.push(' '); }
+            '\x0C' => { out.push(' '); } // form feed
+            '-' => {
+                // If hyphen is followed by a line break or whitespace+linebreak, treat as hyphenation -> space
+                let mut it = chars.clone();
+                let mut is_break = false; let mut consumed = 0;
+                while let Some(nc) = it.next() {
+                    if nc == '\n' { is_break = true; consumed += 1; break; }
+                    else if nc == '\r' || nc == '\t' || nc == ' ' { consumed += 1; continue; }
+                    else { break; }
+                }
+                if is_break {
+                    // consume the peeked whitespace/break
+                    for _ in 0..consumed { let _ = chars.next(); }
+                    out.push(' ');
+                } else {
+                    out.push('-');
+                }
+            }
+            '\n' => { out.push(' '); }
+            c if c.is_control() => { out.push(' '); }
+            c => out.push(c),
+        }
+    }
+    // collapse whitespace
+    let mut collapsed = String::with_capacity(out.len());
+    let mut last_space = false;
+    for c in out.chars() {
+        if c.is_whitespace() {
+            if !last_space { collapsed.push(' '); last_space = true; }
+        } else { collapsed.push(c); last_space = false; }
+    }
+    collapsed
+}
+
+// BM25 term filter: drop numeric-only and punctuation/noise tokens.
+// Heuristics:
+// - Keep if token contains at least 1 alphabetic character and length >= 2 after trimming punctuation.
+// - Drop if token contains no alphabetic characters (numeric-like), allowing only digits and [+-.,/].
+// - Drop if very short (< 2 chars) after trim.
+fn strip_possessive(s: &str) -> &str {
+    // Remove trailing 's or ’s using char boundaries
+    let mut prev: Option<(usize, char)> = None;
+    let mut last: Option<(usize, char)> = None;
+    for (i, c) in s.char_indices() { prev = last; last = Some((i, c)); }
+    if let (Some((pi, pc)), Some((_li, lc))) = (prev, last) {
+        if (lc == 's' || lc == 'S') && (pc == '\'' || pc == '\u{2019}') {
+            return &s[..pi];
+        }
+    }
+    s
+}
+
+pub fn bm25_keep_token(mut tok: &str) -> bool {
+    if tok.is_empty() { return false; }
+    // Trim common leading/trailing punctuation
+    fn is_trim_punct(c: char) -> bool { matches!(c, '.'|','|';'|':'|'"'|'\''|'(' |')'|'['|']'|'{'|'}'|'!'|'?'|'%'|'+'|'-'|'/'|'\\'|'*'|'&'|'#'|'@'|'~'|'`'|'|') }
+    tok = tok.trim_matches(is_trim_punct);
+    if tok.len() < 2 { return false; }
+    // Strip possessive endings: 's or ’s (safe on char boundaries)
+    tok = strip_possessive(tok);
+    if tok.len() < 2 { return false; }
+    // Drop URL tracking params
+    if tok.len() >= 4 && tok.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") { return false; }
+    // Drop tokens with triple hyphen runs (formatting/artifacts)
+    if tok.contains("---") { return false; }
+    let mut has_ascii_letter = false;
+    let mut upper_seq_only = true;
+    for ch in tok.chars() {
+        if ch.is_ascii_alphabetic() { has_ascii_letter = true; }
+        if !matches!(ch, 'A'|'C'|'D'|'E'|'F'|'G'|'H'|'I'|'K'|'L'|'M'|'N'|'P'|'Q'|'R'|'S'|'T'|'V'|'W'|'Y'|'-') { upper_seq_only = false; }
+    }
+    if has_ascii_letter {
+        // Drop long amino-acid sequence-like tokens
+        if upper_seq_only && tok.len() >= 10 { return false; }
+        return true; // keep alpha-containing tokens
+    }
+    // No letters: numeric-like? Allow only digits and simple numeric punctuation
+    for ch in tok.chars() {
+        if !(ch.is_ascii_digit() || matches!(ch, '+'|'-'|'.'|','|'/'|'\\')) {
+            // Contains other symbols; drop
+            return false;
+        }
+    }
+    // All digits and numeric punctuation -> drop
+    false
+}
+
+// Return a normalized token for BM25 (trim punctuation, strip possessive), or None to drop.
+pub fn bm25_normalize_token(tok: &str) -> Option<String> {
+    if tok.is_empty() { return None; }
+    fn is_trim_punct(c: char) -> bool { matches!(c, '.'|','|';'|':'|'"'|'\''|'(' |')'|'['|']'|'{'|'}'|'!'|'?'|'%'|'+'|'-'|'/'|'\\'|'*'|'&'|'#'|'@'|'~'|'`'|'|') }
+    let mut s = tok.trim_matches(is_trim_punct);
+    if s.is_empty() { return None; }
+    s = strip_possessive(s);
+    if s.len() < 2 { return None; }
+    // Normalize case by caller; still apply filters
+    if s.len() >= 4 && s.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") { return None; }
+    if s.contains("---") { return None; }
+    // Check letters and AA-sequence drop
+    let mut has_ascii_letter = false;
+    let mut upper_seq_only = true;
+    for ch in s.chars() {
+        if ch.is_ascii_alphabetic() { has_ascii_letter = true; }
+        if !matches!(ch, 'A'|'C'|'D'|'E'|'F'|'G'|'H'|'I'|'K'|'L'|'M'|'N'|'P'|'Q'|'R'|'S'|'T'|'V'|'W'|'Y'|'-') { upper_seq_only = false; }
+    }
+    if has_ascii_letter {
+        if upper_seq_only && s.len() >= 10 { return None; }
+        return Some(s.to_string());
+    }
+    // No letters: numeric-like allowed chars
+    for ch in s.chars() {
+        if !(ch.is_ascii_digit() || matches!(ch, '+'|'-'|'.'|','|'/'|'\\')) {
+            return None;
+        }
+    }
+    None
+}
+
 fn decode_utf8(s: &[u8]) -> (u32, usize) {
     let c = s[0];
     if c < 0x80 {
@@ -230,7 +361,7 @@ fn is_abbreviation(tok: &str) -> bool {
     crate::english_abbreviations::contains(tok)
 }
 
-fn is_stopword(tok: &str) -> bool {
+pub fn is_stopword(tok: &str) -> bool {
     // Use the comprehensive embedded list
     crate::english_stop_words::contains(tok)
 }

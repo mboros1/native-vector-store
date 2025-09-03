@@ -9,8 +9,13 @@ pub fn search(bundle: &Bundle, query: &str, k: usize) -> Vec<(u32, f32)> {
         remove_stopwords: true,
         remove_punctuation: false, // Keep punctuation for BM25 to maintain compatibility
     });
-    let terms = tok.split(query);
-    let view: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
+    let clean = crate::tokenizer::preprocess_bm25(query);
+    let terms = tok.split(&clean);
+    let filtered: Vec<String> = terms
+        .into_iter()
+        .filter_map(|t| crate::tokenizer::bm25_normalize_token(&t))
+        .collect();
+    let view: Vec<&str> = filtered.iter().map(|s| s.as_str()).collect();
     search_terms(bundle, &view, k)
 }
 
