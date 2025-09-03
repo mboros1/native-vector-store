@@ -35,7 +35,7 @@ DocumentLoader::LoadResult DocumentLoader::loadDirectory(const std::string& path
     
     std::vector<FileInfo> file_infos;
     
-    for (const auto& entry : fs::directory_iterator(path)) {
+    for (const auto& entry : fs::recursive_directory_iterator(path)) {
         if (entry.path().extension() == ".json") {
             std::error_code ec;
             auto size = fs::file_size(entry.path(), ec);
@@ -128,11 +128,13 @@ DocumentLoader::LoadResult DocumentLoader::loadDirectory(const std::string& path
     const size_t num_consumers = std::thread::hardware_concurrency();
     std::vector<std::thread> consumers;
     std::vector<std::vector<Document>> thread_documents(num_consumers);
+    std::vector<std::vector<std::pair<std::string,size_t>>> thread_receipts(num_consumers);
     
     for (size_t i = 0; i < num_consumers; ++i) {
         consumers.emplace_back([&, thread_idx = i]() {
             simdjson::ondemand::parser parser;
             auto& local_docs = thread_documents[thread_idx];
+            auto& local_receipts = thread_receipts[thread_idx];
             local_docs.reserve(100);  // Pre-allocate some space
             
             MixedFileData* data;
@@ -147,6 +149,7 @@ DocumentLoader::LoadResult DocumentLoader::loadDirectory(const std::string& path
                 }
                 
                 // Parse JSON based on type
+                size_t produced_for_file = 0;
                 std::string_view json_content;
                 if (data->is_mmap) {
                     json_content = std::string_view(
@@ -177,6 +180,7 @@ DocumentLoader::LoadResult DocumentLoader::loadDirectory(const std::string& path
                                     processDocumentText(new_doc);
                                     local_docs.push_back(std::move(new_doc));
                                     docs_loaded++;
+                                    produced_for_file++;
                                 }
                             }
                         }
@@ -189,11 +193,16 @@ DocumentLoader::LoadResult DocumentLoader::loadDirectory(const std::string& path
                                 processDocumentText(new_doc);
                                 local_docs.push_back(std::move(new_doc));
                                 docs_loaded++;
+                                produced_for_file++;
                             }
                         }
                     }
                 }
-                
+                // Receipts and warnings
+                local_receipts.emplace_back(data->filename, produced_for_file);
+                if (produced_for_file == 0) {
+                    std::cerr << "Warning: skipping file with no valid docs: " << data->filename << "\n";
+                }
                 files_processed++;
                 if (verbose && files_processed % 100 == 0) {
                     std::cout << "  Processed " << files_processed << " files...\r" << std::flush;
@@ -236,6 +245,12 @@ DocumentLoader::LoadResult DocumentLoader::loadDirectory(const std::string& path
         }
     }
     
+    // Merge receipts and sort
+    for (const auto& recs : thread_receipts) {
+        for (const auto& r : recs) result.receipts.push_back(r);
+    }
+    std::sort(result.receipts.begin(), result.receipts.end(), [](const auto& a, const auto& b){ return a.first < b.first; });
+
     // Calculate average document length
     if (!result.documents.empty()) {
         result.average_document_length = static_cast<double>(result.total_tokens) / result.documents.size();
@@ -260,25 +275,19 @@ static bool parseDocumentObject(simdjson::ondemand::object& obj,
     }
     doc.id = std::string(id_view);
     
-    // Auto-detect text field on first document
+    // Prefer "text"; if missing, fall back to "content" per document
     std::string_view text_view;
-    if (result.text_field == DocumentLoader::LoadResult::TextField::UNKNOWN) {
-        auto text_err = obj["text"].get_string().get(text_view);
-        if (!text_err) {
+    if (obj["text"].get_string().get(text_view) == simdjson::SUCCESS) {
+        // ok
+        if (result.text_field == DocumentLoader::LoadResult::TextField::UNKNOWN) {
             result.text_field = DocumentLoader::LoadResult::TextField::TEXT;
-        } else if (obj["content"].get_string().get(text_view) == simdjson::SUCCESS) {
-            result.text_field = DocumentLoader::LoadResult::TextField::CONTENT;
-        } else {
-            return false;
         }
-    } else if (result.text_field == DocumentLoader::LoadResult::TextField::TEXT) {
-        if (obj["text"].get_string().get(text_view)) {
-            return false;
+    } else if (obj["content"].get_string().get(text_view) == simdjson::SUCCESS) {
+        if (result.text_field == DocumentLoader::LoadResult::TextField::UNKNOWN) {
+            result.text_field = DocumentLoader::LoadResult::TextField::CONTENT;
         }
     } else {
-        if (obj["content"].get_string().get(text_view)) {
-            return false;
-        }
+        return false;
     }
     doc.text = std::string(text_view);
     

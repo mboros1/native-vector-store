@@ -1,0 +1,24 @@
+{
+  "format": "nvs.v1",
+  "created_at": "2025-09-03T17:36:27Z",
+  "num_docs": 2932,
+  "dim": 1536,
+  "embedding": {
+    "model": "unknown",
+    "dtype": "f32"
+  },
+  "bm25": {
+    "avgdl": 648.695,
+    "k1": 1.2,
+    "b": 0.75
+  },
+  "files": {
+    "vectors": { "path": "vectors.f32", "dtype": "f32", "rows": 2932, "cols": 1536 },
+    "doclen": { "path": "doclen.u32", "dtype": "u32", "rows": 2932 },
+    "lexicon": { "path": "lexicon.bin" },
+    "postings": { "path": "postings.bin" },
+    "terms": { "path": "terms.dict" },
+    "meta_idx": { "path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size" },
+    "meta": { "path": "meta.blocks", "block_size": 131072, "doc_aligned": true }
+  }
+}

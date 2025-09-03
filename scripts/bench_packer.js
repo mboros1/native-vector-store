@@ -41,7 +41,7 @@ function parseBundleSize(out) {
   return m ? parseFloat(m[1]) : NaN;
 }
 
-async function runOnce({ bin, input, outDir, compress, level, blockSize, usePipeline=false, threads=0, parallelStages=false }) {
+async function runOnce({ bin, input, outDir, compress, level, blockSize, usePipeline=false, threads=0, parallelStages=false, fastLoader=false, mmapThreshold=0 }) {
   await fs.rm(outDir, { recursive: true, force: true }).catch(() => {});
   await fs.mkdir(outDir, { recursive: true });
   const args = [];
@@ -51,6 +51,8 @@ async function runOnce({ bin, input, outDir, compress, level, blockSize, usePipe
   if (usePipeline) args.push('--use-pipeline');
   if (threads && Number.isFinite(threads) && threads > 0) args.push(`--threads=${threads}`);
   if (parallelStages) args.push('--parallel-stages');
+  if (fastLoader) args.push('--fast-loader');
+  if (mmapThreshold) args.push(`--mmap-threshold=${mmapThreshold}`);
   args.push(input, '-o', outDir);
 
   const t0 = process.hrtime.bigint();
@@ -195,6 +197,8 @@ async function main() {
   const compare = !!process.argv.find(a => a === '--compare-pipeline' || a === '--compare');
   const threads = parseInt(process.argv.find(a => a.startsWith('--threads='))?.split('=')[1] || '0', 10);
   const parallelStages = !!process.argv.find(a => a === '--parallel-stages');
+  const fastLoader = !!process.argv.find(a => a === '--fast-loader');
+  const mmapThreshold = parseInt(process.argv.find(a => a.startsWith('--mmap-threshold='))?.split('=')[1] || '0', 10);
 
   // Sanity check binary
   try { await fs.access(bin); } catch { console.error(`Missing packer binary at ${bin}. Build with: cargo build -p nvs-packer --release`); process.exit(1); }
@@ -226,7 +230,7 @@ async function main() {
     return results;
   }
 
-  const baseline = await runScenario('baseline', { outDir });
+  const baseline = await runScenario('baseline', { outDir, fastLoader, mmapThreshold });
   let piped = null;
   if (compare) {
     piped = await runScenario('pipeline', { outDir, usePipeline: true, threads, parallelStages });

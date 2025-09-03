@@ -40,6 +40,12 @@ struct Cli {
     /// Include embeddings in meta.blocks JSON (defaults to false to avoid duplication)
     #[arg(long = "meta-include-embeddings", default_value_t = false)]
     meta_include_embeddings: bool,
+    /// Use fast adaptive JSON loader (mmap small files, parallel consumers, streaming arrays)
+    #[arg(long = "fast-loader", default_value_t = false)]
+    fast_loader: bool,
+    /// Threshold in bytes below which JSON files are mmapped (used with --fast-loader)
+    #[arg(long = "mmap-threshold", default_value_t = 5_000_000)]
+    mmap_threshold: usize,
     // Pipeline removed: sequential flow only
 }
 
@@ -63,9 +69,10 @@ struct Doc {
     meta: Option<JsonMap<String, JsonValue>>,
 }
 
-fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
+fn read_docs(input_dir: &Path) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
     use walkdir::WalkDir;
     let mut docs = Vec::new();
+    let mut receipts: Vec<(String, usize)> = Vec::new();
     let pb = indicatif::ProgressBar::new_spinner();
     pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
     pb.set_message("Scanning JSON files...");
@@ -87,6 +94,7 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                 .read_to_string(&mut s)?;
             // Try array first
             if s.trim_start().starts_with('[') {
+                let before = docs.len();
                 let arr: Vec<serde_json::Value> = serde_json::from_str(&s)
                     .with_context(|| format!("parse array in {}", path.display()))?;
                 for (i, v) in arr.into_iter().enumerate() {
@@ -142,6 +150,9 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                         }
                     }
                 }
+                let produced = docs.len() - before;
+                let fname = path.display().to_string();
+                receipts.push((fname, produced));
             } else {
                 _total += 1;
                 match serde_json::from_str::<InputDocRaw>(&s) {
@@ -155,6 +166,8 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                                         format!("doc-{h:016x}")
                                     });
                                     docs.push(Doc { id, text, embedding, meta: meta_other });
+                                    let fname = path.display().to_string();
+                                    receipts.push((fname, 1));
                                 } else {
                                     skipped += 1;
                                     eprintln!(
@@ -162,6 +175,8 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                                         console::style("! ").yellow(),
                                         path.display()
                                     );
+                                    let fname = path.display().to_string();
+                                    receipts.push((fname, 0));
                                 }
                             } else {
                                 skipped += 1;
@@ -170,6 +185,8 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                                     console::style("! ").yellow(),
                                     path.display()
                                 );
+                                let fname = path.display().to_string();
+                                receipts.push((fname, 0));
                             }
                         } else {
                             skipped += 1;
@@ -178,6 +195,8 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                                 console::style("! ").yellow(),
                                 path.display()
                             );
+                            let fname = path.display().to_string();
+                            receipts.push((fname, 0));
                         }
                     }
                     Err(e) => {
@@ -188,13 +207,144 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                             path.display(),
                             e
                         );
+                        let fname = path.display().to_string();
+                        receipts.push((fname, 0));
                     }
                 }
             }
         }
     }
     pb.finish_with_message(format!("Loaded {} docs (skipped {})", docs.len(), skipped));
-    Ok(docs)
+    receipts.sort_by(|a,b| a.0.cmp(&b.0));
+    Ok((docs, receipts))
+}
+
+// Fast adaptive loader: mmap small JSON files, parallel parse with streaming arrays
+fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
+    use walkdir::WalkDir;
+    use crossbeam_channel as chan;
+    use std::thread;
+    use memmap2::Mmap;
+    use serde::de::{self, SeqAccess, Visitor, Deserializer as _};
+
+    #[derive(Debug)]
+    enum Buf { Mmap(Mmap), Vec(Vec<u8>) }
+    impl Buf { fn as_slice(&self) -> &[u8] { match self { Buf::Mmap(m) => &m, Buf::Vec(v) => v } } }
+    #[derive(Debug)]
+    struct Job { _path: PathBuf, buf: Buf }
+
+    let pb = indicatif::ProgressBar::new_spinner();
+    pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
+    pb.set_message("Scanning JSON files (fast)...");
+
+    let (tx, rx) = chan::bounded::<Job>(64);
+    let producer = {
+        let tx = tx.clone();
+        let input_dir = input_dir.to_path_buf();
+        thread::spawn(move || {
+            for entry in WalkDir::new(&input_dir).into_iter().filter_map(|e| e.ok()) {
+                if !(entry.file_type().is_file() && entry.path().extension().map(|e| e == "json").unwrap_or(false)) {
+                    continue;
+                }
+                let path = entry.path().to_path_buf();
+                let md = match std::fs::metadata(&path) { Ok(m) => m, Err(_) => continue };
+                let job = if md.len() as usize <= mmap_threshold {
+                    // mmap
+                    match File::open(&path).and_then(|f| unsafe { Mmap::map(&f) }.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))) {
+                        Ok(m) => Job { _path: path, buf: Buf::Mmap(m) },
+                        Err(_) => {
+                            // fallback to Vec
+                            match std::fs::read(&path) { Ok(v) => Job { _path: path, buf: Buf::Vec(v) }, Err(_) => continue }
+                        }
+                    }
+                } else {
+                    match std::fs::read(&path) { Ok(v) => Job { _path: path, buf: Buf::Vec(v) }, Err(_) => continue }
+                };
+                if tx.send(job).is_err() { break; }
+            }
+            // drop tx to close
+        })
+    };
+
+    let nthreads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let mut handles = Vec::new();
+    for _ in 0..nthreads {
+        let rx = rx.clone();
+        handles.push(thread::spawn(move || -> (Vec<Doc>, usize, Vec<(String, usize)>) {
+            let mut out: Vec<Doc> = Vec::with_capacity(1024);
+            let mut skipped: usize = 0;
+            let mut receipts: Vec<(String, usize)> = Vec::with_capacity(128);
+
+            while let Ok(job) = rx.recv() {
+                let file_name = job._path.display().to_string();
+                let bytes = job.buf.as_slice();
+                // Streaming parse: support array or single object
+                let mut de = serde_json::Deserializer::from_slice(bytes);
+                // Try array streaming first
+                struct StreamVisitor<'a> { out: &'a mut Vec<Doc>, skipped: &'a mut usize }
+                impl<'de, 'a> Visitor<'de> for StreamVisitor<'a> {
+                    type Value = ();
+                    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "array or object of docs") }
+                    fn visit_seq<A>(self, mut seq: A) -> Result<(), A::Error> where A: SeqAccess<'de> {
+                        while let Some(raw) = seq.next_element::<InputDocRaw>()? {
+                            if let Some((embedding, meta_other)) = raw.metadata.and_then(extract_embedding_and_meta) {
+                                let text = raw.text.or(raw.content).unwrap_or_default();
+                                if !embedding.is_empty() {
+                                    let id = raw.id.unwrap_or_else(|| {
+                                        let h = xxh64(text.as_bytes(), 0);
+                                        format!("doc-{h:016x}")
+                                    });
+                                    self.out.push(Doc { id, text, embedding, meta: meta_other });
+                                } else { *self.skipped += 1; }
+                            } else { *self.skipped += 1; }
+                        }
+                        Ok(())
+                    }
+                    fn visit_map<M>(self, mut map: M) -> Result<(), M::Error> where M: de::MapAccess<'de> {
+                        // Reconstruct InputDocRaw from map streaming
+                        let mut id: Option<String> = None; let mut text: Option<String> = None; let mut content: Option<String> = None; let mut metadata: Option<serde_json::Value> = None;
+                        while let Some(k) = map.next_key::<String>()? {
+                            match k.as_str() {
+                                "id" => { id = map.next_value()?; }
+                                "text" => { text = map.next_value()?; }
+                                "content" => { content = map.next_value()?; }
+                                "metadata" => { metadata = map.next_value()?; }
+                                _ => { let _ = map.next_value::<serde_json::Value>()?; }
+                            }
+                        }
+                        let raw = InputDocRaw { id, text, content, metadata };
+                        if let Some((embedding, meta_other)) = raw.metadata.and_then(extract_embedding_and_meta) {
+                            let text = raw.text.or(raw.content).unwrap_or_default();
+                            if !embedding.is_empty() {
+                                let id = raw.id.unwrap_or_else(|| {
+                                    let h = xxh64(text.as_bytes(), 0);
+                                    format!("doc-{h:016x}")
+                                });
+                                self.out.push(Doc { id, text, embedding, meta: meta_other });
+                            } else { *self.skipped += 1; }
+                        } else { *self.skipped += 1; }
+                        Ok(())
+                    }
+                }
+                let mut skipped_local = 0usize;
+                let before = out.len();
+                let vis = StreamVisitor { out: &mut out, skipped: &mut skipped_local };
+                let res = de.deserialize_any(vis);
+                let produced_for_file = if res.is_err() { skipped += 1; 0 } else { skipped += skipped_local; out.len() - before };
+                receipts.push((file_name, produced_for_file));
+            }
+            (out, skipped, receipts)
+        }));
+    }
+    drop(tx);
+    let _ = producer.join();
+    let mut docs: Vec<Doc> = Vec::new();
+    let mut skipped = 0usize;
+    let mut receipts: Vec<(String, usize)> = Vec::new();
+    for h in handles { let (mut v, s, mut r) = h.join().unwrap_or_default(); docs.append(&mut v); skipped += s; receipts.append(&mut r); }
+    pb.finish_with_message(format!("Loaded {} docs (skipped {})", docs.len(), skipped));
+    receipts.sort_by(|a,b| a.0.cmp(&b.0));
+    Ok((docs, receipts))
 }
 
 // Extract the embedding array from metadata JSON and return the remaining object fields
@@ -268,23 +418,20 @@ fn write_vectors(docs: &[Doc], dim: usize, out: &Path, dtype: &str) -> Result<()
 
 fn write_bm25_and_terms(docs: &[Doc], out: &Path) -> Result<(f64, Vec<String>, usize, usize)> {
     use rayon::prelude::*;
-    // Streaming reducer with concurrent postings and per-doc lengths
-    let postings_map: Arc<DashMap<String, Vec<(usize, u32)>>> = Arc::new(DashMap::new());
+    // Phase 1: per-doc tokenization and TF maps in parallel; record doc lengths
     let doc_lens: Vec<AtomicUsize> = (0..docs.len()).map(|_| AtomicUsize::new(0)).collect();
+    let mut doc_tfs: Vec<FxHashMap<String, u32>> = (0..docs.len()).map(|_| FxHashMap::default()).collect();
 
-    docs.par_iter().enumerate().for_each(|(i, d)| {
-        let tok = nvs_core::tokenizer::SimpleTokenizer::new();
-        let tokens = tok.split(&d.text);
-        doc_lens[i].store(tokens.len(), Ordering::Relaxed);
-        let mut tf: FxHashMap<String, u32> = FxHashMap::default();
-        for t in tokens.into_iter() {
-            *tf.entry(t).or_insert(0) += 1;
-        }
-        for (term, count) in tf.into_iter() {
-            let mut v = postings_map.entry(term).or_default();
-            v.push((i, count));
-        }
-    });
+    doc_tfs
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(i, tfmap)| {
+            let d = &docs[i];
+            let tok = nvs_core::tokenizer::SimpleTokenizer::new();
+            let tokens = tok.split(&d.text);
+            doc_lens[i].store(tokens.len(), Ordering::Relaxed);
+            for t in tokens.into_iter() { *tfmap.entry(t).or_insert(0) += 1; }
+        });
 
     // Write doc lengths
     {
@@ -297,8 +444,16 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path) -> Result<(f64, Vec<String>, u
 
     let total_tokens: usize = doc_lens.iter().map(|x| x.load(Ordering::Relaxed)).sum();
 
+    // Phase 2: single-threaded merge of TF maps into postings per term
+    let mut postings_map: FxHashMap<String, Vec<(usize, u32)>> = FxHashMap::default();
+    for (i, tfmap) in doc_tfs.into_iter().enumerate() {
+        for (term, count) in tfmap.into_iter() {
+            postings_map.entry(term).or_default().push((i, count));
+        }
+    }
+
     // terms sorted
-    let mut terms: Vec<String> = postings_map.iter().map(|e| e.key().clone()).collect();
+    let mut terms: Vec<String> = postings_map.keys().cloned().collect();
     terms.sort();
     {
         let mut f = File::create(out.join("terms.dict"))?;
@@ -309,14 +464,12 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path) -> Result<(f64, Vec<String>, u
         }
     }
     // postings + lexicon (deterministic)
-    {
+    let postings_entries_count: usize = {
         let mut postings = Vec::<u8>::new();
         let mut lexicon = Vec::<u8>::new();
         let mut offset: u64 = 0;
         for t in &terms {
-            if let Some(entry) = postings_map.get(t) {
-                let mut list = entry.clone();
-                drop(entry);
+            if let Some(mut list) = postings_map.remove(t) {
                 list.sort_by_key(|&(doc, _)| doc);
                 let mut prev = 0usize;
                 let mut length = 0u32;
@@ -338,13 +491,14 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path) -> Result<(f64, Vec<String>, u
         pf.write_all(&postings)?;
         let mut lf = File::create(out.join("lexicon.bin"))?;
         lf.write_all(&lexicon)?;
-    }
+        (offset / 8) as usize
+    };
     let avgdl = if docs.is_empty() {
         0.0
     } else {
         (total_tokens as f64) / (docs.len() as f64)
     };
-    let postings_entries: usize = postings_map.iter().map(|e| e.value().len()).sum();
+    let postings_entries: usize = postings_entries_count;
     Ok((avgdl, terms, postings_entries, total_tokens))
 }
 
@@ -630,6 +784,15 @@ fn write_checksums(out: &Path) -> Result<()> {
     Ok(())
 }
 
+fn write_receipts(out: &Path, receipts: &[(String, usize)]) -> Result<()> {
+    use std::io::Write as _;
+    let mut f = File::create(out.join("receipts.txt"))?;
+    for (name, count) in receipts.iter() {
+        writeln!(f, "{}\t{}", name, count)?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     fs::create_dir_all(&cli.out).context("create output dir")?;
@@ -637,7 +800,7 @@ fn main() -> Result<()> {
     let style = indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap();
     pb.set_style(style);
     let t0 = std::time::Instant::now();
-    let docs = read_docs(&cli.input)?;
+    let (docs, receipts) = if cli.fast_loader { read_docs_fast(&cli.input, cli.mmap_threshold)? } else { read_docs(&cli.input)? };
     anyhow::ensure!(!docs.is_empty(), "no documents found in input");
     let dim = docs[0].embedding.len();
     anyhow::ensure!(dim > 0, "embedding dimension must be > 0");
@@ -684,6 +847,7 @@ fn main() -> Result<()> {
     pb.set_message("Computing checksums...");
     let t5 = std::time::Instant::now();
     write_checksums(&cli.out)?;
+    write_receipts(&cli.out, &receipts)?;
     let t_checksums = t5.elapsed();
     pb.finish_and_clear();
 

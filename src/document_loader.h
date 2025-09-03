@@ -59,6 +59,9 @@ public:
         // Detected configuration
         enum class TextField { UNKNOWN, TEXT, CONTENT };
         TextField text_field = TextField::UNKNOWN;
+
+        // Receipts: per-file document counts
+        std::vector<std::pair<std::string, size_t>> receipts; // (filename, doc_count)
     };
     
     /**

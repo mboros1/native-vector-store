@@ -134,6 +134,7 @@ public:
         
         // Step 5: Compute checksums
         if (!writeChecksums()) return 1;
+        if (!writeReceipts()) return 1;
         
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
@@ -431,6 +432,17 @@ private:
         }
         
         return file.good();
+    }
+    
+    bool writeReceipts() {
+        std::string path = opts_.output_dir + "/receipts.txt";
+        std::ofstream out(path);
+        if (!out) return false;
+        // data_.receipts already alphabetical; safe to write
+        for (const auto& p : data_.receipts) {
+            out << p.first << "\t" << p.second << "\n";
+        }
+        return out.good();
     }
     
     std::string computeXXH64(const std::string& filepath) {
