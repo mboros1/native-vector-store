@@ -1,0 +1,45 @@
+# Source files (we ship the built binary)
+src/*.o
+*.o
+
+# Build artifacts (but keep prebuilds/)
+build/
+!prebuilds/
+*.log
+.DS_Store
+
+# Test files and data
+test/
+test_pdfs/
+benchmarks/
+examples/tokenizer_example.cpp
+*.pdf
+
+# Build output
+out/
+chunk-pdf-cli
+perf-test
+token-test
+benchmark-passes
+tokenizer-example
+libhierarchicalchunker.a
+
+# Development files
+.env
+.env.local
+*.dSYM/
+**/*.dSYM/
+CLAUDE.md
+.claude_context/
+ONBOARDING.md
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Other
+Makefile
+*.cmake
+*.sh
+cl100k_base.tiktoken

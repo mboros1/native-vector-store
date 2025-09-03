@@ -270,6 +270,8 @@ pub fn bm25_keep_token(mut tok: &str) -> bool {
 // Return a normalized token for BM25 (trim punctuation, strip possessive), or None to drop.
 pub fn bm25_normalize_token(tok: &str) -> Option<String> {
     if tok.is_empty() { return None; }
+    // Drop tokens with triple hyphens anywhere (formatting/artifacts)
+    if tok.contains("---") { return None; }
     fn is_trim_punct(c: char) -> bool { matches!(c, '.'|','|';'|':'|'"'|'\''|'(' |')'|'['|']'|'{'|'}'|'!'|'?'|'%'|'+'|'-'|'/'|'\\'|'*'|'&'|'#'|'@'|'~'|'`'|'|') }
     let mut s = tok.trim_matches(is_trim_punct);
     if s.is_empty() { return None; }
@@ -366,13 +368,62 @@ pub fn is_stopword(tok: &str) -> bool {
     crate::english_stop_words::contains(tok)
 }
 
+#[cfg(test)]
+mod bm25_norm_tests {
+    use super::*;
+
+    #[test]
+    fn preprocess_dehyphenates_line_breaks_and_controls() {
+        let s = "High-\nquality and\tbar\x0C";
+        let out = preprocess_bm25(s);
+        assert!(out.contains("High"));
+        assert!(out.contains("quality"));
+        assert!(out.contains("and"));
+        assert!(out.contains("bar"));
+        assert!(!out.contains("\x0C"));
+        assert!(!out.contains("-\n"));
+    }
+
+    #[test]
+    fn normalize_strips_possessive_ascii_and_unicode() {
+        assert_eq!(bm25_normalize_token("doctor's").as_deref(), Some("doctor"));
+        assert_eq!(bm25_normalize_token("women’s").as_deref(), Some("women"));
+    }
+
+    #[test]
+    fn normalize_drops_numeric_and_url_tracking() {
+        assert_eq!(bm25_normalize_token("-0.03"), None);
+        assert_eq!(bm25_normalize_token("utm_campaign"), None);
+    }
+
+    #[test]
+    fn normalize_drops_triple_hyphen_and_sequences() {
+        assert_eq!(bm25_normalize_token("---ABC"), None);
+        let aa = "ACDEFGHIKLMNPQRSTVWY-".repeat(1); // length >= 21
+        assert_eq!(bm25_normalize_token(&aa), None);
+    }
+
+    #[test]
+    fn normalize_keeps_biomedical_patterns() {
+        assert_eq!(bm25_normalize_token("il-6").as_deref(), Some("il-6"));
+        assert_eq!(bm25_normalize_token("p53").as_deref(), Some("p53"));
+        assert_eq!(bm25_normalize_token("covid-19").as_deref(), Some("covid-19"));
+    }
+
+    #[test]
+    fn normalize_trims_leading_punct() {
+        assert_eq!(bm25_normalize_token("&chibnall").as_deref(), Some("chibnall"));
+        assert_eq!(bm25_normalize_token("'administrators'").as_deref(), Some("administrators"));
+    }
+}
+
 fn is_punctuation(tok: &str) -> bool {
     // Use the imported punctuation list
     crate::english_punctuations::contains(tok)
 }
 
 #[cfg(test)]
-mod tests {
+mod simple_tokenizer_tests {
     use super::*;
 
     #[test]

@@ -2,6 +2,7 @@
 members = [
     "crates/nvs-core",
     "crates/nvs-packer",
+    "crates/tokenmonster",
 ]
 
 resolver = "2"

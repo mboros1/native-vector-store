@@ -1,0 +1,73 @@
+{
+  "name": "fast-pdf-parser",
+  "version": "1.0.0",
+  "description": "High-performance PDF text extraction and chunking library with Node.js bindings",
+  "main": "index.js",
+  "types": "lib/index.d.ts",
+  "author": "Martin Boros <mboros04@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mboros1/fast-pdf-parser.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mboros1/fast-pdf-parser/issues"
+  },
+  "homepage": "https://github.com/mboros1/fast-pdf-parser#readme",
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "build-native": "make clean && make all",
+    "clean": "node-gyp clean && make clean",
+    "test": "node test/test.js",
+    "test-native": "make unit-test",
+    "install": "node-gyp-build",
+    "prebuildify": "prebuildify --napi --strip",
+    "prebuildify-cross": "prebuildify-cross -i centos7-devtoolset7 -i alpine -i linux-arm64 -i darwin-arm64 -i darwin-x64+arm64",
+    "benchmark": "node test/benchmark.js",
+    "example": "node example.js",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "pdf",
+    "parser",
+    "text-extraction",
+    "chunking",
+    "mupdf",
+    "tiktoken",
+    "hierarchical",
+    "llm",
+    "rag"
+  ],
+  "dependencies": {
+    "node-addon-api": "^7.0.0",
+    "node-gyp-build": "^4.8.4"
+  },
+  "devDependencies": {
+    "node-gyp": "^10.0.0",
+    "prebuildify": "^6.0.0",
+    "prebuildify-cross": "^5.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "gypfile": true,
+  "files": [
+    "index.js",
+    "lib/",
+    "include/",
+    "src/",
+    "binding.gyp",
+    "prebuilds/",
+    "README.md",
+    "LICENSE"
+  ]
+}
