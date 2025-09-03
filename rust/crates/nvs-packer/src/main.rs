@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use dashmap::DashMap;
 use rustc_hash::FxHashMap;
-use serde::{Deserialize, Serialize};
+use serde::{ser::{SerializeMap, Serializer}, Deserialize};
+use serde_json::{self, Map as JsonMap, Value as JsonValue};
 use std::fs::{self, File};
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -36,12 +37,10 @@ struct Cli {
     /// Zstd compression level (1-22), used when --compress=zstd
     #[arg(long = "zstd-level", default_value_t = 3)]
     zstd_level: i32,
+    /// Include embeddings in meta.blocks JSON (defaults to false to avoid duplication)
+    #[arg(long = "meta-include-embeddings", default_value_t = false)]
+    meta_include_embeddings: bool,
     // Pipeline removed: sequential flow only
-}
-
-#[derive(Deserialize)]
-struct InputDocMeta {
-    embedding: Vec<f32>,
 }
 
 #[derive(Deserialize)]
@@ -53,7 +52,7 @@ struct InputDocRaw {
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
-    metadata: Option<InputDocMeta>,
+    metadata: Option<JsonValue>,
 }
 
 #[derive(Clone)]
@@ -61,6 +60,7 @@ struct Doc {
     id: String,
     text: String,
     embedding: Vec<f32>,
+    meta: Option<JsonMap<String, JsonValue>>,
 }
 
 fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
@@ -94,19 +94,24 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                     match serde_json::from_value::<InputDocRaw>(v) {
                         Ok(r) => {
                             let text = r.text.or(r.content).unwrap_or_default();
-                            match r.metadata {
-                                Some(m) if !m.embedding.is_empty() => {
-                                    let id = r.id.unwrap_or_else(|| {
-                                        let h = xxh64(text.as_bytes(), 0) ^ (i as u64);
-                                        format!("doc-{h:016x}")
-                                    });
-                                    docs.push(Doc {
-                                        id,
-                                        text,
-                                        embedding: m.embedding,
-                                    });
-                                }
-                                _ => {
+                            if let Some(mv) = r.metadata {
+                                if let Some((embedding, meta_other)) = extract_embedding_and_meta(mv) {
+                                    if !embedding.is_empty() {
+                                        let id = r.id.unwrap_or_else(|| {
+                                            let h = xxh64(text.as_bytes(), 0) ^ (i as u64);
+                                            format!("doc-{h:016x}")
+                                        });
+                                        docs.push(Doc { id, text, embedding, meta: meta_other });
+                                    } else {
+                                        skipped += 1;
+                                        eprintln!(
+                                            "{} skipping doc without embedding ({}:#{})",
+                                            console::style("! ").yellow(),
+                                            path.display(),
+                                            i
+                                        );
+                                    }
+                                } else {
                                     skipped += 1;
                                     eprintln!(
                                         "{} skipping doc without embedding ({}:#{})",
@@ -115,8 +120,16 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                                         i
                                     );
                                 }
+                            } else {
+                                    skipped += 1;
+                                    eprintln!(
+                                        "{} skipping doc without metadata ({}:#{})",
+                                        console::style("! ").yellow(),
+                                        path.display(),
+                                        i
+                                    );
                             }
-                        }
+                        },
                         Err(e) => {
                             skipped += 1;
                             eprintln!(
@@ -134,19 +147,23 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                 match serde_json::from_str::<InputDocRaw>(&s) {
                     Ok(r) => {
                         let text = r.text.or(r.content).unwrap_or_default();
-                        match r.metadata {
-                            Some(m) if !m.embedding.is_empty() => {
-                                let id = r.id.unwrap_or_else(|| {
-                                    let h = xxh64(text.as_bytes(), 0);
-                                    format!("doc-{h:016x}")
-                                });
-                                docs.push(Doc {
-                                    id,
-                                    text,
-                                    embedding: m.embedding,
-                                });
-                            }
-                            _ => {
+                        if let Some(mv) = r.metadata {
+                            if let Some((embedding, meta_other)) = extract_embedding_and_meta(mv) {
+                                if !embedding.is_empty() {
+                                    let id = r.id.unwrap_or_else(|| {
+                                        let h = xxh64(text.as_bytes(), 0);
+                                        format!("doc-{h:016x}")
+                                    });
+                                    docs.push(Doc { id, text, embedding, meta: meta_other });
+                                } else {
+                                    skipped += 1;
+                                    eprintln!(
+                                        "{} skipping doc without embedding ({})",
+                                        console::style("! ").yellow(),
+                                        path.display()
+                                    );
+                                }
+                            } else {
                                 skipped += 1;
                                 eprintln!(
                                     "{} skipping doc without embedding ({})",
@@ -154,6 +171,13 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
                                     path.display()
                                 );
                             }
+                        } else {
+                            skipped += 1;
+                            eprintln!(
+                                "{} skipping doc without metadata ({})",
+                                console::style("! ").yellow(),
+                                path.display()
+                            );
                         }
                     }
                     Err(e) => {
@@ -171,6 +195,30 @@ fn read_docs(input_dir: &Path) -> Result<Vec<Doc>> {
     }
     pb.finish_with_message(format!("Loaded {} docs (skipped {})", docs.len(), skipped));
     Ok(docs)
+}
+
+// Extract the embedding array from metadata JSON and return the remaining object fields
+fn extract_embedding_and_meta(meta: JsonValue) -> Option<(Vec<f32>, Option<JsonMap<String, JsonValue>>)> {
+    match meta {
+        JsonValue::Object(mut map) => {
+            let emb = map.remove("embedding")?;
+            let embedding = match emb {
+                JsonValue::Array(arr) => {
+                    let mut v = Vec::with_capacity(arr.len());
+                    for val in arr {
+                        if let JsonValue::Number(n) = val {
+                            if let Some(f) = n.as_f64() { v.push(f as f32); } else { return None; }
+                        } else { return None; }
+                    }
+                    v
+                }
+                _ => return None,
+            };
+            let meta_other = if map.is_empty() { None } else { Some(map) };
+            Some((embedding, meta_other))
+        }
+        _ => None,
+    }
 }
 
 fn write_vectors(docs: &[Doc], dim: usize, out: &Path, dtype: &str) -> Result<()> {
@@ -306,6 +354,7 @@ fn write_meta_and_index(
     out: &Path,
     compress: &str,
     zstd_level: i32,
+    include_embeddings: bool,
 ) -> Result<usize> {
     let mut blocks: Vec<Vec<u8>> = Vec::new();
     let mut headers: Vec<(u32, u32, u32, u32)> = Vec::new();
@@ -314,73 +363,73 @@ fn write_meta_and_index(
     let mut cur_usize = 0u32;
     let mut cur_docs = 0u32;
     let mut block_id = 0u32;
-    #[derive(Serialize)]
-    struct Meta<'a> {
-        embedding: &'a [f32],
-    }
-
-    // Lightweight counter to measure JSON length without allocating a buffer
-    struct CountWriter {
-        count: usize,
-    }
-    impl CountWriter {
-        fn new() -> Self {
-            Self { count: 0 }
-        }
-    }
-    impl Write for CountWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.count += buf.len();
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     for d in docs {
-        let meta = Meta {
-            embedding: &d.embedding,
-        };
-        // First pass: count JSON bytes to determine record size and block fit
-        let mut cw = CountWriter::new();
-        serde_json::to_writer(&mut cw, &meta)?;
-        let meta_len = cw.count;
+        let mut wrote = false;
+        for attempt in 0..2 {
+            let rec_offset = cur_usize;
+            let cur_len0 = cur.len();
+            // id
+            cur.extend_from_slice(&(d.id.len() as u32).to_le_bytes());
+            cur.extend_from_slice(d.id.as_bytes());
+            // text
+            cur.extend_from_slice(&(d.text.len() as u32).to_le_bytes());
+            cur.extend_from_slice(d.text.as_bytes());
+            // meta
+            let len_pos = cur.len();
+            cur.extend_from_slice(&0u32.to_le_bytes());
+            let meta_start = cur.len();
+            if include_embeddings {
+                // Stream a merged object: existing metadata fields + embedding
+                let mut ser = serde_json::Serializer::new(&mut cur);
+                let mut map = ser.serialize_map(None)?;
+                if let Some(ref m) = d.meta {
+                    for (k, v) in m.iter() { map.serialize_entry(k, v)?; }
+                }
+                map.serialize_entry("embedding", &d.embedding)?;
+                map.end()?;
+            } else {
+                if let Some(ref m) = d.meta {
+                    // Write the remaining metadata object (may be empty)
+                    let mut ser = serde_json::Serializer::new(&mut cur);
+                    let mut map = ser.serialize_map(Some(m.len()))?;
+                    for (k, v) in m.iter() { map.serialize_entry(k, v)?; }
+                    map.end()?;
+                } else {
+                    cur.extend_from_slice(b"{}");
+                }
+            }
+            let meta_written = (cur.len() - meta_start) as u32;
+            cur[len_pos..len_pos + 4].copy_from_slice(&meta_written.to_le_bytes());
+            let rec_size = (cur.len() - cur_len0) as u32;
 
-        let rec_size = 4 + d.id.len() + 4 + d.text.len() + 4 + meta_len;
-        if cur_docs > 0 && (cur_usize as usize + rec_size) > block_size {
-            headers.push((block_id, cur_usize, cur_docs, 0));
-            blocks.push(std::mem::take(&mut cur));
-            cur = Vec::with_capacity(block_size);
-            cur_usize = 0;
-            cur_docs = 0;
-            block_id += 1;
+            if cur_docs > 0 && (cur_usize as usize + rec_size as usize) > block_size {
+                // overflow: rollback and start a new block
+                cur.truncate(cur_len0);
+                if attempt == 0 {
+                    headers.push((block_id, cur_usize, cur_docs, 0));
+                    blocks.push(std::mem::take(&mut cur));
+                    cur = Vec::with_capacity(block_size);
+                    cur_usize = 0;
+                    cur_docs = 0;
+                    block_id += 1;
+                    continue;
+                } else {
+                    anyhow::bail!("record larger than block size");
+                }
+            }
+
+            // idx entry (after confirming fit)
+            idx.extend_from_slice(&block_id.to_le_bytes());
+            idx.extend_from_slice(&rec_offset.to_le_bytes());
+            idx.extend_from_slice(&rec_size.to_le_bytes());
+            idx.extend_from_slice(&0u32.to_le_bytes());
+
+            cur_usize += rec_size;
+            cur_docs += 1;
+            wrote = true;
+            break;
         }
-        // idx entry
-        idx.extend_from_slice(&block_id.to_le_bytes());
-        idx.extend_from_slice(&(cur_usize).to_le_bytes());
-        idx.extend_from_slice(&(rec_size as u32).to_le_bytes());
-        idx.extend_from_slice(&0u32.to_le_bytes());
-        // write record directly into current block buffer
-        cur.extend_from_slice(&(d.id.len() as u32).to_le_bytes());
-        cur.extend_from_slice(d.id.as_bytes());
-        cur.extend_from_slice(&(d.text.len() as u32).to_le_bytes());
-        cur.extend_from_slice(d.text.as_bytes());
-        // Reserve space for meta length, then serialize JSON directly and back-patch length
-        let len_pos = cur.len();
-        cur.extend_from_slice(&0u32.to_le_bytes());
-        let start = cur.len();
-        serde_json::to_writer(&mut cur, &meta)?;
-        let written = cur.len() - start;
-        debug_assert_eq!(
-            written, meta_len,
-            "meta length changed between count and write"
-        );
-        let meta_len_le = (written as u32).to_le_bytes();
-        cur[len_pos..len_pos + 4].copy_from_slice(&meta_len_le);
-
-        cur_usize += rec_size as u32;
-        cur_docs += 1;
+        if !wrote { anyhow::bail!("failed to write record after rollover"); }
     }
     if cur_docs > 0 {
         headers.push((block_id, cur_usize, cur_docs, 0));
@@ -617,7 +666,7 @@ fn main() -> Result<()> {
     let unique_terms = terms.len();
     pb.set_message("Writing metadata blocks...");
     let t3 = std::time::Instant::now();
-    let block_count = write_meta_and_index(&docs, cli.block_size, &cli.out, &cli.compress, lvl)?;
+    let block_count = write_meta_and_index(&docs, cli.block_size, &cli.out, &cli.compress, lvl, cli.meta_include_embeddings)?;
     let t_meta = t3.elapsed();
     pb.set_message("Writing manifest...");
     let t4 = std::time::Instant::now();

@@ -29,6 +29,7 @@ fn pack_then_open_bundle() {
         .arg(&output)
         .arg("--model")
         .arg("test")
+        .arg("--meta-include-embeddings")
         .status()
         .unwrap();
     assert!(status.success());

@@ -148,7 +148,7 @@ impl Bundle {
             4
         };
         let row_bytes = (manifest.dim as usize) * elem_size;
-        let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
+        let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
         let expected = (manifest.num_docs as usize) * aligned_row_bytes;
         if vectors.len() != expected {
             return Err(NvsError::InvalidBundle("vectors size mismatch"));
@@ -321,7 +321,7 @@ impl Bundle {
     #[inline]
     pub(crate) fn row_stride_f32(&self) -> usize {
         let row_bytes = (self.manifest.dim as usize) * 4;
-        let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
+        let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
         aligned_row_bytes / 4
     }
 
@@ -487,7 +487,7 @@ mod tests {
         // write vectors file with correct padded size (zeros)
         {
             let row_bytes = (4usize) * 4;
-            let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
+            let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
             let data = vec![0u8; (3usize) * aligned_row_bytes];
             let mut f = File::create(dir.join("vectors.f32")).unwrap();
             f.write_all(&data).unwrap();
@@ -517,7 +517,7 @@ mod tests {
         // vectors file with correct padded size (zeros)
         {
             let row_bytes = (1usize) * 4;
-            let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
+            let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
             let data = vec![0u8; (1usize) * aligned_row_bytes];
             let mut f = File::create(dir.join("vectors.f32")).unwrap();
             f.write_all(&data).unwrap();
@@ -566,7 +566,7 @@ mod tests {
             let dim = 1usize;
             let num_docs = 3usize;
             let row_bytes = dim * 4;
-            let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
+            let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
             let data = vec![0u8; num_docs * aligned_row_bytes];
             let mut f = File::create(dir.join("vectors.f32")).unwrap();
             f.write_all(&data).unwrap();
@@ -658,7 +658,7 @@ mod tests {
         // vectors: zeros with proper padding
         {
             let row_bytes = 4usize;
-            let aligned = ((row_bytes + 63) / 64) * 64;
+            let aligned = row_bytes.div_ceil(64) * 64;
             let data = vec![0u8; 3 * aligned];
             let mut f = File::create(dir.join("vectors.f32")).unwrap();
             f.write_all(&data).unwrap();
@@ -725,7 +725,7 @@ mod tests {
         // Write vectors: identity rows padded to 64B
         {
             let row_bytes = (dim as usize) * 4;
-            let aligned_row_bytes = ((row_bytes + 63) / 64) * 64;
+            let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
             let mut data = vec![0u8; (num_docs as usize) * aligned_row_bytes];
             for i in 0..(num_docs as usize) {
                 for j in 0..(dim as usize) {
@@ -773,7 +773,7 @@ mod tests {
         // vectors
         {
             let row_bytes = 4usize;
-            let aligned = ((row_bytes + 63) / 64) * 64;
+            let aligned = row_bytes.div_ceil(64) * 64;
             let data = vec![0u8; 2 * aligned];
             let mut f = File::create(dir.join("vectors.f32")).unwrap();
             f.write_all(&data).unwrap();
@@ -858,7 +858,7 @@ mod tests {
         // vectors: zeros
         {
             let row_bytes = 4usize;
-            let aligned = ((row_bytes + 63) / 64) * 64;
+            let aligned = row_bytes.div_ceil(64) * 64;
             let data = vec![0u8; 3 * aligned];
             let mut f = File::create(dir.join("vectors.f32")).unwrap();
             f.write_all(&data).unwrap();
@@ -903,7 +903,7 @@ mod tests {
             let dim = 3usize;
             let n = 3usize;
             let row_bytes = dim * 4;
-            let aligned = ((row_bytes + 63) / 64) * 64;
+            let aligned = row_bytes.div_ceil(64) * 64;
             let mut data = vec![0u8; n * aligned];
             for i in 0..n {
                 for j in 0..dim {
@@ -944,7 +944,7 @@ mod tests {
         // Vectors (64B aligned rows)
         {
             let row_bytes = dim * 4;
-            let aligned = ((row_bytes + 63) / 64) * 64;
+            let aligned = row_bytes.div_ceil(64) * 64;
             let mut data = vec![0u8; docs.len() * aligned];
             for (i, d) in docs.iter().enumerate() {
                 assert_eq!(d.embedding.len(), dim);
@@ -1486,7 +1486,7 @@ mod tests {
         // Write vectors.f16 with identity-like rows, 64B aligned
         {
             let row_bytes = dim * 2; // f16
-            let aligned = ((row_bytes + 63) / 64) * 64;
+            let aligned = row_bytes.div_ceil(64) * 64;
             let mut data = vec![0u8; num_docs * aligned];
             for i in 0..num_docs {
                 for j in 0..dim {
