@@ -7,6 +7,7 @@ pub fn search(bundle: &Bundle, query: &str, k: usize) -> Vec<(u32, f32)> {
         lowercase: true,
         split_contractions: true,
         remove_stopwords: true,
+        remove_punctuation: false,  // Keep punctuation for BM25 to maintain compatibility
     });
     let terms = tok.split(query);
     let view: Vec<&str> = terms.iter().map(|s| s.as_str()).collect();
@@ -49,7 +50,16 @@ pub fn search_terms(bundle: &Bundle, query_terms: &[&str], k: usize) -> Vec<(u32
         if heap.len() < k { heap.push(item); }
         else if let Some(mut top) = heap.peek_mut() { if item.0 .0 > top.0 .0 { *top = item; } }
     }
-    let mut v: Vec<(OrderedFloat<f32>,u32)> = heap.into_sorted_vec().into_iter().map(|r| r.0).collect();
-    v.reverse();
-    v.into_iter().map(|(s,d)|(d,s.0)).collect()
+    // into_sorted_vec() with Reverse comparator yields descending order by (score, doc).
+    // Map to (doc, score) and ensure deterministic tie-break: score desc, id asc.
+    let mut v: Vec<(u32, f32)> = heap
+        .into_sorted_vec()
+        .into_iter()
+        .map(|r| {
+            let (s, d) = r.0; // (OrderedFloat(score), doc)
+            (d, s.0)
+        })
+        .collect();
+    v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
+    v
 }

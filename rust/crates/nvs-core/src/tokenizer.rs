@@ -11,11 +11,17 @@ pub struct TokenizerOptions {
     pub lowercase: bool,
     pub split_contractions: bool,
     pub remove_stopwords: bool,
+    pub remove_punctuation: bool,
 }
 
 impl Default for TokenizerOptions {
     fn default() -> Self {
-        Self { lowercase: false, split_contractions: false, remove_stopwords: false }
+        Self { 
+            lowercase: false, 
+            split_contractions: false, 
+            remove_stopwords: false,
+            remove_punctuation: false,
+        }
     }
 }
 
@@ -51,11 +57,14 @@ impl SimpleTokenizer {
                 }
             }
             // optional stopwords removal
-            if self.opts.remove_stopwords {
-                if !is_stopword(&t) { out.push(t); }
-            } else {
-                out.push(t);
+            if self.opts.remove_stopwords && is_stopword(&t) {
+                continue;
             }
+            // optional punctuation removal
+            if self.opts.remove_punctuation && is_punctuation(&t) {
+                continue;
+            }
+            out.push(t);
         }
         out
     }
@@ -161,6 +170,11 @@ fn is_stopword(tok: &str) -> bool {
     crate::english_stop_words::contains(tok)
 }
 
+fn is_punctuation(tok: &str) -> bool {
+    // Use the imported punctuation list
+    crate::english_punctuations::contains(tok)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,7 +196,12 @@ mod tests {
 
     #[test]
     fn contractions_and_stopwords() {
-        let t = SimpleTokenizer::with_options(TokenizerOptions{ lowercase: true, split_contractions: true, remove_stopwords: true });
+        let t = SimpleTokenizer::with_options(TokenizerOptions{ 
+            lowercase: true, 
+            split_contractions: true, 
+            remove_stopwords: true,
+            remove_punctuation: false 
+        });
         // With the comprehensive English stopword list, all resulting tokens are stopwords
         let toks = t.split("I can't and won't do it");
         assert_eq!(toks.as_slice(), [] as [&str; 0]);
@@ -248,6 +267,45 @@ mod tests {
         let t = SimpleTokenizer::new();
         assert_eq!(t.split("word!!!???...").as_slice(), ["word","!","!","!","?","?","?",".",".","."]);
         // straight and curly apostrophes should both behave as in-word punctuation
-        assert_eq!(t.split("it's it’s").as_slice(), ["it's","it’s"]);
+        assert_eq!(t.split("it's it's").as_slice(), ["it's","it's"]);
+    }
+
+    #[test]
+    fn punctuation_removal() {
+        let t = SimpleTokenizer::with_options(TokenizerOptions{ 
+            lowercase: false, 
+            split_contractions: false, 
+            remove_stopwords: false,
+            remove_punctuation: true 
+        });
+        // Test that punctuation marks are removed
+        assert_eq!(t.split("Hello, world!").as_slice(), ["Hello", "world"]);
+        assert_eq!(t.split("What? Really! Yes...").as_slice(), ["What", "Really", "Yes"]);
+        // Punctuation within words should still be preserved
+        assert_eq!(t.split("self-driving and/or R&D").as_slice(), ["self-driving", "and/or", "R&D"]);
+        // Test with mixed punctuation
+        assert_eq!(t.split("(example) [test] {code}").as_slice(), ["example", "test", "code"]);
+    }
+
+    #[test]
+    fn combined_options() {
+        let t = SimpleTokenizer::with_options(TokenizerOptions{ 
+            lowercase: true, 
+            split_contractions: true, 
+            remove_stopwords: true,
+            remove_punctuation: true 
+        });
+        // With all options enabled
+        let toks = t.split("I can't believe it's working!");
+        // "I", "can", "not", "believe", "it", "'s", "working" become
+        // After stopword removal: "believe", "working" (others are stopwords)
+        // After punctuation removal: "believe", "working" (! is removed)
+        assert_eq!(toks.as_slice(), ["believe", "working"]);
+        
+        // Another test
+        let toks2 = t.split("The quick brown fox jumps over the lazy dog.");
+        // After stopword removal: "quick", "brown", "fox", "jumps", "lazy", "dog"
+        // After punctuation removal: same (. is removed)
+        assert_eq!(toks2.as_slice(), ["quick", "brown", "fox", "jumps", "lazy", "dog"]);
     }
 }

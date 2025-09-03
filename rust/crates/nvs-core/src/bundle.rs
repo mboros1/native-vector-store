@@ -445,10 +445,58 @@ mod tests {
         let res = store.search_bm25("apple", 3);
         assert!(!res.is_empty());
         assert_eq!(res[0].0, 0);
+        // Scores should be non-increasing
+        for i in 1..res.len() { assert!(res[i-1].1 >= res[i].1, "bm25 scores must be sorted desc"); }
         // Multi-term apple+banana likely keeps doc1 and doc0 in top 2
         let res2 = store.search_bm25("apple banana", 3);
         assert!(res2.iter().any(|&(id,_)| id==0));
         assert!(res2.iter().any(|&(id,_)| id==1));
+        for i in 1..res2.len() { assert!(res2[i-1].1 >= res2[i].1, "bm25 scores must be sorted desc"); }
+    }
+
+    #[test]
+    fn bm25_sort_order_and_ties() {
+        use std::io::Write;
+        let dir = temp_dir("nvs_rust_bm25_ties");
+        // 3 docs, dim 1
+        write_manifest(&dir, 3, 1, 128);
+        // vectors: zeros with proper padding
+        {
+            let row_bytes = 4usize; let aligned = ((row_bytes + 63) / 64) * 64; let data = vec![0u8; 3*aligned];
+            let mut f = File::create(dir.join("vectors.f32")).unwrap(); f.write_all(&data).unwrap();
+        }
+        // doc lengths: all 1
+        { let mut f = File::create(dir.join("doclen.u32")).unwrap(); for _ in 0..3 { f.write_all(&1u32.to_le_bytes()).unwrap(); } }
+        // terms: one term 'foo'
+        {
+            let mut f = File::create(dir.join("terms.dict")).unwrap(); let s = "foo"; f.write_all(&(s.len() as u32).to_le_bytes()).unwrap(); f.write_all(s.as_bytes()).unwrap();
+        }
+        // postings: foo appears once in doc0, doc1, doc2 (equal tf -> tie)
+        {
+            let mut postings = Vec::<u8>::new();
+            let mut lexicon = Vec::<u8>::new();
+            let mut offset: u64 = 0;
+            let add = |delta: u32, tf: u32, buf: &mut Vec<u8>| { buf.extend_from_slice(&delta.to_le_bytes()); buf.extend_from_slice(&tf.to_le_bytes()); };
+            add(0,1,&mut postings); // doc0
+            add(1,1,&mut postings); // doc1
+            add(1,1,&mut postings); // doc2
+            lexicon.extend_from_slice(&offset.to_le_bytes()); lexicon.extend_from_slice(&(3u32).to_le_bytes()); lexicon.extend_from_slice(&(3u32).to_le_bytes());
+            let mut pf = File::create(dir.join("postings.bin")).unwrap(); pf.write_all(&postings).unwrap();
+            let mut lf = File::create(dir.join("lexicon.bin")).unwrap(); lf.write_all(&lexicon).unwrap();
+        }
+        // meta files
+        write_meta_idx(&dir, 3);
+        write_meta_blocks(&dir, 1, 128);
+
+        let store = crate::VectorStore::from_bundle(Bundle::open(&dir).unwrap());
+        let res = store.search_bm25("foo", 3);
+        assert_eq!(res.len(), 3);
+        // Scores must be non-increasing
+        for i in 1..res.len() { assert!(res[i-1].1 >= res[i].1, "bm25 scores must be sorted desc"); }
+        // Ties must be broken by id asc (0,1,2)
+        assert_eq!(res[0].0, 0);
+        assert_eq!(res[1].0, 1);
+        assert_eq!(res[2].0, 2);
     }
 
     #[test]
@@ -720,6 +768,106 @@ mod tests {
             let mut out = String::new();
             for name in files { let path = dir.join(name); let mut buf=Vec::new(); File::open(&path).unwrap().read_to_end(&mut buf).unwrap(); let h = xxh64(&buf, 0); out.push_str(&format!("{h:016x}  {name}\n")); }
             let mut f = File::create(dir.join("checksums.xxhash64")).unwrap(); f.write_all(out.as_bytes()).unwrap();
+        }
+    }
+
+    #[test]
+    fn corpus_semantic_sanity() {
+        use rand::{Rng, SeedableRng};
+        use rand::seq::SliceRandom;
+        use rand::rngs::StdRng;
+
+        // Build a medium corpus across three topical clusters with synthetic embeddings.
+        // Text contains topical keywords so BM25 should agree with vector similarity.
+        #[derive(Clone)]
+        struct Topic { name: &'static str, keywords: &'static [&'static str] }
+        let topics = [
+            Topic { name: "physics", keywords: &["quantum","particle","wave","electron","photon","field","spin","energy"] },
+            Topic { name: "cooking", keywords: &["recipe","cook","bake","ingredients","oven","simmer","spice","kitchen"] },
+            Topic { name: "finance", keywords: &["market","stock","investment","portfolio","risk","returns","capital","trading"] },
+        ];
+
+        let dim = 64usize;
+        let per_topic = 30usize; // total 90 docs
+        let block_size = 8192usize;
+        let dir = temp_dir("nvs_rust_corpus_semantic");
+
+        // Create per-topic centroids
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut centroids: Vec<Vec<f32>> = Vec::new();
+        for _ in 0..topics.len() {
+            let mut v: Vec<f32> = (0..dim).map(|_| rng.gen_range(-0.5f32..0.5f32)).collect();
+            // normalize
+            let n = (v.iter().map(|x| x*x).sum::<f32>()).sqrt().max(1e-6);
+            for x in &mut v { *x /= n; }
+            centroids.push(v);
+        }
+
+        // Generate documents
+        let mut docs: Vec<TDoc> = Vec::with_capacity(topics.len()*per_topic);
+        for (ti, topic) in topics.iter().enumerate() {
+            for j in 0..per_topic {
+                // Build simple text with 4 keywords shuffled
+                let mut idxs: Vec<usize> = (0..topic.keywords.len()).collect();
+                idxs.shuffle(&mut rng);
+                let kw = [topic.keywords[idxs[0]], topic.keywords[idxs[1]], topic.keywords[idxs[2]], topic.keywords[idxs[3]]];
+                let text = format!(
+                    "{} {} discussed here. We also mention {} and {} in this paragraph about {}.",
+                    kw[0], kw[1], kw[2], kw[3], topic.name
+                );
+
+                // Embedding = centroid + small noise
+                let base = &centroids[ti];
+                let mut e = vec![0f32; dim];
+                for d in 0..dim {
+                    let noise: f32 = rng.gen_range(-0.03..0.03);
+                    e[d] = base[d] + noise;
+                }
+                // renormalize
+                let n = (e.iter().map(|x| x*x).sum::<f32>()).sqrt().max(1e-6);
+                for x in &mut e { *x /= n; }
+
+                let id = format!("{}-{:02}", topic.name, j);
+                docs.push(TDoc { id, text, embedding: e });
+            }
+        }
+
+        // Pack bundle
+        pack_bundle(&dir, &docs, dim, block_size);
+        let store = crate::VectorStore::open(&dir).expect("open bundle");
+        assert_eq!(store.size(), topics.len()*per_topic);
+        assert_eq!(store.dimensions(), dim);
+
+        // Helper: extract topic from id
+        let topic_of = |doc_id: u32| -> String { store.get_document(doc_id).unwrap().0.split('-').next().unwrap().to_string() };
+
+        // For each topic, build a vector query from the centroid and a BM25 query from 2-3 keywords
+        for (ti, topic) in topics.iter().enumerate() {
+            // Vector query
+            let qv = centroids[ti].clone();
+            let vres = store.search_vector(&qv, 10);
+            assert!(!vres.is_empty());
+            let top_topic = topic_of(vres[0].0);
+            assert_eq!(top_topic, topic.name, "vector top-1 should match topic");
+            let same_count = vres.iter().filter(|(id, _)| topic_of(*id) == topic.name).count();
+            assert!(same_count >= 7, "expected >=7/10 same-topic in vector search, got {}", same_count);
+
+            // BM25 query text from two keywords
+            let qtext = format!("{} {}", topic.keywords[0], topic.keywords[1]);
+            let bres = store.search_bm25(&qtext, 10);
+            assert!(!bres.is_empty());
+            let top_topic_b = topic_of(bres[0].0);
+            assert_eq!(top_topic_b, topic.name, "bm25 top-1 should match topic");
+            let same_count_b = bres.iter().filter(|(id, _)| topic_of(*id) == topic.name).count();
+            assert!(same_count_b >= 6, "expected >=6/10 same-topic in BM25, got {}", same_count_b);
+
+            // Hybrid query
+            let hres = store.search_hybrid(&qv, &qtext, 10, 0.5);
+            assert!(!hres.is_empty());
+            let top_topic_h = topic_of(hres[0].0);
+            assert_eq!(top_topic_h, topic.name, "hybrid top-1 should match topic");
+            let same_count_h = hres.iter().filter(|(id, _)| topic_of(*id) == topic.name).count();
+            assert!(same_count_h >= 7, "expected >=7/10 same-topic in hybrid, got {}", same_count_h);
         }
     }
 

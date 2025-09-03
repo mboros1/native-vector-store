@@ -55,6 +55,50 @@
                 "cwd": "${workspaceFolder}"
             },
             "dependsOn": "Build Node.js addon"
+        },
+        {
+            "label": "Rust: cargo build (workspace)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["build"],
+            "group": "build",
+            "options": { "cwd": "${workspaceFolder}/rust" },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "Rust: test nvs-core",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["test", "-p", "nvs-core"],
+            "group": "test",
+            "options": { "cwd": "${workspaceFolder}/rust" },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "Rust: test nvs-packer",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["test", "-p", "nvs-packer"],
+            "group": "test",
+            "options": { "cwd": "${workspaceFolder}/rust" },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "Rust: bench nvs-core",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["bench", "-p", "nvs-core"],
+            "group": "test",
+            "options": { "cwd": "${workspaceFolder}/rust" },
+            "problemMatcher": ["$rustc"]
+        },
+        {
+            "label": "Rust: run nvs-packer (samples/json)",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["run", "-p", "nvs-packer", "--release", "--", "${workspaceFolder}/samples/json", "--out", "${workspaceFolder}/nvs-bundle"],
+            "options": { "cwd": "${workspaceFolder}/rust" },
+            "problemMatcher": ["$rustc"]
         }
     ]
 }

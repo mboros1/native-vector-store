@@ -15,6 +15,29 @@
             "preLaunchTask": "Build C++ test"
         },
         {
+            "name": "Rust: Debug nvs-packer",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["run", "--package", "nvs-packer", "--bin", "nvs-packer", "--no-default-features"],
+                "filter": { "name": "nvs-packer", "kind": "bin" },
+                "cwd": "${workspaceFolder}/rust"
+            },
+            "args": ["${workspaceFolder}/samples/json", "--out", "${workspaceFolder}/nvs-bundle"],
+            "cwd": "${workspaceFolder}/rust",
+            "env": {}
+        },
+        {
+            "name": "Rust: Debug nvs-core tests",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": ["test", "--package", "nvs-core", "--", "--nocapture"],
+                "cwd": "${workspaceFolder}/rust"
+            },
+            "cwd": "${workspaceFolder}/rust"
+        },
+        {
             "name": "Debug Node.js test",
             "type": "node",
             "request": "launch",

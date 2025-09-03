@@ -57,3 +57,7 @@ rust/**/target/
 rust/**/.cargo-ok
 rust/**/.rustc_info.json
 rust/**/.criterion/
+
+out_bundle/
+out_corpus/
+out_queries.json
