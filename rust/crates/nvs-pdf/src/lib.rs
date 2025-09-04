@@ -1,6 +1,7 @@
 pub mod extract;
 pub mod chunker;
 pub mod json;
+// pdfium binding handled within extractor for now
 
 use anyhow::Result;
 use std::path::Path;
@@ -37,25 +38,42 @@ pub struct ChunkStats {
     pub pages: usize,
     pub chunks: usize,
     pub extract_ms: u128,
+    pub extract_bind_open_ms: u128,
+    pub extract_pages_ms: u128,
     pub chunk_ms: u128,
     pub total_ms: u128,
+    // Breakdown of chunking stages
+    pub annotate_ms: u128,
+    pub group_ms: u128,
+    pub pack_ms: u128,
+    pub overlap_ms: u128,
+    pub merge_ms: u128,
+    pub split_ms: u128,
+    pub final_ms: u128,
 }
 
 pub fn parse_to_chunks_with_stats(pdf_path: &Path, opts: &ChunkOptions) -> Result<(Vec<chunker::Chunk>, ChunkStats)> {
     use std::time::Instant;
     let t0 = Instant::now();
     let tokenizer = GreedyTokenizer::from_cl100k_bin();
-    let t1 = Instant::now();
-    let pages = extract::extract_text_pages(pdf_path, opts.page_limit, opts.thread_count)?;
-    let t2 = Instant::now();
-    let chunks = chunker::chunk_pages(&pages, &tokenizer, opts);
+    let (pages, estats) = extract::extract_text_pages_with_stats(pdf_path, opts.page_limit, opts.thread_count)?;
+    let (chunks, cstats) = chunker::chunk_pages_with_stats(&pages, &tokenizer, opts);
     let t3 = Instant::now();
     let stats = ChunkStats {
         pages: pages.len(),
         chunks: chunks.len(),
-        extract_ms: (t2 - t1).as_millis(),
-        chunk_ms: (t3 - t2).as_millis(),
+        extract_ms: estats.total_ms,
+        extract_bind_open_ms: estats.bind_open_ms,
+        extract_pages_ms: estats.pages_ms,
+        chunk_ms: cstats.total_ms,
         total_ms: (t3 - t0).as_millis(),
+        annotate_ms: cstats.annotate_ms,
+        group_ms: cstats.group_ms,
+        pack_ms: cstats.pack_ms,
+        overlap_ms: cstats.overlap_ms,
+        merge_ms: cstats.merge_ms,
+        split_ms: cstats.split_ms,
+        final_ms: cstats.final_ms,
     };
     Ok((chunks, stats))
 }

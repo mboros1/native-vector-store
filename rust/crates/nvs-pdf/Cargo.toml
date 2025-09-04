@@ -23,5 +23,10 @@ xxhash-rust = { version = "0.8", features = ["xxh64"] }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 tokenmonster = { path = "../tokenmonster" }
+rayon = "1"
+once_cell = "1"
+num_cpus = "1"
+indicatif = "0.17"
+crossbeam-channel = "0.5"
 
 [dev-dependencies]

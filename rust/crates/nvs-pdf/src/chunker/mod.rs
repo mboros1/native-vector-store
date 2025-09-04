@@ -2,6 +2,7 @@
 
 use crate::ChunkOptions;
 use tokenmonster::GreedyTokenizer;
+use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub struct Chunk {
@@ -36,6 +37,61 @@ pub fn chunk_pages(pages: &[(String, i32)], tokenizer: &GreedyTokenizer, opts: &
     chunks = split_oversized(chunks, opts.max_tokens, tokenizer);
     chunks = final_merge(chunks, opts.min_tokens, opts.max_tokens);
     chunks
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct ChunkerStats {
+    pub annotate_ms: u128,
+    pub group_ms: u128,
+    pub pack_ms: u128,
+    pub overlap_ms: u128,
+    pub merge_ms: u128,
+    pub split_ms: u128,
+    pub final_ms: u128,
+    pub total_ms: u128,
+}
+
+pub fn chunk_pages_with_stats(pages: &[(String, i32)], tokenizer: &GreedyTokenizer, opts: &ChunkOptions) -> (Vec<Chunk>, ChunkerStats) {
+    let t0 = Instant::now();
+    let ta = Instant::now();
+    let annotated = annotate_lines(pages, tokenizer);
+    let ta_ms = ta.elapsed().as_millis();
+
+    let tg = Instant::now();
+    let semantic_units = group_semantic_units(&annotated);
+    let tg_ms = tg.elapsed().as_millis();
+
+    let tp = Instant::now();
+    let mut chunks = pack_initial_chunks(&semantic_units, opts.max_tokens);
+    let tp_ms = tp.elapsed().as_millis();
+
+    let to = Instant::now();
+    add_overlap(&mut chunks, opts.overlap_tokens, tokenizer);
+    let to_ms = to.elapsed().as_millis();
+
+    let tm = Instant::now();
+    chunks = merge_small_chunks(chunks, opts.min_tokens, opts.max_tokens);
+    let tm_ms = tm.elapsed().as_millis();
+
+    let ts = Instant::now();
+    chunks = split_oversized(chunks, opts.max_tokens, tokenizer);
+    let ts_ms = ts.elapsed().as_millis();
+
+    let tf = Instant::now();
+    chunks = final_merge(chunks, opts.min_tokens, opts.max_tokens);
+    let tf_ms = tf.elapsed().as_millis();
+
+    let stats = ChunkerStats {
+        annotate_ms: ta_ms,
+        group_ms: tg_ms,
+        pack_ms: tp_ms,
+        overlap_ms: to_ms,
+        merge_ms: tm_ms,
+        split_ms: ts_ms,
+        final_ms: tf_ms,
+        total_ms: t0.elapsed().as_millis(),
+    };
+    (chunks, stats)
 }
 
 fn annotate_lines(pages: &[(String, i32)], tokenizer: &GreedyTokenizer) -> Vec<AnnotatedLine> {
