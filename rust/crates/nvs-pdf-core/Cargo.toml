@@ -1,0 +1,18 @@
+[package]
+name = "nvs-pdf-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Fast-path, text-only PDF utilities (probe + future parser)"
+
+[lib]
+name = "nvs_pdf_core"
+path = "src/lib.rs"
+
+[dependencies]
+memmap2 = "0.9"
+regex = { version = "1", default-features = false, features = ["perf", "unicode"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+miniz_oxide = "0.7"

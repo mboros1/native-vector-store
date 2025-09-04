@@ -4,6 +4,7 @@ members = [
     "crates/nvs-packer",
     "crates/tokenmonster",
     "crates/nvs-pdf",
+    "crates/nvs-pdf-core",
 ]
 
 resolver = "2"
