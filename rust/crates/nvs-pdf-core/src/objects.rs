@@ -52,6 +52,10 @@ impl PdfDoc {
             i += 1;
         }
         let mut doc = PdfDoc { data: hay.to_vec(), objects, inline_objects: OrderedMap::new() };
+        // Populate additional object ranges from any XRef streams
+        doc.populate_from_xref_streams();
+        // Also try parsing from startxref pointers (handles files with no textual obj scan hits)
+        doc.populate_from_startxref();
         doc.expand_object_streams()?;
         Ok(doc)
     }
@@ -70,9 +74,31 @@ impl PdfDoc {
         let keys: Vec<_> = self.objects.keys().cloned().collect();
         for (obj, gen) in keys {
             if let Some(range) = self.objects.get(&(obj, gen)).cloned() {
-                if let Ok(PdfValue::Stream{ dict, data }) = parse_indirect_object(&self.data[range]) {
+                if let Ok(PdfValue::Stream{ dict, data }) = self.parse_object_at_range(range.clone()) {
                     if dict.get("Type").and_then(|v| as_name(v)) == Some("ObjStm") {
-                        let decoded = crate::streams::get_stream_data_with_filters(&dict, data)?;
+                        // Try primary decode
+                        let decoded = match crate::streams::get_stream_data_with_filters(&dict, data.clone()) {
+                            Ok(v) => v,
+                            Err(_e1) => {
+                                // Try scan-based slice
+                                if let Ok(PdfValue::Stream{ dict: d2, data: dbytes }) = self.parse_stream_at_range_scan(range.clone()) {
+                                    match crate::streams::get_stream_data_with_filters(&d2, dbytes.clone()) {
+                                        Ok(v2) => v2,
+                                        Err(_e2) => {
+                                            // Brute force around declared Length
+                                            if let Some(PdfValue::Int(len)) = dict.get("Length") {
+                                                if let Some(v3) = self.bruteforce_flate_slice(range.clone(), *len as usize, &dict) { v3 }
+                                                else { return Err(anyhow!("ObjStm decode failed after brute-force")); }
+                                            } else {
+                                                return Err(anyhow!("ObjStm decode failed and no Length to brute-force"));
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    return Err(anyhow!("ObjStm decode failed and scan fallback unavailable"));
+                                }
+                            }
+                        };
                         let n = dict.get("N").and_then(|v| match v { PdfValue::Int(i) => Some(*i as usize), _=>None }).ok_or_else(|| anyhow!("ObjStm missing N"))?;
                         let first = dict.get("First").and_then(|v| match v { PdfValue::Int(i) => Some(*i as usize), _=>None }).ok_or_else(|| anyhow!("ObjStm missing First"))?;
                         if first > decoded.len() { continue; }
@@ -104,6 +130,233 @@ impl PdfDoc {
         }
         Ok(())
     }
+
+    fn populate_from_xref_streams(&mut self) {
+        // Iterate a snapshot of current objects; new ones will be inserted as discovered
+        let keys: Vec<_> = self.objects.keys().cloned().collect();
+        for (obj, gen) in keys {
+            if let Some(range) = self.objects.get(&(obj, gen)).cloned() {
+                if let Ok(PdfValue::Stream{ dict, data }) = self.parse_object_at_range(range.clone()) {
+                    if dict.get("Type").and_then(|v| as_name(v)) == Some("XRef") {
+                        if let Ok(decoded) = crate::streams::get_stream_data_with_filters(&dict, data) {
+                            self.parse_xref_stream_entries(&dict, &decoded);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn parse_object_at_range(&self, bytes_range: Range<usize>) -> Result<PdfValue> {
+        let bytes = &self.data[bytes_range.clone()];
+        // Find 'obj'
+        let mut i = 0usize;
+        if let Some(pos) = find_token(bytes, 0, b"obj") { i = pos + 3; }
+        i = skip_ws(bytes, i);
+        let (val, j) = parse_value(bytes, i)?;
+        let j = skip_ws(bytes, j);
+        if bytes.get(j..j+6) == Some(b"stream") {
+            let mut k = j + 6;
+            if bytes.get(k) == Some(&b'\r') && bytes.get(k+1) == Some(&b'\n') { k += 2; }
+            else if bytes.get(k) == Some(&b'\n') { k += 1; }
+            if let PdfValue::Dict(ref d) = val {
+                if let Some(len) = self.resolve_length(d) {
+                    let end = k.saturating_add(len);
+                    if end <= bytes.len() {
+                        let data = bytes[k..end].to_vec();
+                        return Ok(PdfValue::Stream { dict: d.clone(), data });
+                    }
+                }
+            }
+            // fallback to find 'endstream'
+            if let Some(end) = find_token(bytes, k, b"endstream") {
+                let data = bytes[k..end].to_vec();
+                if let PdfValue::Dict(dict) = val { return Ok(PdfValue::Stream { dict, data }); } else { return Err(anyhow!("stream without dict")); }
+            } else { return Err(anyhow!("unterminated stream")); }
+        }
+        Ok(val)
+    }
+
+    fn parse_stream_at_range_scan(&self, bytes_range: Range<usize>) -> Result<PdfValue> {
+        let bytes = &self.data[bytes_range.clone()];
+        let mut i = 0usize;
+        if let Some(pos) = find_token(bytes, 0, b"obj") { i = pos + 3; }
+        i = skip_ws(bytes, i);
+        let (val, j) = parse_value(bytes, i)?;
+        let j = skip_ws(bytes, j);
+        if bytes.get(j..j+6) == Some(b"stream") {
+            let mut k = j + 6;
+            if bytes.get(k) == Some(&b'\r') && bytes.get(k+1) == Some(&b'\n') { k += 2; }
+            else if bytes.get(k) == Some(&b'\n') { k += 1; }
+            // Find the endobj and select the last endstream before it
+            if let Some(endobj) = find_token(bytes, k, b"endobj") {
+                let mut search = k;
+                let mut last_es = None;
+                while let Some(es) = find_token(bytes, search, b"endstream") {
+                    if es >= endobj { break; }
+                    last_es = Some(es); search = es + 9;
+                }
+                if let Some(end) = last_es {
+                    let data = bytes[k..end].to_vec();
+                    if let PdfValue::Dict(dict) = val { return Ok(PdfValue::Stream { dict, data }); }
+                    else { return Err(anyhow!("scan stream without dict")); }
+                }
+            }
+            // Fallback to first endstream if endobj not found
+            if let Some(end) = find_token(bytes, k, b"endstream") {
+                let data = bytes[k..end].to_vec();
+                if let PdfValue::Dict(dict) = val { return Ok(PdfValue::Stream { dict, data }); }
+                else { return Err(anyhow!("scan stream without dict")); }
+            }
+            return Err(anyhow!("scan stream: endstream/endobj not found"));
+        }
+        Ok(val)
+    }
+
+    fn bruteforce_flate_slice(&self, bytes_range: Range<usize>, declared_len: usize, dict: &BTreeMap<String, PdfValue>) -> Option<Vec<u8>> {
+        let bytes = &self.data[bytes_range.clone()];
+        // find stream start
+        let mut i = 0usize; if let Some(pos) = find_token(bytes, 0, b"obj") { i = pos + 3; }
+        i = skip_ws(bytes, i);
+        let (_val, j) = parse_value(bytes, i).ok()?; let j = skip_ws(bytes, j);
+        if bytes.get(j..j+6) != Some(b"stream") { return None; }
+        let mut k = j + 6; if bytes.get(k) == Some(&b'\r') && bytes.get(k+1) == Some(&b'\n') { k += 2; } else if bytes.get(k) == Some(&b'\n') { k += 1; }
+        // Try end positions around declared_len within +/- 128
+        let start_end = k + declared_len;
+        let mut deltas: Vec<isize> = (-128..=128).step_by(1).collect();
+        // Try exact first
+        deltas.sort_by_key(|d| d.abs());
+        for d in deltas {
+            let end = if d.is_negative() { start_end.saturating_sub(d.unsigned_abs() as usize) } else { start_end.saturating_add(d as usize) };
+            if end <= bytes.len() && end > k + 8 {
+                let slice = &bytes[k..end];
+                // Try flate tolerant directly for performance
+                if let Ok(v) = crate::filters::decode_flate_tolerant(slice) { return Some(v); }
+            }
+        }
+        None
+    }
+
+    fn resolve_length(&self, dict: &BTreeMap<String, PdfValue>) -> Option<usize> {
+        match dict.get("Length")? {
+            PdfValue::Int(i) => Some(*i as usize),
+            PdfValue::Real(f) => Some(*f as usize),
+            PdfValue::Ref(o,g) => {
+                if let Ok(v) = self.get_object(*o, *g) {
+                    match v { PdfValue::Int(i)=>Some(i as usize), PdfValue::Real(f)=>Some(f as usize), _=>None }
+                } else { None }
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_xref_stream_entries(&mut self, dict: &BTreeMap<String, PdfValue>, data: &[u8]) {
+        // Parse W array (three integers)
+        let w = match dict.get("W").and_then(|v| as_array(v)) {
+            Some(arr) if arr.len() >= 3 => arr.iter().take(3).map(|v| match v { PdfValue::Int(i)=>*i as usize, PdfValue::Real(f)=>(*f as i64) as usize, _=>0 }).collect::<Vec<_>>(),
+            _ => return,
+        };
+        let w0 = *w.get(0).unwrap_or(&0); let w1 = *w.get(1).unwrap_or(&0); let w2 = *w.get(2).unwrap_or(&0);
+        // Index array: pairs of (start, count); default [0 Size]
+        let mut indexes: Vec<(usize, usize)> = Vec::new();
+        if let Some(idx) = dict.get("Index").and_then(|v| as_array(v)) {
+            let mut it = idx.iter();
+            while let (Some(a), Some(b)) = (it.next(), it.next()) {
+                let start = match a { PdfValue::Int(i)=>*i as usize, PdfValue::Real(f)=>*f as usize, _=>0 };
+                let count = match b { PdfValue::Int(i)=>*i as usize, PdfValue::Real(f)=>*f as usize, _=>0 };
+                if count>0 { indexes.push((start, count)); }
+            }
+        } else if let Some(PdfValue::Int(sz)) = dict.get("Size") { indexes.push((0, *sz as usize)); }
+        if indexes.is_empty() { return; }
+        // Walk entries
+        let mut off = 0usize;
+        for (start, count) in indexes {
+            for i in 0..count {
+                if off + w0 + w1 + w2 > data.len() { return; }
+                let t = if w0==0 { 1u64 } else { read_uint_be(&data[off..off+w0]) }; off += w0;
+                let f1 = if w1==0 { 0u64 } else { read_uint_be(&data[off..off+w1]) }; off += w1;
+                let f2 = if w2==0 { 0u64 } else { read_uint_be(&data[off..off+w2]) }; off += w2;
+                let objnum = (start + i) as u32;
+                match t {
+                    0 => { /* free */ }
+                    1 => { // uncompressed object at offset f1, gen f2
+                        let offset = f1 as usize; let gen = (f2 as u16);
+                        self.add_object_range_if_missing(objnum, gen, offset);
+                    }
+                    2 => { // compressed object in object stream f1 at index f2
+                        // Ensure the object stream itself is present; will be expanded later
+                        let objstm = f1 as u32; self.add_object_range_if_any(objstm);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn add_object_range_if_any(&mut self, obj: u32) {
+        // If object exists, do nothing; otherwise try to locate via textual scan (best effort)
+        if self.objects.keys().any(|(o,_g)| *o == obj) { return; }
+        // best effort: search for pattern "<obj> 0 obj" from start
+        let needle = format!("{} 0 obj", obj);
+        if let Some(pos) = find_token(&self.data, 0, needle.as_bytes()) {
+            if let Some(end) = find_token(&self.data, pos, b"endobj") { self.objects.insert((obj, 0u16), pos..end+6); }
+        }
+    }
+
+    fn add_object_range_if_missing(&mut self, obj: u32, gen: u16, offset: usize) {
+        if self.objects.contains_key(&(obj, gen)) { return; }
+        if offset >= self.data.len() { return; }
+        // Verify this looks like an object header at offset
+        // Scan forward slightly to find "obj"
+        let mut i = offset;
+        let end = self.data.len();
+        // Skip whitespace
+        while i < end && is_ws(self.data[i]) { i+=1; }
+        // Find endobj
+        if let Some(endpos) = find_token(&self.data, i, b"endobj") {
+            self.objects.insert((obj, gen), i..endpos+6);
+        }
+    }
+}
+
+fn read_uint_be(slice: &[u8]) -> u64 { let mut v=0u64; for &b in slice { v = (v<<8) | (b as u64); } v }
+
+impl PdfDoc {
+    fn populate_from_startxref(&mut self) {
+        // Find last 'startxref' in file
+        let mut pos = None;
+        let mut i = self.data.len().saturating_sub(9);
+        while i > 0 {
+            if self.data[i..].starts_with(b"startxref") { pos = Some(i); break; }
+            i -= 1;
+        }
+        let Some(start) = pos else { return };
+        // Parse number after startxref
+        let mut j = start + b"startxref".len();
+        while j < self.data.len() && is_ws(self.data[j]) { j+=1; }
+        let num_start = j; while j < self.data.len() && self.data[j].is_ascii_digit() { j+=1; }
+        if j == num_start { return; }
+        let off_str = String::from_utf8_lossy(&self.data[num_start..j]).to_string();
+        let Ok(mut off) = off_str.parse::<usize>() else { return };
+        let mut visited = std::collections::BTreeSet::new();
+        let mut queue = vec![off];
+        while let Some(offset) = queue.pop() {
+            if !visited.insert(offset) { continue; }
+            if offset >= self.data.len() { continue; }
+            if let Ok(val) = parse_indirect_object(&self.data[offset..]) {
+                if let PdfValue::Stream{ dict, data } = val {
+                    if dict.get("Type").and_then(|v| as_name(v)) == Some("XRef") {
+                        if let Ok(decoded) = crate::streams::get_stream_data_with_filters(&dict, data) {
+                            self.parse_xref_stream_entries(&dict, &decoded);
+                            // Follow Prev/XRefStm if present
+                            if let Some(PdfValue::Int(prev)) = dict.get("Prev") { queue.push(*prev as usize); }
+                            if let Some(PdfValue::Int(xrs)) = dict.get("XRefStm") { queue.push(*xrs as usize); }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Parsing primitives reused across modules
@@ -117,6 +370,17 @@ pub(crate) fn parse_indirect_object(bytes: &[u8]) -> Result<PdfValue> {
         let mut k = j + 6;
         if bytes.get(k) == Some(&b'\r') && bytes.get(k+1) == Some(&b'\n') { k += 2; }
         else if bytes.get(k) == Some(&b'\n') { k += 1; }
+        // Use declared Length if present
+        if let PdfValue::Dict(ref d) = val {
+            if let Some(PdfValue::Int(len)) = d.get("Length") {
+                let end = k.saturating_add(*len as usize);
+                if end <= bytes.len() {
+                    let data = bytes[k..end].to_vec();
+                    let dict = d.clone();
+                    return Ok(PdfValue::Stream { dict, data });
+                }
+            }
+        }
         if let Some(end) = find_token(bytes, k, b"endstream") {
             let data = bytes[k..end].to_vec();
             if let PdfValue::Dict(dict) = val { return Ok(PdfValue::Stream { dict, data }); } else { return Err(anyhow!("stream without dict")); }
