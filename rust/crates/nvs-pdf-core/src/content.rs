@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::objects::{PdfDoc, PdfValue, as_dict, as_name, resolve, parse_string, parse_name, parse_number, skip_ws, is_alpha};
 use crate::streams::get_stream_data_with_filters;
 use crate::fonts::{parse_tounicode_cmap, ToUnicodeMap, map_bytes_with_tounicode_or_base};
+use std::time::Instant;
 
 #[derive(Clone, Default)]
 struct FontInfo {
@@ -13,10 +14,12 @@ struct FontInfo {
 fn append_bytes_as_text(out: &mut String, s: &[u8]) { match String::from_utf8(s.to_vec()) { Ok(t) => out.push_str(&t), Err(_) => { for &b in s { out.push(b as char); } } } }
 
 pub fn extract_page_text(doc: &PdfDoc, page: (u32,u16)) -> Result<String> {
+    let t_page = Instant::now();
     let val = doc.get_object(page.0, page.1)?;
     let dict = if let Some(d) = as_dict(&val) { d } else { anyhow::bail!("page not dict"); };
     let mut xobjects: BTreeMap<String, PdfValue> = BTreeMap::new();
     let mut fonts: BTreeMap<String, FontInfo> = BTreeMap::new();
+    let t_res = Instant::now();
     if let Some(res) = dict.get("Resources").and_then(|v| as_dict(v)) {
         if let Some(xobj) = res.get("XObject").and_then(|v| as_dict(v)) { for (k, v) in xobj { xobjects.insert(k.clone(), v.clone()); } }
         if let Some(fdict) = res.get("Font").and_then(|v| as_dict(v)) {
@@ -28,7 +31,11 @@ pub fn extract_page_text(doc: &PdfDoc, page: (u32,u16)) -> Result<String> {
                     if let Some(tu) = fd.get("ToUnicode") {
                         let rf2 = resolve(doc, tu, 0).unwrap_or_else(|_| tu.clone());
                         if let PdfValue::Stream{ dict: sdict, data } = rf2 {
-                            if let Ok(dec) = get_stream_data_with_filters(&sdict, data) { fi.to_unicode = Some(parse_tounicode_cmap(&dec)); }
+                            if let Ok(dec) = get_stream_data_with_filters(&sdict, data) {
+                                let tf = Instant::now();
+                                fi.to_unicode = Some(parse_tounicode_cmap(&dec));
+                                crate::stats::add_fonts_duration(tf.elapsed().as_millis());
+                            }
                         }
                     }
                     fonts.insert(name.clone(), fi);
@@ -36,10 +43,12 @@ pub fn extract_page_text(doc: &PdfDoc, page: (u32,u16)) -> Result<String> {
             }
         }
     }
+    crate::stats::add_resources_duration(t_res.elapsed().as_nanos() as u128);
     let contents = match dict.get("Contents") {
         Some(v) => v,
         None => return Ok(String::new()), // treat pages without content as empty text, not an error
     };
+    let t_streams = Instant::now();
     let mut buffers: Vec<u8> = Vec::new();
     match contents {
         PdfValue::Stream { dict, data } => { let dec = get_stream_data_with_filters(dict, data.clone())?; buffers.extend_from_slice(&dec); }
@@ -47,8 +56,15 @@ pub fn extract_page_text(doc: &PdfDoc, page: (u32,u16)) -> Result<String> {
         PdfValue::Ref(obj, gen) => { let vv = doc.get_object(*obj, *gen)?; if let PdfValue::Stream{ dict, data } = vv { let dec = get_stream_data_with_filters(&dict, data)?; buffers.extend_from_slice(&dec); } }
         _ => {}
     }
+    crate::stats::add_streams_duration(t_streams.elapsed().as_nanos() as u128);
+    let ti = Instant::now();
     let text = interpret_text_with_resources(doc, &xobjects, &fonts, &buffers)?;
-    Ok(normalize_page_text(&text))
+    crate::stats::add_interpret_duration(ti.elapsed().as_nanos() as u128);
+    let t_norm = Instant::now();
+    let norm = normalize_page_text(&text);
+    crate::stats::add_normalize_duration(t_norm.elapsed().as_nanos() as u128);
+    crate::stats::add_page_total_duration(t_page.elapsed().as_nanos() as u128);
+    Ok(norm)
 }
 
 #[derive(Clone, Default, serde::Serialize)]
@@ -218,7 +234,11 @@ fn interpret_text_with_resources_depth(doc: &PdfDoc, xobjects: &BTreeMap<String,
                                                     if let Some(tu) = fd.get("ToUnicode") {
                                                         let rf2 = resolve(doc, tu, 0).unwrap_or_else(|_| tu.clone());
                                                         if let PdfValue::Stream{ dict: sdict, data } = rf2 {
-                                                            if let Ok(dec) = get_stream_data_with_filters(&sdict, data) { fi.to_unicode = Some(parse_tounicode_cmap(&dec)); }
+                                                            if let Ok(dec) = get_stream_data_with_filters(&sdict, data) {
+                                                                let tf = Instant::now();
+                                                                fi.to_unicode = Some(parse_tounicode_cmap(&dec));
+                                                                crate::stats::add_fonts_duration(tf.elapsed().as_millis());
+                                                            }
                                                         }
                                                     }
                                                     sub_fonts.insert(name.clone(), fi);
@@ -226,7 +246,9 @@ fn interpret_text_with_resources_depth(doc: &PdfDoc, xobjects: &BTreeMap<String,
                                             }
                                         }
                                     }
+                                    let ti = Instant::now();
                                     let sub = interpret_text_with_resources_depth(doc, &sub_xobjs, &sub_fonts, &dec, depth+1)?;
+                                    crate::stats::add_interpret_duration(ti.elapsed().as_millis());
                                     if !sub.is_empty() { out.push_str(&sub); if !out.ends_with('\n') { out.push('\n'); } }
                                 }
                             }

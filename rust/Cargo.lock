@@ -770,6 +770,7 @@ dependencies = [
  "clap",
  "crossbeam-channel",
  "indicatif",
+ "memmap2",
  "num_cpus",
  "nvs-pdf-core",
  "once_cell",

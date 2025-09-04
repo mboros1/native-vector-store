@@ -29,5 +29,6 @@ num_cpus = "1"
 indicatif = "0.17"
 nvs-pdf-core = { path = "../nvs-pdf-core" }
 crossbeam-channel = "0.5"
+memmap2 = "0.9"
 
 [dev-dependencies]

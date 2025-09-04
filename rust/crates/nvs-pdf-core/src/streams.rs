@@ -1,4 +1,5 @@
 use crate::objects::PdfValue;
+use std::time::Instant;
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
 
@@ -27,6 +28,7 @@ pub fn get_stream_data_with_filters(dict: &BTreeMap<String,PdfValue>, data: Vec<
 }
 
 fn apply_filter_with_params(name: &str, data: Vec<u8>, decode_parms: Option<&PdfValue>, index: usize) -> Result<Vec<u8>> {
+    let tdec = Instant::now();
     let mut decoded = match name {
         "FlateDecode" => match crate::filters::decode_flate(&data) {
             Ok(v) => v,
@@ -59,15 +61,18 @@ fn apply_filter_with_params(name: &str, data: Vec<u8>, decode_parms: Option<&Pdf
             if let Some(dp) = get_decode_params_for_index(params, index) {
                 let predictor = dp.get("Predictor").and_then(as_int).unwrap_or(1) as u32;
                 if predictor > 1 {
+                    let tp = Instant::now();
                     let colors = dp.get("Colors").and_then(as_int).unwrap_or(1) as u32;
                     let bpc = dp.get("BitsPerComponent").and_then(as_int).unwrap_or(8) as u32;
                     let columns = dp.get("Columns").and_then(as_int).unwrap_or(1) as u32;
                     decoded = apply_predictor(&decoded, predictor, colors, bpc, columns)
                         .map_err(|e| anyhow!("Predictor apply failed (pred={}, cols={}, colors={}, bpc={}, in_len={}): {}", predictor, columns, colors, bpc, decoded.len(), e))?;
+                    crate::stats::add_decode_duration(tp.elapsed().as_nanos() as u128);
                 }
             }
         }
     }
+    crate::stats::add_decode_duration(tdec.elapsed().as_nanos() as u128);
     Ok(decoded)
 }
 

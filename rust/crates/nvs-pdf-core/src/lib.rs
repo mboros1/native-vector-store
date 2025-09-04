@@ -9,6 +9,7 @@ pub mod pages;
 pub mod streams;
 pub mod content;
 pub mod fonts;
+pub mod stats;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct ProbeResult {
@@ -106,19 +107,91 @@ pub fn summarize(results: &[ProbeResult]) -> ProbeSummary {
 // Fast path stub: attempt to extract pages using Rust fast-path. Returns
 // Ok(Some(pages)) when supported, Ok(None) to signal fallback to PDFium.
 pub fn fast_extract_pages(path: &Path, page_limit: Option<usize>) -> Result<Option<Vec<(String, i32)>>> {
-    let f = std::fs::File::open(path)?;
-    let mmap = unsafe { memmap2::MmapOptions::new().map(&f)? };
+    Ok(fast_extract_pages_with_stats(path, page_limit)?.0)
+}
+
+#[derive(Debug, Default, Serialize, Clone)]
+pub struct FastExtractBreakdown {
+    pub io_ms: u128,
+    pub build_ms: u128,
+    pub tree_ms: u128,
+    pub pages_ms: u128,
+    pub interpret_ms: u128,
+    pub decode_ms: u128,
+    pub fonts_ms: u128,
+    pub resources_ms: u128,
+    pub streams_ms: u128,
+    pub normalize_ms: u128,
+    pub total_ms: u128,
+}
+
+pub fn fast_extract_pages_with_stats(path: &Path, page_limit: Option<usize>) -> Result<(Option<Vec<(String, i32)>>, FastExtractBreakdown)> {
+    use memmap2::MmapOptions;
+    use std::time::Instant;
+    stats::reset();
+    let t0 = Instant::now();
+    let ti = Instant::now();
+    let f = std::fs::File::open(path)?; let mmap = unsafe { MmapOptions::new().map(&f)? };
     let pr = probe_pdf_bytes(&path.display().to_string(), &mmap);
-    if pr.has_encrypt { return Ok(None); }
-    // Build doc by scanning objects (fast-path)
+    let io_ms = ti.elapsed().as_millis();
+    if pr.has_encrypt { return Ok((None, FastExtractBreakdown { total_ms: t0.elapsed().as_millis(), ..Default::default() })); }
+    let tb = Instant::now();
     let doc = parser::PdfDoc::from_bytes(&mmap)?;
-    let mut pages_out = Vec::new();
-    // Prefer page tree traversal; fallback to direct scan
-    let mut page_ids = match parser::collect_pages_via_tree(&doc) {
-        Ok(v) if !v.is_empty() => v,
-        _ => parser::collect_page_object_ids(&doc),
-    };
+    let build_ms = tb.elapsed().as_millis();
+
+    let tt = Instant::now();
+    let ids_tree = pages::collect_pages_via_tree(&doc).ok();
+    let mut page_ids = if let Some(v)=ids_tree { v } else { pages::collect_page_object_ids(&doc) };
+    let tree_ms = tt.elapsed().as_millis();
     if let Some(limit) = page_limit { page_ids.truncate(limit); }
+    let mut pages_out = Vec::new();
+    let mut any_ok = false;
+    for (idx, id) in page_ids.into_iter().enumerate() {
+        let tp = Instant::now();
+        match parser::extract_page_text(&doc, id) {
+            Ok(txt) => { pages_out.push((txt, idx as i32)); any_ok = true; }
+            Err(_) => { /* skip page on fast path */ }
+        }
+        let dt = tp.elapsed().as_millis();
+        // interpreter time is added inside content module; ensure at least per-page overhead is included
+        stats::add_interpret_duration(0); let _ = dt; // touch dt to avoid warnings if unused in future extensions
+    }
+    let s = stats::snapshot();
+    // Convert nanos to millis (ceil) to avoid pervasive zeros from fast ops
+    let to_ms = |ns: u128| -> u128 { if ns == 0 { 0 } else { (ns + 999_999) / 1_000_000 } };
+    let out = if any_ok { Some(pages_out) } else { None };
+    let br = FastExtractBreakdown {
+        io_ms,
+        build_ms,
+        tree_ms,
+        pages_ms: to_ms(s.page_total_ns),
+        interpret_ms: to_ms(s.interpret_ns),
+        decode_ms: to_ms(s.decode_ns),
+        fonts_ms: to_ms(s.fonts_ns),
+        resources_ms: to_ms(s.resources_ns),
+        streams_ms: to_ms(s.streams_ns),
+        normalize_ms: to_ms(s.normalize_ns),
+        total_ms: t0.elapsed().as_millis(),
+    };
+    Ok((out, br))
+}
+
+// Variant that operates directly on provided bytes (skips file IO/mmapping).
+pub fn fast_extract_pages_from_bytes_with_stats(data: &[u8], page_limit: Option<usize>) -> Result<(Option<Vec<(String, i32)>>, FastExtractBreakdown)> {
+    use std::time::Instant;
+    stats::reset();
+    let t0 = Instant::now();
+    // No IO here; io_ms set to 0 in breakdown
+    let tb = Instant::now();
+    let doc = parser::PdfDoc::from_bytes(data)?;
+    let build_ms = tb.elapsed().as_millis();
+
+    let tt = Instant::now();
+    let ids_tree = pages::collect_pages_via_tree(&doc).ok();
+    let mut page_ids = if let Some(v)=ids_tree { v } else { pages::collect_page_object_ids(&doc) };
+    let tree_ms = tt.elapsed().as_millis();
+    if let Some(limit) = page_limit { page_ids.truncate(limit); }
+    let mut pages_out = Vec::new();
     let mut any_ok = false;
     for (idx, id) in page_ids.into_iter().enumerate() {
         match parser::extract_page_text(&doc, id) {
@@ -126,7 +199,23 @@ pub fn fast_extract_pages(path: &Path, page_limit: Option<usize>) -> Result<Opti
             Err(_) => { /* skip page on fast path */ }
         }
     }
-    if any_ok { Ok(Some(pages_out)) } else { Ok(None) }
+    let s = stats::snapshot();
+    let out = if any_ok { Some(pages_out) } else { None };
+    let to_ms = |ns: u128| -> u128 { if ns == 0 { 0 } else { (ns + 999_999) / 1_000_000 } };
+    let br = FastExtractBreakdown {
+        io_ms: 0,
+        build_ms,
+        tree_ms,
+        pages_ms: to_ms(s.page_total_ns),
+        interpret_ms: to_ms(s.interpret_ns),
+        decode_ms: to_ms(s.decode_ns),
+        fonts_ms: to_ms(s.fonts_ns),
+        resources_ms: to_ms(s.resources_ns),
+        streams_ms: to_ms(s.streams_ns),
+        normalize_ms: to_ms(s.normalize_ns),
+        total_ms: t0.elapsed().as_millis(),
+    };
+    Ok((out, br))
 }
 
 #[derive(serde::Serialize, Default, Clone)]
