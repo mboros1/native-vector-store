@@ -87,13 +87,19 @@ process_pdf() {
     local process_start=$(date +%s%N)
     
     # Run the chunk-pdf-cli tool
-    if timeout 120 "$CHUNK_CLI" \
+    if { [ -n "$TIMEOUT_CMD" ] && "$TIMEOUT_CMD" 120 "$CHUNK_CLI" \
         --input "$pdf_path" \
         --output "$output_path" \
         --max-chunk-size "$MAX_CHUNK_SIZE" \
         --min-chunk-size "$MIN_CHUNK_SIZE" \
         --overlap "$OVERLAP" \
-        > "$temp_log" 2>&1; then
+        > "$temp_log" 2>&1; } || { [ -z "$TIMEOUT_CMD" ] && "$CHUNK_CLI" \
+        --input "$pdf_path" \
+        --output "$output_path" \
+        --max-chunk-size "$MAX_CHUNK_SIZE" \
+        --min-chunk-size "$MIN_CHUNK_SIZE" \
+        --overlap "$OVERLAP" \
+        > "$temp_log" 2>&1; }; then
         
         local process_end=$(date +%s%N)
         local process_time=$((($process_end - $process_start) / 1000000)) # milliseconds
@@ -130,7 +136,9 @@ show_progress() {
 # Export functions for parallel processing
 export -f process_pdf
 export -f get_file_size
-export PDF_DIR OUTPUT_DIR CHUNK_CLI MAX_CHUNK_SIZE MIN_CHUNK_SIZE OVERLAP LOG_FILE FAILED_LIST
+export PDF_DIR OUTPUT_DIR CHUNK_CLI MAX_CHUNK_SIZE MIN_CHUNK_SIZE OVERLAP LOG_FILE FAILED_LIST TIMEOUT_CMD
+export -f process_pdf
+export -f get_file_size
 
 echo -e "${YELLOW}⏳ Processing $TOTAL_PDFS PDF files...${NC}"
 echo ""
@@ -330,6 +338,15 @@ if __name__ == "__main__":
     json_dir = sys.argv[1] if len(sys.argv) > 1 else "samples/json"
     analyze_chunks(json_dir)
 EOF
+# Detect timeout command (macOS often uses gtimeout from coreutils)
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD=timeout
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD=gtimeout
+else
+  TIMEOUT_CMD=""
+  echo -e "${YELLOW}⚠️  No 'timeout' found; proceeding without per-file timeout${NC}"
+fi
 
 chmod +x samples/inspect_chunks.py
 

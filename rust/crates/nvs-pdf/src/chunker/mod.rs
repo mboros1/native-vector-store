@@ -1,7 +1,7 @@
 mod util;
 
 use crate::ChunkOptions;
-use memchr::memchr;
+// use memchr::memchr; // reserved for future optimized scans
 use tokenmonster::GreedyTokenizer;
 
 #[derive(Clone, Debug)]
@@ -242,4 +242,3 @@ fn final_merge(chunks: Vec<Chunk>, min_tokens: usize, max_tokens: usize) -> Vec<
     }
     out
 }
-
