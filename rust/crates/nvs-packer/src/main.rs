@@ -651,16 +651,14 @@ fn write_meta_and_index(
                 }
                 map.serialize_entry("embedding", &d.embedding)?;
                 map.end()?;
+            } else if let Some(ref m) = d.meta {
+                // Write the remaining metadata object (may be empty)
+                let mut ser = serde_json::Serializer::new(&mut cur);
+                let mut map = ser.serialize_map(Some(m.len()))?;
+                for (k, v) in m.iter() { map.serialize_entry(k, v)?; }
+                map.end()?;
             } else {
-                if let Some(ref m) = d.meta {
-                    // Write the remaining metadata object (may be empty)
-                    let mut ser = serde_json::Serializer::new(&mut cur);
-                    let mut map = ser.serialize_map(Some(m.len()))?;
-                    for (k, v) in m.iter() { map.serialize_entry(k, v)?; }
-                    map.end()?;
-                } else {
-                    cur.extend_from_slice(b"{}");
-                }
+                cur.extend_from_slice(b"{}");
             }
             let meta_written = (cur.len() - meta_start) as u32;
             cur[len_pos..len_pos + 4].copy_from_slice(&meta_written.to_le_bytes());

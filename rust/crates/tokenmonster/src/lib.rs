@@ -105,7 +105,7 @@ impl TokenMonster {
     }
 
     pub fn count_tokens(&self, text: &str) -> usize { self.encode(text).len() }
-    pub fn estimate_tokens(text: &str) -> usize { (text.len() + 3) / 4 }
+    pub fn estimate_tokens(text: &str) -> usize { text.len().div_ceil(4) }
 }
 
 #[cfg(test)]

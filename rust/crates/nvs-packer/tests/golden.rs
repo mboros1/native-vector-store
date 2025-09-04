@@ -64,7 +64,7 @@ fn golden_bundle_fields_no_embeddings_in_meta() {
     let rows = files.vectors.rows.unwrap_or(0) as usize;
     let cols = files.vectors.cols.unwrap_or(0) as usize;
     let row_bytes = cols * if files.vectors.dtype.as_deref() == Some("f16") { 2 } else { 4 };
-    let stride = ((row_bytes + 63) / 64) * 64;
+    let stride = row_bytes.div_ceil(64) * 64;
     assert_eq!(vec_md.len() as usize, rows * stride);
 
     // doclen.u32 size equals num_docs * 4

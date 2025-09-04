@@ -275,7 +275,7 @@ pub fn decode_lzw_tolerant(input: &[u8]) -> Result<Vec<u8>> {
                 let mut new_entry = p.clone(); new_entry.push(entry[0]);
                 if (dict.len() as u16) == next_code { dict.push(new_entry); } else { dict.resize(next_code as usize + 1, Vec::new()); dict[next_code as usize] = new_entry; }
                 next_code = next_code.saturating_add(1);
-                let threshold = if ec_flag { (1u16 << code_size) - 1 } else { (1u16 << code_size) };
+                let threshold = if ec_flag { (1u16 << code_size) - 1 } else { 1u16 << code_size };
                 if next_code == threshold { code_size = (code_size + 1).min(12); }
             }
             prev = Some(entry);

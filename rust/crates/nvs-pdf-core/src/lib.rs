@@ -8,8 +8,13 @@ pub mod objects;
 pub mod pages;
 pub mod streams;
 pub mod content;
+pub mod resources;
+pub mod contents;
+pub mod interpret;
 pub mod fonts;
 pub mod stats;
+pub mod normalize;
+pub mod metrics;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct ProbeResult {
@@ -68,7 +73,6 @@ fn byte_count(hay: &[u8], needle: &[u8]) -> usize {
 pub fn probe_path(path: &std::path::Path) -> Result<ProbeResult> {
     use memmap2::MmapOptions;
     let f = std::fs::File::open(path)?;
-    let meta = f.metadata()?;
     let mmap = unsafe { MmapOptions::new().map(&f)? };
     Ok(probe_pdf_bytes(&path.display().to_string(), &mmap))
 }

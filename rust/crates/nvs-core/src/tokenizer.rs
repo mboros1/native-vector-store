@@ -183,9 +183,9 @@ pub fn preprocess_bm25(input: &str) -> String {
             '\x0C' => { out.push(' '); } // form feed
             '-' => {
                 // If hyphen is followed by a line break or whitespace+linebreak, treat as hyphenation -> space
-                let mut it = chars.clone();
+                let it = chars.clone();
                 let mut is_break = false; let mut consumed = 0;
-                while let Some(nc) = it.next() {
+                for nc in it {
                     if nc == '\n' { is_break = true; consumed += 1; break; }
                     else if nc == '\r' || nc == '\t' || nc == ' ' { consumed += 1; continue; }
                     else { break; }

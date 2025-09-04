@@ -280,7 +280,7 @@ impl PdfDoc {
                 match t {
                     0 => { /* free */ }
                     1 => { // uncompressed object at offset f1, gen f2
-                        let offset = f1 as usize; let gen = (f2 as u16);
+                        let offset = f1 as usize; let gen = f2 as u16;
                         self.add_object_range_if_missing(objnum, gen, offset);
                     }
                     2 => { // compressed object in object stream f1 at index f2
@@ -337,7 +337,7 @@ impl PdfDoc {
         let num_start = j; while j < self.data.len() && self.data[j].is_ascii_digit() { j+=1; }
         if j == num_start { return; }
         let off_str = String::from_utf8_lossy(&self.data[num_start..j]).to_string();
-        let Ok(mut off) = off_str.parse::<usize>() else { return };
+        let Ok(off) = off_str.parse::<usize>() else { return };
         let mut visited = std::collections::BTreeSet::new();
         let mut queue = vec![off];
         while let Some(offset) = queue.pop() {

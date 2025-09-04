@@ -2,6 +2,12 @@ use crate::objects::PdfValue;
 use std::time::Instant;
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
+#[allow(dead_code)]
+#[derive(Debug, Copy, Clone)]
+pub enum FilterKind { Flate, ASCII85, ASCIIHex, RunLength, LZW, Image, Other }
+#[allow(dead_code)]
+#[derive(Debug, Copy, Clone)]
+pub enum PredictorKind { None, TIFF2, PNG }
 
 pub fn get_stream_data_with_filters(dict: &BTreeMap<String,PdfValue>, data: Vec<u8>) -> Result<Vec<u8>> {
     let mut out = data;
@@ -33,7 +39,7 @@ fn apply_filter_with_params(name: &str, data: Vec<u8>, decode_parms: Option<&Pdf
         "FlateDecode" => match crate::filters::decode_flate(&data) {
             Ok(v) => v,
             Err(e) => crate::filters::decode_flate_tolerant(&data)
-                .map_err(|e2| anyhow!("FlateDecode failed (in_len={}): {}; tolerant={} ", data.len(), e, e2))?,
+                .map_err(|e2| anyhow!("filter=FlateDecode in_len={} err={} tolerant={} ", data.len(), e, e2))?,
         },
         "ASCII85Decode" => return crate::filters::decode_ascii85(&data),
         "ASCIIHexDecode" => return crate::filters::decode_asciihex(&data),
@@ -46,13 +52,13 @@ fn apply_filter_with_params(name: &str, data: Vec<u8>, decode_parms: Option<&Pdf
                 Err(e1) => match crate::filters::decode_lzw_with_params(&data, !early_change) {
                     Ok(v2) => v2,
                     Err(e2) => crate::filters::decode_lzw_tolerant(&data)
-                        .map_err(|e3| anyhow!("LZWDecode failed (in_len={}, EC1={}, EC0={}): {}", data.len(), e1, e2, e3))?,
+                        .map_err(|e3| anyhow!("filter=LZWDecode in_len={} EC1={} EC0={} tolerant={} ", data.len(), e1, e2, e3))?,
                 }
             }
         },
         // Image-only filters: pass through for text streams
         "DCTDecode" | "JPXDecode" | "JBIG2Decode" | "CCITTFaxDecode" => data,
-        other => data, // be permissive: unknown filter → pass-through
+        _other => data, // be permissive: unknown filter → pass-through
     };
 
     // Apply Predictor if specified (PNG/TIFF predictors) — only meaningful for Flate/LZW
@@ -66,7 +72,7 @@ fn apply_filter_with_params(name: &str, data: Vec<u8>, decode_parms: Option<&Pdf
                     let bpc = dp.get("BitsPerComponent").and_then(as_int).unwrap_or(8) as u32;
                     let columns = dp.get("Columns").and_then(as_int).unwrap_or(1) as u32;
                     decoded = apply_predictor(&decoded, predictor, colors, bpc, columns)
-                        .map_err(|e| anyhow!("Predictor apply failed (pred={}, cols={}, colors={}, bpc={}, in_len={}): {}", predictor, columns, colors, bpc, decoded.len(), e))?;
+                        .map_err(|e| anyhow!("predictor_apply failed pred={} cols={} colors={} bpc={} in_len={} err={}", predictor, columns, colors, bpc, decoded.len(), e))?;
                     crate::stats::add_decode_duration(tp.elapsed().as_nanos() as u128);
                 }
             }
@@ -175,4 +181,32 @@ fn paeth(a: u8, b: u8, c: u8) -> u8 {
     let pb = (p - b).abs();
     let pc = (p - c).abs();
     if pa <= pb && pa <= pc { a as u8 } else if pb <= pc { b as u8 } else { c as u8 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_predictor;
+
+    #[test]
+    fn tiff_predictor_horizontal_differencing() {
+        // Original row: [1,2,3,4]; encoded with horizontal differencing predictor 2 becomes [1,1,1,1]
+        let encoded = vec![1u8, 1, 1, 1];
+        let decoded = apply_predictor(&encoded, 2, 1, 8, 4).expect("tiff predictor");
+        assert_eq!(decoded, vec![1u8,2,3,4]);
+    }
+
+    #[test]
+    fn png_predictor_sub() {
+        // PNG Sub filter (1): each byte is difference to left. For original [1,2,3,4], encoded row is [filter=1, 1,1,1,1]
+        let encoded = vec![1u8, 1,1,1,1];
+        let decoded = apply_predictor(&encoded, 15, 1, 8, 4).expect("png sub predictor");
+        assert_eq!(decoded, vec![1u8,2,3,4]);
+    }
+
+    #[test]
+    fn png_predictor_none() {
+        let encoded = vec![0u8, 9,8,7,6];
+        let decoded = apply_predictor(&encoded, 15, 1, 8, 4).expect("png none predictor");
+        assert_eq!(decoded, vec![9u8,8,7,6]);
+    }
 }

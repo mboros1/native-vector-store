@@ -80,6 +80,28 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> ToUnicodeMap {
     map
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tounicode_beginbfchar_simple() {
+        let cmap = b"beginbfchar\n<01> <0041>\nendbfchar";
+        let tu = parse_tounicode_cmap(cmap);
+        let mapped = tu.map_bytes(&[0x01]);
+        assert_eq!(mapped, "A");
+    }
+
+    #[test]
+    fn tounicode_beginbfrange_first_only() {
+        // MVP maps start to dst; range fill not fully implemented, but start should work
+        let cmap = b"beginbfrange\n<10> <12> <0042>\nendbfrange"; // 0x10 -> 'B'
+        let tu = parse_tounicode_cmap(cmap);
+        let mapped = tu.map_bytes(&[0x10]);
+        assert_eq!(mapped, "B");
+    }
+}
+
 fn extract_hex(line: &str, idx: usize) -> Option<String> {
     // find the idx-th <...> token
     let mut n = 0;

@@ -1,6 +1,7 @@
 pub mod extract;
 pub mod chunker;
 pub mod json;
+pub mod orchestrator;
 // pdfium binding handled within extractor for now
 
 use anyhow::Result;

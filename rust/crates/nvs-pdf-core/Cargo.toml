@@ -9,6 +9,10 @@ description = "Fast-path, text-only PDF utilities (probe + future parser)"
 name = "nvs_pdf_core"
 path = "src/lib.rs"
 
+[features]
+default = []
+metrics = []
+
 [dependencies]
 memmap2 = "0.9"
 regex = { version = "1", default-features = false, features = ["perf", "unicode"] }
