@@ -99,7 +99,7 @@ fn annotate_lines(pages: &[(String, i32)], tokenizer: &GreedyTokenizer) -> Vec<A
     for (page_text, page) in pages.iter() {
         for line in page_text.split('\n') {
             let (kind, lvl) = detect_line_type(line);
-            let tokens = tokenizer.encode(line).len(); // TODO: count-only fast path
+            let tokens = tokenizer.count_tokens(line);
             out.push(AnnotatedLine {
                 text: line.to_owned(),
                 kind,
@@ -201,14 +201,19 @@ fn add_overlap(chunks: &mut [Chunk], overlap_tokens: usize, tokenizer: &GreedyTo
         let prev = &chunks[i - 1].text;
         let tail_chars = overlap_tokens.saturating_mul(5);
         let take = prev.len().min(tail_chars);
-        let mut overlap = prev[prev.len() - take..].to_string();
-        while tokenizer.encode(&overlap).len() > overlap_tokens && overlap.len() > 10 {
+        // Ensure start at a UTF-8 char boundary
+        let mut start = prev.len().saturating_sub(take);
+        while start < prev.len() && !prev.is_char_boundary(start) { start += 1; }
+        let mut overlap = prev[start..].to_string();
+        while tokenizer.count_tokens(&overlap) > overlap_tokens && overlap.len() > 10 {
             // Trim from the front in small slices to approach target without scanning full text
-            let step = 10.min(overlap.len());
+            let mut step = 10.min(overlap.len());
+            // drain at a char boundary
+            while step < overlap.len() && !overlap.is_char_boundary(step) { step += 1; }
             overlap.drain(..step);
         }
         // Prepend overlap to current chunk text, adjust count
-        let delta = tokenizer.encode(&overlap).len();
+        let delta = tokenizer.count_tokens(&overlap);
         chunks[i].text = format!("{}{}", overlap, chunks[i].text);
         chunks[i].token_count = chunks[i].token_count.saturating_add(delta);
     }
@@ -244,19 +249,76 @@ fn merge_small_chunks(chunks: Vec<Chunk>, min_tokens: usize, max_tokens: usize) 
 }
 
 fn split_oversized(chunks: Vec<Chunk>, max_tokens: usize, tokenizer: &GreedyTokenizer) -> Vec<Chunk> {
+    fn split_line_by_tokens(line: &str, max_tokens: usize, tokenizer: &GreedyTokenizer) -> Vec<String> {
+        let mut parts: Vec<String> = Vec::new();
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.is_empty() { return vec![String::new()]; }
+        // Precompute token counts of words for reuse
+        let word_tok: Vec<usize> = words.iter().map(|w| tokenizer.count_tokens(w)).collect();
+        let mut cur = String::new();
+        let mut cur_tok = 0usize;
+        for (wi, w) in words.iter().enumerate() {
+            let wtok = word_tok[wi];
+            let sep_tok = if cur.is_empty() { 0 } else { 1 }; // approximate one token for a space
+            if cur_tok + sep_tok + wtok > max_tokens {
+                if !cur.is_empty() {
+                    parts.push(cur);
+                    cur = String::new();
+                    cur_tok = 0;
+                }
+                if wtok > max_tokens {
+                    // Split long word at char boundaries greedily
+                    let mut acc = String::new();
+                    for ch in w.chars() {
+                        let mut candidate = acc.clone();
+                        candidate.push(ch);
+                        let c = tokenizer.count_tokens(&candidate);
+                        if c > max_tokens && !acc.is_empty() {
+                            parts.push(acc);
+                            acc = ch.to_string();
+                        } else {
+                            acc = candidate;
+                        }
+                    }
+                    if !acc.is_empty() { parts.push(acc); }
+                    continue;
+                }
+            }
+            if cur.is_empty() { cur.push_str(w); cur_tok = wtok; }
+            else { cur.push(' '); cur.push_str(w); cur_tok += 1 + wtok; }
+            if wi + 1 == words.len() { parts.push(cur.clone()); cur.clear(); cur_tok = 0; }
+        }
+        if parts.is_empty() { parts.push(cur); }
+        parts
+    }
+
     let mut out = Vec::new();
     for c in chunks {
         if c.token_count <= max_tokens { out.push(c); continue; }
         let mut current = Chunk { text: String::new(), token_count: 0, start_page: c.start_page, end_page: c.end_page, has_major_heading: c.has_major_heading, min_heading_level: c.min_heading_level };
         for line in c.text.split('\n') {
-            let t = tokenizer.encode(line).len();
-            if !current.text.is_empty() && current.token_count + t > max_tokens {
-                if current.token_count >= (max_tokens as f32 * 0.8) as usize {
-                    out.push(current);
-                    current = Chunk { text: String::new(), token_count: 0, start_page: c.start_page, end_page: c.end_page, has_major_heading: false, min_heading_level: i32::MAX };
+            let t = tokenizer.count_tokens(line);
+            if t > max_tokens {
+                let pieces = split_line_by_tokens(line, max_tokens, tokenizer);
+                for p in pieces {
+                    let tp = tokenizer.count_tokens(&p);
+                    if !current.text.is_empty() && current.token_count + tp > max_tokens {
+                        if current.token_count > 0 { out.push(current); }
+                        current = Chunk { text: String::new(), token_count: 0, start_page: c.start_page, end_page: c.end_page, has_major_heading: false, min_heading_level: i32::MAX };
+                    }
+                    current.text.push_str(&p);
+                    current.text.push('\n');
+                    current.token_count += tp;
                 }
+                continue;
             }
-            current.text.push_str(line); current.text.push('\n');
+
+            if !current.text.is_empty() && current.token_count + t > max_tokens {
+                out.push(current);
+                current = Chunk { text: String::new(), token_count: 0, start_page: c.start_page, end_page: c.end_page, has_major_heading: false, min_heading_level: i32::MAX };
+            }
+            current.text.push_str(line);
+            current.text.push('\n');
             current.token_count += t;
         }
         if !current.text.is_empty() { out.push(current); }

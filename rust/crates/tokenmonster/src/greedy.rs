@@ -75,6 +75,30 @@ impl GreedyTokenizer {
         }
         out
     }
+
+    // Fast path: count tokens without allocating the output vector.
+    pub fn count_tokens(&self, text: &str) -> usize {
+        let bytes = text.as_bytes();
+        let mut count = 0usize;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            let mut node = 0usize;
+            let mut best = None;
+            let mut best_end = i;
+            let mut j = i;
+            while j < bytes.len() {
+                let b = bytes[j];
+                if let Some(&nx) = self.trie[node].next.get(&b) {
+                    node = nx;
+                    if let Some(id) = self.trie[node].id { best = Some(id); best_end = j + 1; }
+                    j += 1;
+                } else { break; }
+            }
+            if best.is_some() { count += 1; i = best_end; }
+            else { count += 1; i += 1; }
+        }
+        count
+    }
 }
 
 // Note: Header parsing path removed; we use only pre-converted binary.

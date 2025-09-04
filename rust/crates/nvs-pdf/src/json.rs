@@ -13,6 +13,15 @@ pub fn write_chunks_json(pdf_path: &Path, chunks: &[Chunk], out_path: &Path) -> 
     let binary_hash = xxh64(path_str.as_bytes(), 0) as i64;
 
     let total = chunks.len();
+    // Derive document-wide page count from chunk page indices (schema expects full doc pages per chunk)
+    let (doc_min_page, doc_max_page) = if total == 0 {
+        (0i32, -1i32)
+    } else {
+        let mut min_p = i32::MAX; let mut max_p = i32::MIN;
+        for c in chunks { min_p = min_p.min(c.start_page); max_p = max_p.max(c.end_page); }
+        (min_p, max_p)
+    };
+    let doc_page_count: i64 = if doc_max_page >= doc_min_page { (doc_max_page - doc_min_page + 1) as i64 } else { 0 };
     let mut arr: Vec<Value> = Vec::with_capacity(total);
     for (i, c) in chunks.iter().enumerate() {
         let meta = json!({
@@ -20,7 +29,8 @@ pub fn write_chunks_json(pdf_path: &Path, chunks: &[Chunk], out_path: &Path) -> 
             "version": "1.0.0",
             "start_page": c.start_page,
             "end_page": c.end_page,
-            "page_count": (c.end_page - c.start_page + 1).max(0),
+            // Use full-document page count for parity with C++ schema output
+            "page_count": doc_page_count,
             "chunk_index": i as i64,
             "total_chunks": total as i64,
             "token_count": c.token_count as i64,
@@ -48,4 +58,3 @@ pub fn write_chunks_json(pdf_path: &Path, chunks: &[Chunk], out_path: &Path) -> 
     f.write_all(s.as_bytes())?;
     Ok(())
 }
-

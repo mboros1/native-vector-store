@@ -1,10 +1,14 @@
 use anyhow::Result;
-use regex::Regex;
 use serde::Serialize;
 use std::path::Path;
 
 pub mod filters;
-pub mod parser;
+pub mod parser; // thin re-export layer
+pub mod objects;
+pub mod pages;
+pub mod streams;
+pub mod content;
+pub mod fonts;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct ProbeResult {
