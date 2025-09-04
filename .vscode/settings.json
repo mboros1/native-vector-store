@@ -21,7 +21,7 @@
     "rust-analyzer.cargo.allTargets": true,
     "rust-analyzer.procMacro.enable": true,
     "rust-analyzer.checkOnSave.command": "clippy",
-    "rust-analyzer.checkOnSave.extraArgs": ["--workspace", "--tests"],
+    "rust-analyzer.checkOnSave.extraArgs": ["--tests"],
     "rust-analyzer.inlayHints.enable": true,
     "rust-analyzer.runnables.extraArgs": ["--workspace"],
     // Per-crate test code lenses
