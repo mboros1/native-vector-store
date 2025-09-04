@@ -1,7 +1,6 @@
-mod util;
+// minimal path: no external helpers
 
 use crate::ChunkOptions;
-// use memchr::memchr; // reserved for future optimized scans
 use tokenmonster::GreedyTokenizer;
 
 #[derive(Clone, Debug)]

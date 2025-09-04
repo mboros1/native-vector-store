@@ -734,13 +734,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "memchr",
- "once_cell",
  "pdfium-render",
- "rayon",
  "serde",
  "serde_json",
- "tempfile",
  "tokenmonster",
  "walkdir",
  "xxhash-rust",

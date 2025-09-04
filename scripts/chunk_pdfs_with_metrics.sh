@@ -169,9 +169,20 @@ echo "" # New line after progress bar
 END_TIME=$(date +%s)
 TOTAL_TIME=$((END_TIME - START_TIME))
 
-# Calculate sizes
-TOTAL_INPUT_SIZE=$(find "$PDF_DIR" -name "*.pdf" -type f -exec du -cb {} + | tail -1 | cut -f1)
-TOTAL_OUTPUT_SIZE=$(find "$OUTPUT_DIR" -name "*_chunks.json" -type f -exec du -cb {} + 2>/dev/null | tail -1 | cut -f1 || echo 0)
+# Cross-platform: calculate total sizes (bytes) for inputs and outputs
+sum_sizes() {
+  local dir="$1"
+  local pattern="$2"
+  local out
+  out=$(find "$dir" -name "$pattern" -type f -print0 | \
+        xargs -0 -I {} bash -c 'stat -f%z "{}" 2>/dev/null || stat -c%s "{}" 2>/dev/null' | \
+        awk '{s+=$1} END{printf "%d", s}'
+      ) || out=0
+  if [ -z "$out" ]; then echo 0; else echo "$out"; fi
+}
+
+TOTAL_INPUT_SIZE=$(sum_sizes "$PDF_DIR" "*.pdf")
+TOTAL_OUTPUT_SIZE=$(sum_sizes "$OUTPUT_DIR" "*_chunks.json")
 
 # Parse log for detailed metrics
 TOTAL_CHUNKS=0
@@ -194,6 +205,30 @@ if [ $SUCCESS_COUNT -gt 0 ]; then
     AVG_PROCESS_TIME=$((TOTAL_PROCESS_TIME / SUCCESS_COUNT))
 fi
 
+# Guard against empty or zero values for bc computations
+[ -z "$TOTAL_TIME" ] && TOTAL_TIME=0
+[ -z "$PROCESSED" ] && PROCESSED=0
+[ -z "$TOTAL_INPUT_SIZE" ] && TOTAL_INPUT_SIZE=0
+[ -z "$TOTAL_OUTPUT_SIZE" ] && TOTAL_OUTPUT_SIZE=0
+
+# Safe divisions
+DOCS_PER_SECOND=0
+if [ "$TOTAL_TIME" -gt 0 ]; then
+  DOCS_PER_SECOND=$(echo "scale=2; $PROCESSED / $TOTAL_TIME" | bc 2>/dev/null || echo 0)
+fi
+
+SUCCESS_RATE=0
+if [ "$TOTAL_PDFS" -gt 0 ]; then
+  SUCCESS_RATE=$(echo "scale=2; $PROCESSED * 100 / $TOTAL_PDFS" | bc 2>/dev/null || echo 0)
+fi
+
+TOTAL_INPUT_MB=$(echo "scale=2; $TOTAL_INPUT_SIZE / 1048576" | bc 2>/dev/null || echo 0)
+TOTAL_OUTPUT_MB=$(echo "scale=2; $TOTAL_OUTPUT_SIZE / 1048576" | bc 2>/dev/null || echo 0)
+COMPRESSION_RATIO=0
+if [ "$TOTAL_INPUT_SIZE" -gt 0 ]; then
+  COMPRESSION_RATIO=$(echo "scale=2; $TOTAL_OUTPUT_SIZE / $TOTAL_INPUT_SIZE" | bc 2>/dev/null || echo 0)
+fi
+
 # Generate metrics JSON
 cat > "$METRICS_FILE" << EOF
 {
@@ -203,18 +238,18 @@ cat > "$METRICS_FILE" << EOF
     "processed": $PROCESSED,
     "failed": $FAILED,
     "skipped": $SKIPPED,
-    "success_rate": $(echo "scale=2; $PROCESSED * 100 / $TOTAL_PDFS" | bc)
+    "success_rate": $SUCCESS_RATE
   },
   "performance": {
     "total_time_seconds": $TOTAL_TIME,
     "avg_time_per_doc_ms": $AVG_PROCESS_TIME,
-    "docs_per_second": $(echo "scale=2; $PROCESSED / $TOTAL_TIME" | bc),
+    "docs_per_second": $DOCS_PER_SECOND,
     "parallel_workers": $MAX_WORKERS
   },
   "data_metrics": {
-    "total_input_size_mb": $(echo "scale=2; $TOTAL_INPUT_SIZE / 1048576" | bc),
-    "total_output_size_mb": $(echo "scale=2; $TOTAL_OUTPUT_SIZE / 1048576" | bc),
-    "compression_ratio": $(echo "scale=2; $TOTAL_OUTPUT_SIZE / $TOTAL_INPUT_SIZE" | bc),
+    "total_input_size_mb": $TOTAL_INPUT_MB,
+    "total_output_size_mb": $TOTAL_OUTPUT_MB,
+    "compression_ratio": $COMPRESSION_RATIO,
     "total_chunks_created": $TOTAL_CHUNKS,
     "avg_chunks_per_document": $AVG_CHUNKS_PER_DOC
   },

@@ -1,2 +1,0 @@
-#define FAST_PDF_PARSER_CL100K_IMPLEMENTATION
-#include "fast_pdf_parser/cl100k_base_data.h"
