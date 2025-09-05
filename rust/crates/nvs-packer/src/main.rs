@@ -84,10 +84,10 @@ fn read_docs(input_dir: &Path) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
     for entry in WalkDir::new(input_dir).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file()
             && entry
-                .path()
-                .extension()
-                .map(|e| e == "json")
-                .unwrap_or(false)
+            .path()
+            .extension()
+            .map(|e| e == "json")
+            .unwrap_or(false)
         {
             let path = entry.path();
             pb.set_message(format!("Reading {}", path.display()));
@@ -132,15 +132,15 @@ fn read_docs(input_dir: &Path) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
                                     );
                                 }
                             } else {
-                                    skipped += 1;
-                                    eprintln!(
-                                        "{} skipping doc without metadata ({}:#{})",
-                                        console::style("! ").yellow(),
-                                        path.display(),
-                                        i
-                                    );
+                                skipped += 1;
+                                eprintln!(
+                                    "{} skipping doc without metadata ({}:#{})",
+                                    console::style("! ").yellow(),
+                                    path.display(),
+                                    i
+                                );
                             }
-                        },
+                        }
                         Err(e) => {
                             skipped += 1;
                             eprintln!(
@@ -218,7 +218,7 @@ fn read_docs(input_dir: &Path) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
         }
     }
     pb.finish_with_message(format!("Loaded {} docs (skipped {})", docs.len(), skipped));
-    receipts.sort_by(|a,b| a.0.cmp(&b.0));
+    receipts.sort_by(|a, b| a.0.cmp(&b.0));
     Ok((docs, receipts))
 }
 
@@ -228,13 +228,23 @@ fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, 
     use crossbeam_channel as chan;
     use std::thread;
     use memmap2::Mmap;
-    use serde::de::{self, SeqAccess, Visitor, Deserializer as _};
+    use serde::de::{self, Deserializer as _, SeqAccess, Visitor};
 
     #[derive(Debug)]
     enum Buf { Mmap(Mmap), Vec(Vec<u8>) }
-    impl Buf { fn as_slice(&self) -> &[u8] { match self { Buf::Mmap(m) => &m, Buf::Vec(v) => v } } }
+    impl Buf {
+        fn as_slice(&self) -> &[u8] {
+            match self {
+                Buf::Mmap(m) => &m,
+                Buf::Vec(v) => v
+            }
+        }
+    }
     #[derive(Debug)]
-    struct Job { _path: PathBuf, buf: Buf }
+    struct Job {
+        _path: PathBuf,
+        buf: Buf,
+    }
 
     let pb = indicatif::ProgressBar::new_spinner();
     pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
@@ -250,18 +260,27 @@ fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, 
                     continue;
                 }
                 let path = entry.path().to_path_buf();
-                let md = match std::fs::metadata(&path) { Ok(m) => m, Err(_) => continue };
+                let md = match std::fs::metadata(&path) {
+                    Ok(m) => m,
+                    Err(_) => continue
+                };
                 let job = if md.len() as usize <= mmap_threshold {
                     // mmap
                     match File::open(&path).and_then(|f| unsafe { Mmap::map(&f) }.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))) {
                         Ok(m) => Job { _path: path, buf: Buf::Mmap(m) },
                         Err(_) => {
                             // fallback to Vec
-                            match std::fs::read(&path) { Ok(v) => Job { _path: path, buf: Buf::Vec(v) }, Err(_) => continue }
+                            match std::fs::read(&path) {
+                                Ok(v) => Job { _path: path, buf: Buf::Vec(v) },
+                                Err(_) => continue
+                            }
                         }
                     }
                 } else {
-                    match std::fs::read(&path) { Ok(v) => Job { _path: path, buf: Buf::Vec(v) }, Err(_) => continue }
+                    match std::fs::read(&path) {
+                        Ok(v) => Job { _path: path, buf: Buf::Vec(v) },
+                        Err(_) => continue
+                    }
                 };
                 if tx.send(job).is_err() { break; }
             }
@@ -284,11 +303,17 @@ fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, 
                 // Streaming parse: support array or single object
                 let mut de = serde_json::Deserializer::from_slice(bytes);
                 // Try array streaming first
-                struct StreamVisitor<'a> { out: &'a mut Vec<Doc>, skipped: &'a mut usize }
+                struct StreamVisitor<'a> {
+                    out: &'a mut Vec<Doc>,
+                    skipped: &'a mut usize,
+                }
                 impl<'de, 'a> Visitor<'de> for StreamVisitor<'a> {
                     type Value = ();
                     fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "array or object of docs") }
-                    fn visit_seq<A>(self, mut seq: A) -> Result<(), A::Error> where A: SeqAccess<'de> {
+                    fn visit_seq<A>(self, mut seq: A) -> Result<(), A::Error>
+                    where
+                        A: SeqAccess<'de>,
+                    {
                         while let Some(raw) = seq.next_element::<InputDocRaw>()? {
                             if let Some((embedding, meta_other)) = raw.metadata.and_then(extract_embedding_and_meta) {
                                 let text = raw.text.or(raw.content).unwrap_or_default();
@@ -303,9 +328,15 @@ fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, 
                         }
                         Ok(())
                     }
-                    fn visit_map<M>(self, mut map: M) -> Result<(), M::Error> where M: de::MapAccess<'de> {
+                    fn visit_map<M>(self, mut map: M) -> Result<(), M::Error>
+                    where
+                        M: de::MapAccess<'de>,
+                    {
                         // Reconstruct InputDocRaw from map streaming
-                        let mut id: Option<String> = None; let mut text: Option<String> = None; let mut content: Option<String> = None; let mut metadata: Option<serde_json::Value> = None;
+                        let mut id: Option<String> = None;
+                        let mut text: Option<String> = None;
+                        let mut content: Option<String> = None;
+                        let mut metadata: Option<serde_json::Value> = None;
                         while let Some(k) = map.next_key::<String>()? {
                             match k.as_str() {
                                 "id" => { id = map.next_value()?; }
@@ -333,7 +364,13 @@ fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, 
                 let before = out.len();
                 let vis = StreamVisitor { out: &mut out, skipped: &mut skipped_local };
                 let res = de.deserialize_any(vis);
-                let produced_for_file = if res.is_err() { skipped += 1; 0 } else { skipped += skipped_local; out.len() - before };
+                let produced_for_file = if res.is_err() {
+                    skipped += 1;
+                    0
+                } else {
+                    skipped += skipped_local;
+                    out.len() - before
+                };
                 receipts.push((file_name, produced_for_file));
             }
             (out, skipped, receipts)
@@ -344,9 +381,14 @@ fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Doc>, 
     let mut docs: Vec<Doc> = Vec::new();
     let mut skipped = 0usize;
     let mut receipts: Vec<(String, usize)> = Vec::new();
-    for h in handles { let (mut v, s, mut r) = h.join().unwrap_or_default(); docs.append(&mut v); skipped += s; receipts.append(&mut r); }
+    for h in handles {
+        let (mut v, s, mut r) = h.join().unwrap_or_default();
+        docs.append(&mut v);
+        skipped += s;
+        receipts.append(&mut r);
+    }
     pb.finish_with_message(format!("Loaded {} docs (skipped {})", docs.len(), skipped));
-    receipts.sort_by(|a,b| a.0.cmp(&b.0));
+    receipts.sort_by(|a, b| a.0.cmp(&b.0));
     Ok((docs, receipts))
 }
 
@@ -419,7 +461,12 @@ fn write_vectors(docs: &[Doc], dim: usize, out: &Path, dtype: &str) -> Result<()
     }
 }
 
-struct Bm25Stats { tf: std::time::Duration, local: std::time::Duration, merge: std::time::Duration, write: std::time::Duration }
+struct Bm25Stats {
+    tf: std::time::Duration,
+    local: std::time::Duration,
+    merge: std::time::Duration,
+    write: std::time::Duration,
+}
 
 fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result<(f64, Vec<String>, usize, usize, Bm25Stats)> {
     use rayon::prelude::*;
@@ -475,7 +522,11 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result
 
     // Phase 3: bucketed k-way merge and write outputs
     let buckets = if bm25_buckets > 0 { bm25_buckets } else { std::cmp::max(1, std::cmp::min(32, threads * 2)) };
-    struct BucketOut { terms: Vec<String>, postings: Vec<u8>, lex: Vec<(u64, u32, u32)> }
+    struct BucketOut {
+        terms: Vec<String>,
+        postings: Vec<u8>,
+        lex: Vec<(u64, u32, u32)>,
+    }
     let bucket_out: Vec<std::sync::Mutex<Option<BucketOut>>> = (0..buckets).map(|_| std::sync::Mutex::new(None)).collect();
     let t_merge_start = std::time::Instant::now();
     (0..buckets).into_par_iter().for_each(|b| {
@@ -498,23 +549,37 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result
             let mut slices: Vec<&[(usize, u32)]> = Vec::new();
             let mut pos: Vec<usize> = Vec::new();
             for loc in &local_maps {
-                if let Some(vec) = loc.get(term) { slices.push(vec); pos.push(0); }
+                if let Some(vec) = loc.get(term) {
+                    slices.push(vec);
+                    pos.push(0);
+                }
             }
-            let mut prev = 0usize; let mut len: u32 = 0; let start = postings_b.len() as u64;
+            let mut prev = 0usize;
+            let mut len: u32 = 0;
+            let start = postings_b.len() as u64;
             loop {
-                let mut best = usize::MAX; let mut which = usize::MAX;
+                let mut best = usize::MAX;
+                let mut which = usize::MAX;
                 for i in 0..slices.len() {
                     if pos[i] < slices[i].len() {
                         let d = slices[i][pos[i]].0;
-                        if d < best { best = d; which = i; }
+                        if d < best {
+                            best = d;
+                            which = i;
+                        }
                     }
                 }
                 if which == usize::MAX { break; }
-                let (doc, tf) = slices[which][pos[which]]; pos[which] += 1;
-                let delta = (doc - prev) as u32; prev = doc;
-                postings_b.extend_from_slice(&delta.to_le_bytes()); postings_b.extend_from_slice(&tf.to_le_bytes()); len += 1;
+                let (doc, tf) = slices[which][pos[which]];
+                pos[which] += 1;
+                let delta = (doc - prev) as u32;
+                prev = doc;
+                postings_b.extend_from_slice(&delta.to_le_bytes());
+                postings_b.extend_from_slice(&tf.to_le_bytes());
+                len += 1;
             }
-            let df = len; lex_b.push((start, len, df));
+            let df = len;
+            lex_b.push((start, len, df));
         }
         let mut g = bucket_out[b].lock().unwrap();
         *g = Some(BucketOut { terms: terms_b, postings: postings_b, lex: lex_b });
@@ -523,8 +588,15 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result
 
     // Move buckets out and compute capacities
     let mut buckets_vec: Vec<BucketOut> = Vec::with_capacity(buckets);
-    let mut total_terms = 0usize; let mut total_post_bytes = 0usize;
-    for b in 0..buckets { if let Some(outb) = bucket_out[b].lock().unwrap().take() { total_terms += outb.terms.len(); if let Some((off, len, _)) = outb.lex.last().copied() { total_post_bytes += (off as usize) + (len as usize)*8; } buckets_vec.push(outb); } else { buckets_vec.push(BucketOut{terms:Vec::new(), postings:Vec::new(), lex:Vec::new()}); } }
+    let mut total_terms = 0usize;
+    let mut total_post_bytes = 0usize;
+    for b in 0..buckets {
+        if let Some(outb) = bucket_out[b].lock().unwrap().take() {
+            total_terms += outb.terms.len();
+            if let Some((off, len, _)) = outb.lex.last().copied() { total_post_bytes += (off as usize) + (len as usize) * 8; }
+            buckets_vec.push(outb);
+        } else { buckets_vec.push(BucketOut { terms: Vec::new(), postings: Vec::new(), lex: Vec::new() }); }
+    }
 
     // Assemble: final merge, coalesced copies, stream terms
     let t_assemble_start = std::time::Instant::now();
@@ -533,28 +605,72 @@ fn write_bm25_and_terms(docs: &[Doc], out: &Path, bm25_buckets: usize) -> Result
     let mut lexicon = Vec::<u8>::with_capacity(total_terms * 16);
     let mut terms_writer = std::io::BufWriter::new(File::create(out.join("terms.dict"))?);
     let mut global_off: u64 = 0;
-    let mut run_bucket: Option<usize> = None; let mut run_start = 0usize; let mut run_bytes = 0usize; let mut run_expected_next_off = 0usize;
+    let mut run_bucket: Option<usize> = None;
+    let mut run_start = 0usize;
+    let mut run_bytes = 0usize;
+    let mut run_expected_next_off = 0usize;
     loop {
-        let mut best_b = usize::MAX; let mut best_term: Option<&str> = None;
-        for b in 0..buckets { let h = heads[b]; let outb = &buckets_vec[b]; if h < outb.terms.len() { let t = &outb.terms[h]; if best_term.map_or(true, |cur| t.as_str() < cur) { best_term = Some(t.as_str()); best_b = b; } } }
+        let mut best_b = usize::MAX;
+        let mut best_term: Option<&str> = None;
+        for b in 0..buckets {
+            let h = heads[b];
+            let outb = &buckets_vec[b];
+            if h < outb.terms.len() {
+                let t = &outb.terms[h];
+                if best_term.map_or(true, |cur| t.as_str() < cur) {
+                    best_term = Some(t.as_str());
+                    best_b = b;
+                }
+            }
+        }
         if best_b == usize::MAX { break; }
-        let outb = &buckets_vec[best_b]; let idx = heads[best_b]; let (off_rel, len, df) = outb.lex[idx]; let start = off_rel as usize; let bytes = (len as usize)*8;
+        let outb = &buckets_vec[best_b];
+        let idx = heads[best_b];
+        let (off_rel, len, df) = outb.lex[idx];
+        let start = off_rel as usize;
+        let bytes = (len as usize) * 8;
         // write term
-        let term = outb.terms[idx].as_str(); let l = term.len() as u32; terms_writer.write_all(&l.to_le_bytes())?; terms_writer.write_all(term.as_bytes())?;
+        let term = outb.terms[idx].as_str();
+        let l = term.len() as u32;
+        terms_writer.write_all(&l.to_le_bytes())?;
+        terms_writer.write_all(term.as_bytes())?;
         // lex entry
-        lexicon.extend_from_slice(&global_off.to_le_bytes()); lexicon.extend_from_slice(&len.to_le_bytes()); lexicon.extend_from_slice(&df.to_le_bytes());
+        lexicon.extend_from_slice(&global_off.to_le_bytes());
+        lexicon.extend_from_slice(&len.to_le_bytes());
+        lexicon.extend_from_slice(&df.to_le_bytes());
         // coalesce copy
-        if run_bucket == Some(best_b) && start == run_expected_next_off { run_bytes += bytes; run_expected_next_off += bytes; } else { if let Some(rb) = run_bucket { let src = &buckets_vec[rb].postings[run_start..run_start+run_bytes]; postings.extend_from_slice(src); } run_bucket = Some(best_b); run_start = start; run_bytes = bytes; run_expected_next_off = start + bytes; }
-        global_off += bytes as u64; heads[best_b] += 1;
+        if run_bucket == Some(best_b) && start == run_expected_next_off {
+            run_bytes += bytes;
+            run_expected_next_off += bytes;
+        } else {
+            if let Some(rb) = run_bucket {
+                let src = &buckets_vec[rb].postings[run_start..run_start + run_bytes];
+                postings.extend_from_slice(src);
+            }
+            run_bucket = Some(best_b);
+            run_start = start;
+            run_bytes = bytes;
+            run_expected_next_off = start + bytes;
+        }
+        global_off += bytes as u64;
+        heads[best_b] += 1;
     }
-    if let Some(rb) = run_bucket { let src = &buckets_vec[rb].postings[run_start..run_start+run_bytes]; postings.extend_from_slice(src); }
+    if let Some(rb) = run_bucket {
+        let src = &buckets_vec[rb].postings[run_start..run_start + run_bytes];
+        postings.extend_from_slice(src);
+    }
     terms_writer.flush()?;
     let t_assemble = t_assemble_start.elapsed();
 
     let t_io_start = std::time::Instant::now();
-    { let mut pf = File::create(out.join("postings.bin"))?; pf.write_all(&postings)?; let mut lf = File::create(out.join("lexicon.bin"))?; lf.write_all(&lexicon)?; }
+    {
+        let mut pf = File::create(out.join("postings.bin"))?;
+        pf.write_all(&postings)?;
+        let mut lf = File::create(out.join("lexicon.bin"))?;
+        lf.write_all(&lexicon)?;
+    }
     let t_io = t_io_start.elapsed();
-    let postings_entries_count: usize = postings.len()/8;
+    let postings_entries_count: usize = postings.len() / 8;
     let avgdl = if docs.is_empty() {
         0.0
     } else {
@@ -578,7 +694,8 @@ fn tokenize_bm25_into(text: &str, tf: &mut FxHashMap<String, u32>) -> usize {
         for b in unsafe { buf.as_bytes_mut() } { if (b'A'..=b'Z').contains(b) { *b = *b + 32; } }
         if let Some(norm) = bm25_normalize_token(&buf) {
             if !nvs_core::tokenizer::is_stopword(&norm) {
-                *tf.entry(norm).or_insert(0) += 1; kept += 1;
+                *tf.entry(norm).or_insert(0) += 1;
+                kept += 1;
             }
         }
         buf.clear();
@@ -587,20 +704,28 @@ fn tokenize_bm25_into(text: &str, tf: &mut FxHashMap<String, u32>) -> usize {
     while let Some(ch) = chars.next() {
         match ch {
             // whitespace and control
-            '\r' | '\t' | '\n' | '\x0C' => { flush(&mut buf); },
+            '\r' | '\t' | '\n' | '\x0C' => { flush(&mut buf); }
             // remove soft hyphen/zero-width/BOM
             '\u{00AD}' | '\u{200B}' | '\u{FEFF}' => { /* skip */ }
             '-' => {
                 // dehyphenate: - followed by optional ws and newline
                 let mut it = chars.clone();
-                let mut consumed = 0; let mut is_break = false;
+                let mut consumed = 0;
+                let mut is_break = false;
                 while let Some(nc) = it.next() {
-                    if nc == '\n' { is_break = true; consumed += 1; break; }
-                    else if nc == '\r' || nc == '\t' || nc == ' ' { consumed += 1; continue; }
-                    else { break; }
+                    if nc == '\n' {
+                        is_break = true;
+                        consumed += 1;
+                        break;
+                    } else if nc == '\r' || nc == '\t' || nc == ' ' {
+                        consumed += 1;
+                        continue;
+                    } else { break; }
                 }
-                if is_break { for _ in 0..consumed { let _ = chars.next(); } flush(&mut buf); }
-                else { buf.push('-'); }
+                if is_break {
+                    for _ in 0..consumed { let _ = chars.next(); }
+                    flush(&mut buf);
+                } else { buf.push('-'); }
             }
             c if c.is_alphanumeric() || c == '_' || c >= '\u{80}' => { buf.push(c); }
             // allowed internal punct: keep as part of token
@@ -972,12 +1097,12 @@ fn main() -> Result<()> {
         "meta.idx",
         "meta.blocks",
     ]
-    .iter()
-    .filter_map(|name| {
-        let p = cli.out.join(name);
-        fs::metadata(&p).ok().map(|m| m.len())
-    })
-    .sum();
+        .iter()
+        .filter_map(|name| {
+            let p = cli.out.join(name);
+            fs::metadata(&p).ok().map(|m| m.len())
+        })
+        .sum();
     // Allocated (physical) size on disk
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
@@ -993,12 +1118,12 @@ fn main() -> Result<()> {
         "meta.idx",
         "meta.blocks",
     ]
-    .iter()
-    .filter_map(|name| {
-        let p = cli.out.join(name);
-        fs::metadata(&p).ok().map(|m| m.blocks() * 512)
-    })
-    .sum();
+        .iter()
+        .filter_map(|name| {
+            let p = cli.out.join(name);
+            fs::metadata(&p).ok().map(|m| m.blocks() * 512)
+        })
+        .sum();
     #[cfg(not(unix))]
     let allocated_size: u64 = 0;
     println!(
