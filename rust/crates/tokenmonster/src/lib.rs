@@ -30,11 +30,7 @@ static VOCAB: Lazy<Vocab> = Lazy::new(|| {
         // "hello" (aGVsbG8=) → 100001
         // "world" (d29ybGQ=) → 100002
         // " " (space) (IA==) → 100003
-        let data = [
-            ("aGVsbG8=", 100001),
-            ("d29ybGQ=", 100002),
-            ("IA==", 100003),
-        ];
+        let data = [("aGVsbG8=", 100001), ("d29ybGQ=", 100002), ("IA==", 100003)];
         for (b64, id) in data.iter() {
             let token = base64_decode(b64);
             v.encoder.insert(token.clone(), *id);
@@ -54,11 +50,22 @@ static VOCAB: Lazy<Vocab> = Lazy::new(|| {
 
 fn base64_decode(s: &str) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut val = 0i32; let mut valb = -8i32; let mut out = Vec::with_capacity(s.len()*3/4);
+    let mut val = 0i32;
+    let mut valb = -8i32;
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
     for &c in s.as_bytes() {
-        if c == b'=' { break; }
+        if c == b'=' {
+            break;
+        }
         let pos = TABLE.iter().position(|&x| x == c);
-        if let Some(p) = pos { val = (val << 6) + (p as i32); valb += 6; if valb >= 0 { out.push(((val >> valb) & 0xFF) as u8); valb -= 8; } }
+        if let Some(p) = pos {
+            val = (val << 6) + (p as i32);
+            valb += 6;
+            if valb >= 0 {
+                out.push(((val >> valb) & 0xFF) as u8);
+                valb -= 8;
+            }
+        }
     }
     String::from_utf8(out).unwrap_or_default()
 }
@@ -66,7 +73,9 @@ fn base64_decode(s: &str) -> String {
 pub struct TokenMonster;
 
 impl TokenMonster {
-    pub fn new() -> Self { TokenMonster }
+    pub fn new() -> Self {
+        TokenMonster
+    }
 
     /// Greedy longest-match encode. Falls back to byte values (0..255).
     pub fn encode(&self, text: &str) -> Vec<i32> {
@@ -79,8 +88,11 @@ impl TokenMonster {
             let max_len = usize::min(20, bytes.len() - pos);
             let mut best: Option<(usize, i32)> = None;
             for len in (1..=max_len).rev() {
-                let sub = &text[pos..pos+len];
-                if let Some(&id) = enc.get(sub) { best = Some((len, id)); break; }
+                let sub = &text[pos..pos + len];
+                if let Some(&id) = enc.get(sub) {
+                    best = Some((len, id));
+                    break;
+                }
             }
             if let Some((len, id)) = best {
                 tokens.push(id);
@@ -98,14 +110,21 @@ impl TokenMonster {
         let dec = &VOCAB.decoder;
         let mut out = String::new();
         for &t in tokens {
-            if let Some(s) = dec.get(&t) { out.push_str(s); }
-            else if (0..=255).contains(&t) { out.push(t as u8 as char); }
+            if let Some(s) = dec.get(&t) {
+                out.push_str(s);
+            } else if (0..=255).contains(&t) {
+                out.push(t as u8 as char);
+            }
         }
         out
     }
 
-    pub fn count_tokens(&self, text: &str) -> usize { self.encode(text).len() }
-    pub fn estimate_tokens(text: &str) -> usize { text.len().div_ceil(4) }
+    pub fn count_tokens(&self, text: &str) -> usize {
+        self.encode(text).len()
+    }
+    pub fn estimate_tokens(text: &str) -> usize {
+        text.len().div_ceil(4)
+    }
 }
 
 #[cfg(test)]
