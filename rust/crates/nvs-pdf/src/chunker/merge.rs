@@ -20,7 +20,10 @@ pub fn merge_small_chunks(chunks: Vec<Chunk>, min_tokens: usize, max_tokens: usi
             cur.text.push_str(&next.text);
             cur.token_count = combined;
             cur.end_page = next.end_page;
-            if next.has_major_heading { cur.has_major_heading = true; cur.min_heading_level = cur.min_heading_level.min(next.min_heading_level); }
+            if next.has_major_heading {
+                cur.has_major_heading = true;
+                cur.min_heading_level = cur.min_heading_level.min(next.min_heading_level);
+            }
             i += 1;
         }
         out.push(cur);
@@ -42,7 +45,10 @@ pub fn final_merge(chunks: Vec<Chunk>, min_tokens: usize, max_tokens: usize) -> 
                 cur.text.push_str(&next.text);
                 cur.token_count = combined;
                 cur.end_page = next.end_page;
-                if next.has_major_heading { cur.has_major_heading = true; cur.min_heading_level = cur.min_heading_level.min(next.min_heading_level); }
+                if next.has_major_heading {
+                    cur.has_major_heading = true;
+                    cur.min_heading_level = cur.min_heading_level.min(next.min_heading_level);
+                }
                 i += 1;
             } else { break; }
         }
@@ -53,8 +59,12 @@ pub fn final_merge(chunks: Vec<Chunk>, min_tokens: usize, max_tokens: usize) -> 
                 prev.text.push_str(&cur.text);
                 prev.token_count = combined;
                 prev.end_page = cur.end_page;
-                if cur.has_major_heading { prev.has_major_heading = true; prev.min_heading_level = prev.min_heading_level.min(cur.min_heading_level); }
-                i += 1; continue;
+                if cur.has_major_heading {
+                    prev.has_major_heading = true;
+                    prev.min_heading_level = prev.min_heading_level.min(cur.min_heading_level);
+                }
+                i += 1;
+                continue;
             }
         }
         out.push(cur);

@@ -17,8 +17,12 @@ pub fn write_chunks_json(pdf_path: &Path, chunks: &[Chunk], out_path: &Path) -> 
     let (doc_min_page, doc_max_page) = if total == 0 {
         (0i32, -1i32)
     } else {
-        let mut min_p = i32::MAX; let mut max_p = i32::MIN;
-        for c in chunks { min_p = min_p.min(c.start_page); max_p = max_p.max(c.end_page); }
+        let mut min_p = i32::MAX;
+        let mut max_p = i32::MIN;
+        for c in chunks {
+            min_p = min_p.min(c.start_page);
+            max_p = max_p.max(c.end_page);
+        }
         (min_p, max_p)
     };
     let doc_page_count: i64 = if doc_max_page >= doc_min_page { (doc_max_page - doc_min_page + 1) as i64 } else { 0 };

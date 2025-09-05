@@ -12,9 +12,9 @@ mod split;
 
 pub use annotate::{annotate_lines, AnnotatedLine, LineType};
 pub use group::{group_semantic_units, SemanticUnit};
-pub use pack::pack_initial_chunks;
+pub use merge::{final_merge, merge_small_chunks};
 pub use overlap::add_overlap;
-pub use merge::{merge_small_chunks, final_merge};
+pub use pack::pack_initial_chunks;
 pub use split::split_oversized;
 
 // Abstraction: token counting, to swap implementations later.

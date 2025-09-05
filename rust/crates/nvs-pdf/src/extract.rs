@@ -33,7 +33,9 @@ pub fn extract_text_pages_with_stats(
     let t0 = Instant::now();
     let t_bind = Instant::now();
     // Guarded binder to avoid concurrent dynamic binding issues across threads
-    use once_cell::sync::Lazy; use std::sync::Mutex; static BIND_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    use once_cell::sync::Lazy;
+    use std::sync::Mutex;
+    static BIND_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
     let _g = BIND_MUTEX.lock().unwrap();
     let pdfium = {
         use pdfium_render::prelude::*;

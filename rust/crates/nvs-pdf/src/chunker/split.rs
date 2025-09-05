@@ -36,9 +36,19 @@ pub fn split_oversized(chunks: Vec<Chunk>, max_tokens: usize, tokenizer: &dyn To
                     continue;
                 }
             }
-            if cur.is_empty() { cur.push_str(w); cur_tok = wtok; }
-            else { cur.push(' '); cur.push_str(w); cur_tok += 1 + wtok; }
-            if wi + 1 == words.len() { parts.push(cur.clone()); cur.clear(); cur_tok = 0; }
+            if cur.is_empty() {
+                cur.push_str(w);
+                cur_tok = wtok;
+            } else {
+                cur.push(' ');
+                cur.push_str(w);
+                cur_tok += 1 + wtok;
+            }
+            if wi + 1 == words.len() {
+                parts.push(cur.clone());
+                cur.clear();
+                cur_tok = 0;
+            }
         }
         if parts.is_empty() { parts.push(cur); }
         parts
@@ -46,7 +56,10 @@ pub fn split_oversized(chunks: Vec<Chunk>, max_tokens: usize, tokenizer: &dyn To
 
     let mut out = Vec::new();
     for c in chunks {
-        if c.token_count <= max_tokens { out.push(c); continue; }
+        if c.token_count <= max_tokens {
+            out.push(c);
+            continue;
+        }
         let mut current = Chunk { text: String::new(), token_count: 0, start_page: c.start_page, end_page: c.end_page, has_major_heading: c.has_major_heading, min_heading_level: c.min_heading_level };
         for line in c.text.split('\n') {
             let t = tokenizer.count_tokens(line);

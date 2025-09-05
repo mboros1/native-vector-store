@@ -1,4 +1,4 @@
-use super::{TokenCounter};
+use super::TokenCounter;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum LineType { Normal, MajorHeading, MinorHeading, ListItem, Blank, Code }
@@ -36,7 +36,8 @@ fn detect_line_type(line: &str) -> (LineType, i32) {
 
     // Headings: leading '#'s followed by space
     let bytes = line.as_bytes();
-    let mut i = 0usize; while i < bytes.len() && bytes[i] == b'#' { i += 1; }
+    let mut i = 0usize;
+    while i < bytes.len() && bytes[i] == b'#' { i += 1; }
     if i > 0 {
         if i <= 6 && (i < bytes.len()) && bytes[i] == b' ' { return (if i <= 2 { LineType::MajorHeading } else { LineType::MinorHeading }, i as i32); }
     }
@@ -45,9 +46,10 @@ fn detect_line_type(line: &str) -> (LineType, i32) {
     let s = line.trim_start();
     if s.starts_with("- ") || s.starts_with("* ") || s.starts_with("• ") { return (LineType::ListItem, 0); }
     // digit+". "
-    let mut di = 0usize; let sb = s.as_bytes();
+    let mut di = 0usize;
+    let sb = s.as_bytes();
     while di < sb.len() && sb[di].is_ascii_digit() { di += 1; }
-    if di > 0 && di + 1 < sb.len() && sb[di] == b'.' && sb[di+1] == b' ' { return (LineType::ListItem, 0); }
+    if di > 0 && di + 1 < sb.len() && sb[di] == b'.' && sb[di + 1] == b' ' { return (LineType::ListItem, 0); }
 
     // Code block heuristic: contains ``` or starts with 2+ spaces (indented)
     if s.contains("```") { return (LineType::Code, 0); }

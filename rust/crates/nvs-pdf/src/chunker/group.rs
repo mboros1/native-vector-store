@@ -25,7 +25,10 @@ pub fn group_semantic_units(lines: &[AnnotatedLine]) -> Vec<SemanticUnit> {
         let c = cur.as_mut().unwrap();
         c.pages.0 = c.pages.0.min(l.page);
         c.pages.1 = c.pages.1.max(l.page);
-        if l.kind == LineType::MajorHeading { c.has_major_heading = true; c.min_heading_level = c.min_heading_level.min(l.heading_level); }
+        if l.kind == LineType::MajorHeading {
+            c.has_major_heading = true;
+            c.min_heading_level = c.min_heading_level.min(l.heading_level);
+        }
         c.total_tokens += l.tokens;
         c.lines.push(l.clone());
 
