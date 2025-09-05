@@ -9,12 +9,12 @@ pub mod pages;
 pub mod streams;
 pub mod content;
 pub mod resources;
-pub mod contents;
 pub mod interpret;
 pub mod fonts;
 pub mod stats;
 pub mod normalize;
 pub mod metrics;
+pub mod debug;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct ProbeResult {
@@ -228,7 +228,7 @@ pub struct FastDebugReport {
     pub page_candidates: usize,
     pub pages_found: usize,
     pub used_tree: bool,
-    pub pages: Vec<content::PageTextDebug>,
+    pub pages: Vec<debug::PageTextDebug>,
     pub errors: Vec<String>,
     pub xref_streams: Vec<XrefStreamDebug>,
     pub objstm_streams: Vec<ObjStmDebug>,
@@ -258,7 +258,7 @@ pub fn fast_extract_pages_with_debug(path: &Path, page_limit: Option<usize>) -> 
     report.pages_found = page_ids.len();
     if let Some(limit) = page_limit { page_ids.truncate(limit); }
     for (idx, id) in page_ids.into_iter().enumerate() {
-        let (txt_opt, dbg) = content::extract_page_text_with_debug(&doc, id);
+        let (txt_opt, dbg) = debug::extract_page_text_with_debug(&doc, id);
         if let Some(txt) = txt_opt { pages_out.push((txt, idx as i32)); }
         report.pages.push(dbg);
     }

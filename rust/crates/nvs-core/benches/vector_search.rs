@@ -37,7 +37,7 @@ fn bench_vector_search(c: &mut Criterion) {
 
     // Allocate aligned rows: 64-byte stride
     let row_bytes = dim * 4;
-    let aligned = ((row_bytes + 63) / 64) * 64;
+    let aligned = row_bytes.div_ceil(64) * 64;
     let row_stride_f32 = aligned / 4;
     let mut store = vec![0f32; n * row_stride_f32];
 

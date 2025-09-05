@@ -62,3 +62,5 @@ out_bundle/
 out_corpus/
 out_queries.json
 nvs-bundle/
+
+.idea/

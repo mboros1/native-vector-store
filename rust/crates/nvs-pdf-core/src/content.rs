@@ -3,12 +3,40 @@ use std::collections::BTreeMap;
 use crate::fonts::map_bytes_with_tounicode_or_base;
 use crate::objects::{as_dict, as_name, is_alpha, parse_name, parse_number, parse_string, resolve, skip_ws, PdfDoc, PdfValue};
 use crate::resources::{collect_resources, FontInfo};
-use crate::contents::resolve_contents;
 use crate::interpret::{append_bytes_as_text, interpret_contents};
 use crate::metrics::MetricKey;
 use crate::streams::get_stream_data_with_filters;
 use std::time::Instant;
 use crate::normalize::normalize_page_text;
+
+// Resolve and decode the page's Contents into a single concatenated buffer
+fn resolve_contents(doc: &PdfDoc, contents: &PdfValue) -> Result<Vec<u8>> {
+    let mut buffers: Vec<u8> = Vec::new();
+    match contents {
+        PdfValue::Stream { dict, data } => {
+            let dec = get_stream_data_with_filters(dict, data.clone())?;
+            buffers.extend_from_slice(&dec);
+        }
+        PdfValue::Array(arr) => {
+            for v in arr {
+                let vv = resolve(doc, v, 0)?;
+                if let PdfValue::Stream{ dict, data } = vv {
+                    let dec = get_stream_data_with_filters(&dict, data)?;
+                    buffers.extend_from_slice(&dec);
+                }
+            }
+        }
+        PdfValue::Ref(obj, gen) => {
+            let vv = doc.get_object(*obj, *gen)?;
+            if let PdfValue::Stream{ dict, data } = vv {
+                let dec = get_stream_data_with_filters(&dict, data)?;
+                buffers.extend_from_slice(&dec);
+            }
+        }
+        _ => {}
+    }
+    Ok(buffers)
+}
 
 pub fn extract_page_text(doc: &PdfDoc, page: (u32,u16)) -> Result<String> {
     let t_page = Instant::now();
@@ -38,67 +66,7 @@ pub struct PageTextDebug {
     pub notes: Vec<String>,
 }
 
-pub fn extract_page_text_with_debug(doc: &PdfDoc, page: (u32,u16)) -> (Option<String>, PageTextDebug) {
-    let mut dbg = PageTextDebug::default();
-    let val = match doc.get_object(page.0, page.1) { Ok(v) => v, Err(e) => { dbg.notes.push(format!("get_object: {}", e)); return (None, dbg) } };
-    let dict = if let Some(d) = as_dict(&val) { d } else { dbg.notes.push("page not dict".into()); return (None, dbg) };
-    // Fonts stats
-    if let Some(res) = dict.get("Resources").and_then(|v| as_dict(v)) {
-        if let Some(fdict) = res.get("Font").and_then(|v| as_dict(v)) {
-            let mut total = 0usize; let mut with_tu = 0usize;
-            for (_name, fv) in fdict {
-                total += 1;
-                let rf = resolve(doc, fv, 0).unwrap_or_else(|_| fv.clone());
-                if let Some(fd) = as_dict(&rf) {
-                    if fd.get("ToUnicode").is_some() { with_tu += 1; }
-                }
-            }
-            dbg.fonts_total = total; dbg.fonts_with_tounicode = with_tu;
-        }
-    }
-    let contents = match dict.get("Contents") { Some(v)=>v, None => { dbg.has_contents=false; return (Some(String::new()), dbg) } };
-    dbg.has_contents = true;
-    let mut buffers: Vec<u8> = Vec::new();
-    let mut filters = Vec::new(); let mut preds = Vec::new();
-    let mut decode_ok = true;
-    let decode_one = |vv: PdfValue, filters: &mut Vec<String>, preds: &mut Vec<i64>, buffers: &mut Vec<u8>| -> Result<()> {
-        if let PdfValue::Stream{ dict: sdict, data } = vv {
-            // Record filters/predictor if present
-            if let Some(fv) = sdict.get("Filter") {
-                match fv {
-                    PdfValue::Name(n) => { filters.push(n.to_string()); },
-                    PdfValue::Array(arr) => { for f in arr { if let Some(n)=as_name(f) { filters.push(n.to_string()); } } },
-                    _ => {}
-                }
-            }
-            if let Some(dp) = sdict.get("DecodeParms") {
-                if let Some(p) = get_predictor(dp) { preds.push(p); }
-            }
-            let dec = get_stream_data_with_filters(&sdict, data)?;
-            buffers.extend_from_slice(&dec);
-        }
-        Ok(())
-    };
-    match contents {
-        PdfValue::Stream { dict, data } => {
-            if let Err(e)=decode_one(PdfValue::Stream{ dict: dict.clone(), data: data.clone() }, &mut filters, &mut preds, &mut buffers) { dbg.notes.push(format!("decode: {}", e)); decode_ok=false; }
-        }
-        PdfValue::Array(arr) => {
-            for v in arr { let vv = match resolve(doc, v, 0) { Ok(x)=>x, Err(e)=>{ dbg.notes.push(format!("resolve stream: {}", e)); continue } }; if let Err(e)=decode_one(vv, &mut filters, &mut preds, &mut buffers) { dbg.notes.push(format!("decode arr: {}", e)); decode_ok=false; } }
-        }
-        PdfValue::Ref(obj, gen) => {
-            let vv = match doc.get_object(*obj, *gen) { Ok(x)=>x, Err(e)=>{ dbg.notes.push(format!("get stream: {}", e)); return (None, dbg) } };
-            if let Err(e)=decode_one(vv, &mut filters, &mut preds, &mut buffers) { dbg.notes.push(format!("decode ref: {}", e)); decode_ok=false; }
-        }
-        _ => {}
-    }
-    dbg.filters = filters; dbg.predictors = preds; dbg.decode_ok = decode_ok;
-    if !decode_ok { return (None, dbg); }
-    match crate::interpret::interpret_text_with_resources(doc, &BTreeMap::new(), &BTreeMap::new(), &buffers) {
-        Ok(txt) => { dbg.interpret_ok = true; (Some(normalize_page_text(&txt)), dbg) }
-        Err(e) => { dbg.notes.push(format!("interpret: {}", e)); (None, dbg) }
-    }
-}
+// debug extraction removed; replaced by crate::debug module
 
 fn get_predictor(dp: &PdfValue) -> Option<i64> {
     match dp {
