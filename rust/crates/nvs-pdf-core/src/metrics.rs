@@ -16,7 +16,8 @@ pub enum MetricKey {
 #[macro_export]
 macro_rules! measure {
     ($key:expr, $block:expr) => {{
-        #[cfg(feature = "metrics")] {
+        #[cfg(feature = "metrics")]
+        {
             let _t0 = std::time::Instant::now();
             let __ret = { $block };
             let ns = _t0.elapsed().as_nanos() as u128;
@@ -32,7 +33,8 @@ macro_rules! measure {
             __ret
         }
         #[cfg(not(feature = "metrics"))]
-        { $block }
+        {
+            $block
+        }
     }};
 }
-

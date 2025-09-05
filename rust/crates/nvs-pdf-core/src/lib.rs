@@ -2,19 +2,19 @@ use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
 
+pub mod content;
+pub mod debug;
 pub mod filters;
-pub mod parser; // thin re-export layer
+pub mod fonts;
+pub mod interpret;
+pub mod metrics;
+pub mod normalize;
 pub mod objects;
 pub mod pages;
-pub mod streams;
-pub mod content;
+pub mod parser; // thin re-export layer
 pub mod resources;
-pub mod interpret;
-pub mod fonts;
 pub mod stats;
-pub mod normalize;
-pub mod metrics;
-pub mod debug;
+pub mod streams;
 
 #[derive(Debug, Default, Serialize, Clone)]
 pub struct ProbeResult {
@@ -33,7 +33,11 @@ pub struct ProbeResult {
 pub fn probe_pdf_bytes(path: &str, data: &[u8]) -> ProbeResult {
     // Heuristic, fast regex scans; not a full parser.
     let s = std::str::from_utf8(data).unwrap_or_else(|_| "");
-    let mut r = ProbeResult { path: path.to_string(), size_bytes: data.len() as u64, ..Default::default() };
+    let mut r = ProbeResult {
+        path: path.to_string(),
+        size_bytes: data.len() as u64,
+        ..Default::default()
+    };
     // Page candidates: count "/Type /Page" occurrences
     if !s.is_empty() {
         r.page_candidates = s.matches("/Type /Page").count();
@@ -107,7 +111,10 @@ pub fn summarize(results: &[ProbeResult]) -> ProbeSummary {
 
 // Fast path stub: attempt to extract pages using Rust fast-path. Returns
 // Ok(Some(pages)) when supported, Ok(None) to signal fallback to PDFium.
-pub fn fast_extract_pages(path: &Path, page_limit: Option<usize>) -> Result<Option<Vec<(String, i32)>>> {
+pub fn fast_extract_pages(
+    path: &Path,
+    page_limit: Option<usize>,
+) -> Result<Option<Vec<(String, i32)>>> {
     Ok(fast_extract_pages_with_stats(path, page_limit)?.0)
 }
 
@@ -126,40 +133,68 @@ pub struct FastExtractBreakdown {
     pub total_ms: u128,
 }
 
-pub fn fast_extract_pages_with_stats(path: &Path, page_limit: Option<usize>) -> Result<(Option<Vec<(String, i32)>>, FastExtractBreakdown)> {
+pub fn fast_extract_pages_with_stats(
+    path: &Path,
+    page_limit: Option<usize>,
+) -> Result<(Option<Vec<(String, i32)>>, FastExtractBreakdown)> {
     use memmap2::MmapOptions;
     use std::time::Instant;
     stats::reset();
     let t0 = Instant::now();
     let ti = Instant::now();
-    let f = std::fs::File::open(path)?; let mmap = unsafe { MmapOptions::new().map(&f)? };
+    let f = std::fs::File::open(path)?;
+    let mmap = unsafe { MmapOptions::new().map(&f)? };
     let pr = probe_pdf_bytes(&path.display().to_string(), &mmap);
     let io_ms = ti.elapsed().as_millis();
-    if pr.has_encrypt { return Ok((None, FastExtractBreakdown { total_ms: t0.elapsed().as_millis(), ..Default::default() })); }
+    if pr.has_encrypt {
+        return Ok((
+            None,
+            FastExtractBreakdown {
+                total_ms: t0.elapsed().as_millis(),
+                ..Default::default()
+            },
+        ));
+    }
     let tb = Instant::now();
     let doc = parser::PdfDoc::from_bytes(&mmap)?;
     let build_ms = tb.elapsed().as_millis();
 
     let tt = Instant::now();
     let ids_tree = pages::collect_pages_via_tree(&doc).ok();
-    let mut page_ids = if let Some(v)=ids_tree { v } else { pages::collect_page_object_ids(&doc) };
+    let mut page_ids = if let Some(v) = ids_tree {
+        v
+    } else {
+        pages::collect_page_object_ids(&doc)
+    };
     let tree_ms = tt.elapsed().as_millis();
-    if let Some(limit) = page_limit { page_ids.truncate(limit); }
+    if let Some(limit) = page_limit {
+        page_ids.truncate(limit);
+    }
     let mut pages_out = Vec::new();
     let mut any_ok = false;
     for (idx, id) in page_ids.into_iter().enumerate() {
         let tp = Instant::now();
         match parser::extract_page_text(&doc, id) {
-            Ok(txt) => { pages_out.push((txt, idx as i32)); any_ok = true; }
+            Ok(txt) => {
+                pages_out.push((txt, idx as i32));
+                any_ok = true;
+            }
             Err(_) => { /* skip page on fast path */ }
         }
         let dt = tp.elapsed().as_millis();
         // interpreter time is added inside content module; ensure at least per-page overhead is included
-        stats::add_interpret_duration(0); let _ = dt; // touch dt to avoid warnings if unused in future extensions
+        stats::add_interpret_duration(0);
+        let _ = dt; // touch dt to avoid warnings if unused in future extensions
     }
     let s = stats::snapshot();
     // Convert nanos to millis (ceil) to avoid pervasive zeros from fast ops
-    let to_ms = |ns: u128| -> u128 { if ns == 0 { 0 } else { (ns + 999_999) / 1_000_000 } };
+    let to_ms = |ns: u128| -> u128 {
+        if ns == 0 {
+            0
+        } else {
+            (ns + 999_999) / 1_000_000
+        }
+    };
     let out = if any_ok { Some(pages_out) } else { None };
     let br = FastExtractBreakdown {
         io_ms,
@@ -178,7 +213,10 @@ pub fn fast_extract_pages_with_stats(path: &Path, page_limit: Option<usize>) -> 
 }
 
 // Variant that operates directly on provided bytes (skips file IO/mmapping).
-pub fn fast_extract_pages_from_bytes_with_stats(data: &[u8], page_limit: Option<usize>) -> Result<(Option<Vec<(String, i32)>>, FastExtractBreakdown)> {
+pub fn fast_extract_pages_from_bytes_with_stats(
+    data: &[u8],
+    page_limit: Option<usize>,
+) -> Result<(Option<Vec<(String, i32)>>, FastExtractBreakdown)> {
     use std::time::Instant;
     stats::reset();
     let t0 = Instant::now();
@@ -189,20 +227,35 @@ pub fn fast_extract_pages_from_bytes_with_stats(data: &[u8], page_limit: Option<
 
     let tt = Instant::now();
     let ids_tree = pages::collect_pages_via_tree(&doc).ok();
-    let mut page_ids = if let Some(v)=ids_tree { v } else { pages::collect_page_object_ids(&doc) };
+    let mut page_ids = if let Some(v) = ids_tree {
+        v
+    } else {
+        pages::collect_page_object_ids(&doc)
+    };
     let tree_ms = tt.elapsed().as_millis();
-    if let Some(limit) = page_limit { page_ids.truncate(limit); }
+    if let Some(limit) = page_limit {
+        page_ids.truncate(limit);
+    }
     let mut pages_out = Vec::new();
     let mut any_ok = false;
     for (idx, id) in page_ids.into_iter().enumerate() {
         match parser::extract_page_text(&doc, id) {
-            Ok(txt) => { pages_out.push((txt, idx as i32)); any_ok = true; }
+            Ok(txt) => {
+                pages_out.push((txt, idx as i32));
+                any_ok = true;
+            }
             Err(_) => { /* skip page on fast path */ }
         }
     }
     let s = stats::snapshot();
     let out = if any_ok { Some(pages_out) } else { None };
-    let to_ms = |ns: u128| -> u128 { if ns == 0 { 0 } else { (ns + 999_999) / 1_000_000 } };
+    let to_ms = |ns: u128| -> u128 {
+        if ns == 0 {
+            0
+        } else {
+            (ns + 999_999) / 1_000_000
+        }
+    };
     let br = FastExtractBreakdown {
         io_ms: 0,
         build_ms,
@@ -231,17 +284,24 @@ pub struct FastDebugReport {
     pub objstm_streams: Vec<ObjStmDebug>,
 }
 
-pub fn fast_extract_pages_with_debug(path: &Path, page_limit: Option<usize>) -> Result<(Option<Vec<(String,i32)>>, FastDebugReport)> {
+pub fn fast_extract_pages_with_debug(
+    path: &Path,
+    page_limit: Option<usize>,
+) -> Result<(Option<Vec<(String, i32)>>, FastDebugReport)> {
     use memmap2::MmapOptions;
     let mut report = FastDebugReport::default();
     report.path = path.display().to_string();
-    let f = std::fs::File::open(path)?; let mmap = unsafe { MmapOptions::new().map(&f)? };
+    let f = std::fs::File::open(path)?;
+    let mmap = unsafe { MmapOptions::new().map(&f)? };
     let pr = probe_pdf_bytes(&path.display().to_string(), &mmap);
     report.page_candidates = pr.page_candidates;
-    if pr.has_encrypt { report.errors.push("encrypted".into()); return Ok((None, report)); }
+    if pr.has_encrypt {
+        report.errors.push("encrypted".into());
+        return Ok((None, report));
+    }
     let doc = match parser::PdfDoc::from_bytes(&mmap) {
-        Ok(d)=>d,
-        Err(e)=>{
+        Ok(d) => d,
+        Err(e) => {
             report.errors.push(format!("from_bytes: {}", e));
             // Probe XRef streams for more detail
             report.xref_streams = probe_xref_streams(&mmap);
@@ -251,15 +311,29 @@ pub fn fast_extract_pages_with_debug(path: &Path, page_limit: Option<usize>) -> 
     };
     let mut pages_out = Vec::new();
     let ids_tree = pages::collect_pages_via_tree(&doc).ok();
-    let mut page_ids = if let Some(v)=ids_tree { report.used_tree=true; v } else { report.used_tree=false; pages::collect_page_object_ids(&doc) };
+    let mut page_ids = if let Some(v) = ids_tree {
+        report.used_tree = true;
+        v
+    } else {
+        report.used_tree = false;
+        pages::collect_page_object_ids(&doc)
+    };
     report.pages_found = page_ids.len();
-    if let Some(limit) = page_limit { page_ids.truncate(limit); }
+    if let Some(limit) = page_limit {
+        page_ids.truncate(limit);
+    }
     for (idx, id) in page_ids.into_iter().enumerate() {
         let (txt_opt, dbg) = debug::extract_page_text_with_debug(&doc, id);
-        if let Some(txt) = txt_opt { pages_out.push((txt, idx as i32)); }
+        if let Some(txt) = txt_opt {
+            pages_out.push((txt, idx as i32));
+        }
         report.pages.push(dbg);
     }
-    if pages_out.is_empty() { Ok((None, report)) } else { Ok((Some(pages_out), report)) }
+    if pages_out.is_empty() {
+        Ok((None, report))
+    } else {
+        Ok((Some(pages_out), report))
+    }
 }
 
 #[derive(serde::Serialize, Default, Clone)]
@@ -285,47 +359,89 @@ fn probe_xref_streams(bytes: &[u8]) -> Vec<XrefStreamDebug> {
         if bytes[i].is_ascii_digit() {
             // parse obj number
             let (objnum_opt, j1) = parse_uint_local(bytes, i);
-            if objnum_opt.is_none() { i += 1; continue; }
+            if objnum_opt.is_none() {
+                i += 1;
+                continue;
+            }
             let objnum = objnum_opt.unwrap() as u32;
             let j1 = skip_ws_local(bytes, j1);
             let (gen_opt, j2) = parse_uint_local(bytes, j1);
-            if gen_opt.is_none() { i += 1; continue; }
+            if gen_opt.is_none() {
+                i += 1;
+                continue;
+            }
             let gen = gen_opt.unwrap() as u16;
             let j2 = skip_ws_local(bytes, j2);
-            if bytes.get(j2..j2+3) == Some(b"obj") {
-                if let Some(end) = find_token_local(bytes, j2+3, b"endobj") {
-                    let slice = &bytes[i..end+6];
+            if bytes.get(j2..j2 + 3) == Some(b"obj") {
+                if let Some(end) = find_token_local(bytes, j2 + 3, b"endobj") {
+                    let slice = &bytes[i..end + 6];
                     if let Ok(val) = parse_indirect_object(slice) {
-                        if let crate::objects::PdfValue::Stream{ dict, data } = val {
+                        if let crate::objects::PdfValue::Stream { dict, data } = val {
                             if dict.get("Type").and_then(|v| as_name_local(v)) == Some("XRef") {
-                                let mut d = XrefStreamDebug { obj: objnum, gen, ..Default::default() };
+                                let mut d = XrefStreamDebug {
+                                    obj: objnum,
+                                    gen,
+                                    ..Default::default()
+                                };
                                 if let Some(fv) = dict.get("Filter") {
                                     match fv {
-                                        crate::objects::PdfValue::Name(n) => d.filter.push(n.clone()),
-                                        crate::objects::PdfValue::Array(arr) => {
-                                            for f in arr { if let Some(n)=as_name_local(f) { d.filter.push(n.to_string()); } }
+                                        crate::objects::PdfValue::Name(n) => {
+                                            d.filter.push(n.clone())
                                         }
-                                        _=>{}
+                                        crate::objects::PdfValue::Array(arr) => {
+                                            for f in arr {
+                                                if let Some(n) = as_name_local(f) {
+                                                    d.filter.push(n.to_string());
+                                                }
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
-                                if let Some(dp) = dict.get("DecodeParms") { d.decodeparms_predictor = get_predictor_local(dp); }
-                                if let Some(warr) = dict.get("W").and_then(|v| as_array_local(v)) {
-                                    d.w = warr.iter().filter_map(|v| match v { crate::objects::PdfValue::Int(i)=>Some(*i), crate::objects::PdfValue::Real(f)=>Some(*f as i64), _=>None }).collect();
+                                if let Some(dp) = dict.get("DecodeParms") {
+                                    d.decodeparms_predictor = get_predictor_local(dp);
                                 }
-                                if let Some(idx) = dict.get("Index").and_then(|v| as_array_local(v)) { d.index_len = idx.len(); }
-                                if let Some(crate::objects::PdfValue::Int(sz)) = dict.get("Size") { d.size = Some(*sz); }
-                                if let Some(lenv) = dict.get("Length") { d.length = match lenv { crate::objects::PdfValue::Int(i)=>Some(*i), crate::objects::PdfValue::Real(f)=>Some(*f as i64), _=>None }; }
+                                if let Some(warr) = dict.get("W").and_then(|v| as_array_local(v)) {
+                                    d.w = warr
+                                        .iter()
+                                        .filter_map(|v| match v {
+                                            crate::objects::PdfValue::Int(i) => Some(*i),
+                                            crate::objects::PdfValue::Real(f) => Some(*f as i64),
+                                            _ => None,
+                                        })
+                                        .collect();
+                                }
+                                if let Some(idx) = dict.get("Index").and_then(|v| as_array_local(v))
+                                {
+                                    d.index_len = idx.len();
+                                }
+                                if let Some(crate::objects::PdfValue::Int(sz)) = dict.get("Size") {
+                                    d.size = Some(*sz);
+                                }
+                                if let Some(lenv) = dict.get("Length") {
+                                    d.length = match lenv {
+                                        crate::objects::PdfValue::Int(i) => Some(*i),
+                                        crate::objects::PdfValue::Real(f) => Some(*f as i64),
+                                        _ => None,
+                                    };
+                                }
                                 d.data_len = Some(data.len());
                                 d.data_preview_hex = Some(hex_preview(&data, 16));
-                                match crate::streams::get_stream_data_with_filters(&dict, data.clone()) {
+                                match crate::streams::get_stream_data_with_filters(
+                                    &dict,
+                                    data.clone(),
+                                ) {
                                     Ok(_) => { /* ok */ }
-                                    Err(e) => { d.decode_error = Some(format!("{}", e)); }
+                                    Err(e) => {
+                                        d.decode_error = Some(format!("{}", e));
+                                    }
                                 }
                                 out.push(d);
                             }
                         }
                     }
-                    i = end + 6; continue;
+                    i = end + 6;
+                    continue;
                 }
             }
         }
@@ -355,44 +471,78 @@ fn probe_objstm_streams(bytes: &[u8]) -> Vec<ObjStmDebug> {
     while i + 6 < bytes.len() {
         if bytes[i].is_ascii_digit() {
             let (objnum_opt, j1) = parse_uint_local(bytes, i);
-            if objnum_opt.is_none() { i += 1; continue; }
+            if objnum_opt.is_none() {
+                i += 1;
+                continue;
+            }
             let objnum = objnum_opt.unwrap() as u32;
             let j1 = skip_ws_local(bytes, j1);
             let (gen_opt, j2) = parse_uint_local(bytes, j1);
-            if gen_opt.is_none() { i += 1; continue; }
+            if gen_opt.is_none() {
+                i += 1;
+                continue;
+            }
             let gen = gen_opt.unwrap() as u16;
             let j2 = skip_ws_local(bytes, j2);
-            if bytes.get(j2..j2+3) == Some(b"obj") {
-                if let Some(end) = find_token_local(bytes, j2+3, b"endobj") {
-                    let slice = &bytes[i..end+6];
+            if bytes.get(j2..j2 + 3) == Some(b"obj") {
+                if let Some(end) = find_token_local(bytes, j2 + 3, b"endobj") {
+                    let slice = &bytes[i..end + 6];
                     if let Ok(val) = parse_indirect_object(slice) {
-                        if let crate::objects::PdfValue::Stream{ dict, data } = val {
+                        if let crate::objects::PdfValue::Stream { dict, data } = val {
                             if dict.get("Type").and_then(|v| as_name_local(v)) == Some("ObjStm") {
-                                let mut d = ObjStmDebug { obj: objnum, gen, ..Default::default() };
+                                let mut d = ObjStmDebug {
+                                    obj: objnum,
+                                    gen,
+                                    ..Default::default()
+                                };
                                 if let Some(fv) = dict.get("Filter") {
                                     match fv {
-                                        crate::objects::PdfValue::Name(n) => d.filter.push(n.clone()),
-                                        crate::objects::PdfValue::Array(arr) => {
-                                            for f in arr { if let Some(n)=as_name_local(f) { d.filter.push(n.to_string()); } }
+                                        crate::objects::PdfValue::Name(n) => {
+                                            d.filter.push(n.clone())
                                         }
-                                        _=>{}
+                                        crate::objects::PdfValue::Array(arr) => {
+                                            for f in arr {
+                                                if let Some(n) = as_name_local(f) {
+                                                    d.filter.push(n.to_string());
+                                                }
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
-                                if let Some(dp) = dict.get("DecodeParms") { d.decodeparms_predictor = get_predictor_local(dp); }
-                                if let Some(lenv) = dict.get("Length") { d.length = match lenv { crate::objects::PdfValue::Int(i)=>Some(*i), crate::objects::PdfValue::Real(f)=>Some(*f as i64), _=>None }; }
-                                if let Some(crate::objects::PdfValue::Int(nv)) = dict.get("N") { d.n = Some(*nv); }
-                                if let Some(crate::objects::PdfValue::Int(fv)) = dict.get("First") { d.first = Some(*fv); }
+                                if let Some(dp) = dict.get("DecodeParms") {
+                                    d.decodeparms_predictor = get_predictor_local(dp);
+                                }
+                                if let Some(lenv) = dict.get("Length") {
+                                    d.length = match lenv {
+                                        crate::objects::PdfValue::Int(i) => Some(*i),
+                                        crate::objects::PdfValue::Real(f) => Some(*f as i64),
+                                        _ => None,
+                                    };
+                                }
+                                if let Some(crate::objects::PdfValue::Int(nv)) = dict.get("N") {
+                                    d.n = Some(*nv);
+                                }
+                                if let Some(crate::objects::PdfValue::Int(fv)) = dict.get("First") {
+                                    d.first = Some(*fv);
+                                }
                                 d.data_len = Some(data.len());
                                 d.data_preview_hex = Some(hex_preview(&data, 16));
-                                match crate::streams::get_stream_data_with_filters(&dict, data.clone()) {
+                                match crate::streams::get_stream_data_with_filters(
+                                    &dict,
+                                    data.clone(),
+                                ) {
                                     Ok(_) => {}
-                                    Err(e) => { d.decode_error = Some(format!("{}", e)); }
+                                    Err(e) => {
+                                        d.decode_error = Some(format!("{}", e));
+                                    }
                                 }
                                 out.push(d);
                             }
                         }
                     }
-                    i = end + 6; continue;
+                    i = end + 6;
+                    continue;
                 }
             }
         }
@@ -403,25 +553,64 @@ fn probe_objstm_streams(bytes: &[u8]) -> Vec<ObjStmDebug> {
 
 fn parse_uint_local(bytes: &[u8], mut i: usize) -> (Option<i64>, usize) {
     let start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() { i+=1; }
-    if i == start { return (None, i); }
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == start {
+        return (None, i);
+    }
     if let Ok(s) = std::str::from_utf8(&bytes[start..i]) {
-        if let Ok(n) = s.parse::<i64>() { return (Some(n), i); }
+        if let Ok(n) = s.parse::<i64>() {
+            return (Some(n), i);
+        }
     }
     (None, i)
 }
-fn skip_ws_local(bytes: &[u8], mut i: usize) -> usize { while i < bytes.len() && crate::objects::is_ws(bytes[i]) { i+=1; } i }
-fn find_token_local(bytes: &[u8], mut i: usize, token: &[u8]) -> Option<usize> { while i + token.len() <= bytes.len() { if &bytes[i..i+token.len()] == token { return Some(i); } i+=1; } None }
-fn as_name_local(v: &crate::objects::PdfValue) -> Option<&str> { if let crate::objects::PdfValue::Name(ref s) = v { Some(s.as_str()) } else { None } }
-fn as_array_local(v: &crate::objects::PdfValue) -> Option<&Vec<crate::objects::PdfValue>> { if let crate::objects::PdfValue::Array(ref a) = v { Some(a) } else { None } }
+fn skip_ws_local(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() && crate::objects::is_ws(bytes[i]) {
+        i += 1;
+    }
+    i
+}
+fn find_token_local(bytes: &[u8], mut i: usize, token: &[u8]) -> Option<usize> {
+    while i + token.len() <= bytes.len() {
+        if &bytes[i..i + token.len()] == token {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+fn as_name_local(v: &crate::objects::PdfValue) -> Option<&str> {
+    if let crate::objects::PdfValue::Name(ref s) = v {
+        Some(s.as_str())
+    } else {
+        None
+    }
+}
+fn as_array_local(v: &crate::objects::PdfValue) -> Option<&Vec<crate::objects::PdfValue>> {
+    if let crate::objects::PdfValue::Array(ref a) = v {
+        Some(a)
+    } else {
+        None
+    }
+}
 fn get_predictor_local(dp: &crate::objects::PdfValue) -> Option<i64> {
     match dp {
-        crate::objects::PdfValue::Dict(d) => d.get("Predictor").and_then(|v| match v { crate::objects::PdfValue::Int(i)=>Some(*i), crate::objects::PdfValue::Real(f)=>Some(*f as i64), _=>None }),
+        crate::objects::PdfValue::Dict(d) => d.get("Predictor").and_then(|v| match v {
+            crate::objects::PdfValue::Int(i) => Some(*i),
+            crate::objects::PdfValue::Real(f) => Some(*f as i64),
+            _ => None,
+        }),
         crate::objects::PdfValue::Array(arr) => {
-            for v in arr { if let Some(i)=get_predictor_local(v) { return Some(i); } }
+            for v in arr {
+                if let Some(i) = get_predictor_local(v) {
+                    return Some(i);
+                }
+            }
             None
         }
-        _=>None
+        _ => None,
     }
 }
 
@@ -429,7 +618,9 @@ fn hex_preview(data: &[u8], n: usize) -> String {
     let mut s = String::new();
     let take = std::cmp::min(n, data.len());
     for (i, b) in data[..take].iter().enumerate() {
-        if i > 0 { s.push(' '); }
+        if i > 0 {
+            s.push(' ');
+        }
         s.push_str(&format!("{:02X}", b));
     }
     s

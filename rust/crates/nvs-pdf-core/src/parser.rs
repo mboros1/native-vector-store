@@ -2,7 +2,6 @@
 //! from the modular layout. Existing call sites can continue to use
 //! `nvs_pdf_core::parser::*`.
 
-pub use crate::objects::{PdfValue, PdfDoc};
-pub use crate::pages::{collect_pages_via_tree, collect_page_object_ids};
 pub use crate::content::extract_page_text;
-
+pub use crate::objects::{PdfDoc, PdfValue};
+pub use crate::pages::{collect_page_object_ids, collect_pages_via_tree};
