@@ -32,10 +32,7 @@ pub struct ProbeResult {
 
 pub fn probe_pdf_bytes(path: &str, data: &[u8]) -> ProbeResult {
     // Heuristic, fast regex scans; not a full parser.
-    let s = match std::str::from_utf8(data) {
-        Ok(v) => v,
-        Err(_) => "", // Binary or mixed: skip string-based probes below
-    };
+    let s = std::str::from_utf8(data).unwrap_or_else(|_| "");
     let mut r = ProbeResult { path: path.to_string(), size_bytes: data.len() as u64, ..Default::default() };
     // Page candidates: count "/Type /Page" occurrences
     if !s.is_empty() {
@@ -70,7 +67,7 @@ fn byte_count(hay: &[u8], needle: &[u8]) -> usize {
     hay.windows(needle.len()).filter(|w| *w == needle).count()
 }
 
-pub fn probe_path(path: &std::path::Path) -> Result<ProbeResult> {
+pub fn probe_path(path: &Path) -> Result<ProbeResult> {
     use memmap2::MmapOptions;
     let f = std::fs::File::open(path)?;
     let mmap = unsafe { MmapOptions::new().map(&f)? };
@@ -97,13 +94,13 @@ pub fn summarize(results: &[ProbeResult]) -> ProbeSummary {
     for r in results {
         s.total_bytes += r.size_bytes;
         s.total_pages_est += r.page_candidates;
-        s.encrypted += (r.has_encrypt as usize);
-        s.with_tounicode += (r.has_tounicode as usize);
-        s.flate += (r.filter_flate as usize);
-        s.lzw += (r.filter_lzw as usize);
-        s.ascii85 += (r.filter_ascii85 as usize);
-        s.asciihex += (r.filter_asciihex as usize);
-        s.runlength += (r.filter_runlength as usize);
+        s.encrypted += r.has_encrypt as usize;
+        s.with_tounicode += r.has_tounicode as usize;
+        s.flate += r.filter_flate as usize;
+        s.lzw += r.filter_lzw as usize;
+        s.ascii85 += r.filter_ascii85 as usize;
+        s.asciihex += r.filter_asciihex as usize;
+        s.runlength += r.filter_runlength as usize;
     }
     s
 }
@@ -281,7 +278,7 @@ pub struct XrefStreamDebug {
 }
 
 fn probe_xref_streams(bytes: &[u8]) -> Vec<XrefStreamDebug> {
-    use crate::objects::{parse_indirect_object, is_ws};
+    use crate::objects::parse_indirect_object;
     let mut out = Vec::new();
     let mut i = 0usize;
     while i + 6 < bytes.len() {
