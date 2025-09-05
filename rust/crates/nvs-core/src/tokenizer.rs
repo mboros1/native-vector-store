@@ -184,11 +184,17 @@ pub fn preprocess_bm25(input: &str) -> String {
             '-' => {
                 // If hyphen is followed by a line break or whitespace+linebreak, treat as hyphenation -> space
                 let it = chars.clone();
-                let mut is_break = false; let mut consumed = 0;
+                let mut is_break = false;
+                let mut consumed = 0;
                 for nc in it {
-                    if nc == '\n' { is_break = true; consumed += 1; break; }
-                    else if nc == '\r' || nc == '\t' || nc == ' ' { consumed += 1; continue; }
-                    else { break; }
+                    if nc == '\n' {
+                        is_break = true;
+                        consumed += 1;
+                        break;
+                    } else if nc == '\r' || nc == '\t' || nc == ' ' {
+                        consumed += 1;
+                        continue;
+                    } else { break; }
                 }
                 if is_break {
                     // consume the peeked whitespace/break
@@ -208,8 +214,14 @@ pub fn preprocess_bm25(input: &str) -> String {
     let mut last_space = false;
     for c in out.chars() {
         if c.is_whitespace() {
-            if !last_space { collapsed.push(' '); last_space = true; }
-        } else { collapsed.push(c); last_space = false; }
+            if !last_space {
+                collapsed.push(' ');
+                last_space = true;
+            }
+        } else {
+            collapsed.push(c);
+            last_space = false;
+        }
     }
     collapsed
 }
@@ -223,7 +235,10 @@ fn strip_possessive(s: &str) -> &str {
     // Remove trailing 's or ’s using char boundaries
     let mut prev: Option<(usize, char)> = None;
     let mut last: Option<(usize, char)> = None;
-    for (i, c) in s.char_indices() { prev = last; last = Some((i, c)); }
+    for (i, c) in s.char_indices() {
+        prev = last;
+        last = Some((i, c));
+    }
     if let (Some((pi, pc)), Some((_li, lc))) = (prev, last) {
         if (lc == 's' || lc == 'S') && (pc == '\'' || pc == '\u{2019}') {
             return &s[..pi];
@@ -495,7 +510,7 @@ mod simple_tokenizer_tests {
     fn periods_and_abbrev() {
         let t = SimpleTokenizer::new();
         assert_eq!(t.split("...").as_slice(), [".", ".", "."]); // ellipsis split
-                                                                // Abbreviations keep period when in-word
+        // Abbreviations keep period when in-word
         assert_eq!(t.split("Dr. Smith").as_slice(), ["Dr.", "Smith"]);
         // Multi-part: "U.S." -> split trailing period per C++ behavior, known limitation
         assert_eq!(

@@ -4,17 +4,17 @@ pub fn dot(a: &[f32], b: &[f32]) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
         if x86_avx2_fma::get() {
-            unsafe { return dot_avx2_fma(a, b) };
+            unsafe { return dot_avx2_fma(a, b); };
         } else if x86_avx2::get() {
-            unsafe { return dot_avx2(a, b) };
+            unsafe { return dot_avx2(a, b); };
         } else if x86_sse2::get() {
-            unsafe { return dot_sse2(a, b) };
+            unsafe { return dot_sse2(a, b); };
         }
         return dot_scalar(a, b);
     }
     #[cfg(target_arch = "aarch64")]
     {
-        unsafe { return dot_neon(a, b) };
+        unsafe { return dot_neon(a, b); };
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {

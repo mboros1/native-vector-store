@@ -64,7 +64,7 @@ pub fn search_terms(bundle: &Bundle, query_terms: &[&str], k: usize) -> Vec<(u32
         if heap.len() < k {
             heap.push(item);
         } else if let Some(mut top) = heap.peek_mut() {
-            if item.0 .0 > top.0 .0 {
+            if item.0.0 > top.0.0 {
                 *top = item;
             }
         }
