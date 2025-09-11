@@ -123,7 +123,6 @@ impl PdfDoc {
                                                 if let Some(v3) = self.bruteforce_flate_slice(
                                                     range.clone(),
                                                     *len as usize,
-                                                    &dict,
                                                 ) {
                                                     v3
                                                 } else {
@@ -263,15 +262,15 @@ impl PdfDoc {
                 }
             }
             // fallback to find 'endstream'
-            if let Some(end) = find_token(bytes, k, b"endstream") {
+            return if let Some(end) = find_token(bytes, k, b"endstream") {
                 let data = bytes[k..end].to_vec();
                 if let PdfValue::Dict(dict) = val {
-                    return Ok(PdfValue::Stream { dict, data });
+                    Ok(PdfValue::Stream { dict, data })
                 } else {
-                    return Err(anyhow!("stream without dict"));
+                    Err(anyhow!("stream without dict"))
                 }
             } else {
-                return Err(anyhow!("unterminated stream"));
+                Err(anyhow!("unterminated stream"))
             }
         }
         Ok(val)
@@ -306,20 +305,20 @@ impl PdfDoc {
                 }
                 if let Some(end) = last_es {
                     let data = bytes[k..end].to_vec();
-                    if let PdfValue::Dict(dict) = val {
-                        return Ok(PdfValue::Stream { dict, data });
+                    return if let PdfValue::Dict(dict) = val {
+                        Ok(PdfValue::Stream { dict, data })
                     } else {
-                        return Err(anyhow!("scan stream without dict"));
+                        Err(anyhow!("scan stream without dict"))
                     }
                 }
             }
             // Fallback to first endstream if endobj not found
             if let Some(end) = find_token(bytes, k, b"endstream") {
                 let data = bytes[k..end].to_vec();
-                if let PdfValue::Dict(dict) = val {
-                    return Ok(PdfValue::Stream { dict, data });
+                return if let PdfValue::Dict(dict) = val {
+                    Ok(PdfValue::Stream { dict, data })
                 } else {
-                    return Err(anyhow!("scan stream without dict"));
+                    Err(anyhow!("scan stream without dict"))
                 }
             }
             return Err(anyhow!("scan stream: endstream/endobj not found"));
@@ -331,7 +330,6 @@ impl PdfDoc {
         &self,
         bytes_range: Range<usize>,
         declared_len: usize,
-        dict: &BTreeMap<String, PdfValue>,
     ) -> Option<Vec<u8>> {
         let bytes = &self.data[bytes_range.clone()];
         // find stream start
@@ -358,7 +356,7 @@ impl PdfDoc {
         deltas.sort_by_key(|d| d.abs());
         for d in deltas {
             let end = if d.is_negative() {
-                start_end.saturating_sub(d.unsigned_abs() as usize)
+                start_end.saturating_sub(d.unsigned_abs())
             } else {
                 start_end.saturating_add(d as usize)
             };
@@ -611,15 +609,15 @@ pub(crate) fn parse_indirect_object(bytes: &[u8]) -> Result<PdfValue> {
                 }
             }
         }
-        if let Some(end) = find_token(bytes, k, b"endstream") {
+        return if let Some(end) = find_token(bytes, k, b"endstream") {
             let data = bytes[k..end].to_vec();
             if let PdfValue::Dict(dict) = val {
-                return Ok(PdfValue::Stream { dict, data });
+                Ok(PdfValue::Stream { dict, data })
             } else {
-                return Err(anyhow!("stream without dict"));
+                Err(anyhow!("stream without dict"))
             }
         } else {
-            return Err(anyhow!("unterminated stream"));
+            Err(anyhow!("unterminated stream"))
         }
     }
     Ok(val)
