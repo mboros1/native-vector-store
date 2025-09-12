@@ -1,4 +1,5 @@
 use crate::fonts::{parse_tounicode_cmap, ToUnicodeMap};
+#[cfg(feature = "metrics")]
 use crate::metrics::MetricKey;
 use crate::objects::{as_dict, as_name, resolve, PdfDoc, PdfValue};
 use crate::streams::get_stream_data_with_filters;

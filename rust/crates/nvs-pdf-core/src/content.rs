@@ -1,4 +1,5 @@
 use crate::interpret::interpret_contents;
+#[cfg(feature = "metrics")]
 use crate::metrics::MetricKey;
 use crate::normalize::normalize_page_text;
 use crate::objects::{as_dict, resolve, PdfDoc, PdfValue};
@@ -62,4 +63,3 @@ pub fn extract_page_text(doc: &PdfDoc, page: (u32, u16)) -> Result<String> {
     crate::stats::add_page_total_duration(t_page.elapsed().as_nanos());
     Ok(norm)
 }
-

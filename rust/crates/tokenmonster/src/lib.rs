@@ -22,7 +22,10 @@ struct Vocab {
 }
 
 static VOCAB: Lazy<Vocab> = Lazy::new(|| {
+    #[cfg(feature = "tiny_vocab")]
     let mut v = Vocab::default();
+    #[cfg(not(feature = "tiny_vocab"))]
+    let v = Vocab::default();
 
     #[cfg(feature = "tiny_vocab")]
     {
@@ -48,6 +51,7 @@ static VOCAB: Lazy<Vocab> = Lazy::new(|| {
     v
 });
 
+#[cfg_attr(not(feature = "tiny_vocab"), allow(dead_code))]
 fn base64_decode(s: &str) -> String {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut val = 0i32;

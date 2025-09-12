@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+#[cfg(feature = "pdfium")]
 use std::time::Instant;
 
 #[derive(Clone, Debug)]

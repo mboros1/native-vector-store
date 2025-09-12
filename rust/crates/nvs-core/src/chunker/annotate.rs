@@ -2,12 +2,12 @@ use super::TokenCounter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LineType {
-    NORMAL,
-    MAJOR_HEADING,
-    MINOR_HEADING,
-    LIST_ITEM,
-    BLANK,
-    CODE_BLOCK,
+    Normal,
+    MajorHeading,
+    MinorHeading,
+    ListItem,
+    Blank,
+    CodeBlock,
 }
 
 #[derive(Clone, Debug)]
@@ -21,21 +21,21 @@ pub struct AnnotatedLine {
 
 fn detect_line_type(line: &str) -> (LineType, i32) {
     let s = line.trim();
-    if s.is_empty() { return (LineType::BLANK, 0); }
+    if s.is_empty() { return (LineType::Blank, 0); }
     // markdown-style headings
     if let Some(stripped) = s.strip_prefix('#') {
         let mut level = 1;
         let mut rest = stripped;
         while let Some(r) = rest.strip_prefix('#') { level += 1; rest = r; }
-        if level <= 2 { return (LineType::MAJOR_HEADING, level as i32); }
-        return (LineType::MINOR_HEADING, level as i32);
+        if level <= 2 { return (LineType::MajorHeading, level as i32); }
+        return (LineType::MinorHeading, level as i32);
     }
     // list items
     if s.starts_with('-') || s.starts_with('*') || s.starts_with('+') {
-        return (LineType::LIST_ITEM, 0);
+        return (LineType::ListItem, 0);
     }
-    if s.chars().all(|c| c == '`') { return (LineType::CODE_BLOCK, 0); }
-    (LineType::NORMAL, 0)
+    if s.chars().all(|c| c == '`') { return (LineType::CodeBlock, 0); }
+    (LineType::Normal, 0)
 }
 
 pub fn annotate_lines(pages: &[(String, i32)], tokenizer: &dyn TokenCounter) -> Vec<AnnotatedLine> {
@@ -55,4 +55,3 @@ pub fn annotate_lines(pages: &[(String, i32)], tokenizer: &dyn TokenCounter) -> 
     }
     out
 }
-

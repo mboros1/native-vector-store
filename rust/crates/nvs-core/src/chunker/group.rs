@@ -18,7 +18,7 @@ impl Default for SemanticUnit {
 
 impl SemanticUnit {
     pub fn add(&mut self, l: AnnotatedLine) {
-        if matches!(l.line_type, LineType::MAJOR_HEADING) {
+        if matches!(l.line_type, LineType::MajorHeading) {
             self.has_major_heading = true;
             self.min_heading_level = self.min_heading_level.min(l.heading_level);
         }
@@ -39,10 +39,10 @@ pub fn group_semantic_units(lines: &[AnnotatedLine]) -> Vec<SemanticUnit> {
     for (i, l) in lines.iter().cloned().enumerate() {
         let mut break_here = false;
         match l.line_type {
-            LineType::MAJOR_HEADING | LineType::MINOR_HEADING => break_here = !cur.lines.is_empty(),
-            LineType::BLANK => {
+            LineType::MajorHeading | LineType::MinorHeading => break_here = !cur.lines.is_empty(),
+            LineType::Blank => {
                 if let Some(nxt) = lines.get(i+1) {
-                    if matches!(nxt.line_type, LineType::MAJOR_HEADING | LineType::MINOR_HEADING) {
+                    if matches!(nxt.line_type, LineType::MajorHeading | LineType::MinorHeading) {
                         break_here = !cur.lines.is_empty();
                     }
                 }
@@ -53,11 +53,10 @@ pub fn group_semantic_units(lines: &[AnnotatedLine]) -> Vec<SemanticUnit> {
             out.push(cur);
             cur = SemanticUnit::default();
         }
-        if !(l.line_type == LineType::BLANK && cur.lines.is_empty()) {
+        if !(l.line_type == LineType::Blank && cur.lines.is_empty()) {
             cur.add(l);
         }
     }
     if !cur.lines.is_empty() { out.push(cur); }
     out
 }
-
