@@ -813,6 +813,7 @@ dependencies = [
  "nvs-html-core",
  "serde",
  "serde_json",
+ "tempfile",
  "tokenmonster",
  "walkdir",
  "xxhash-rust",

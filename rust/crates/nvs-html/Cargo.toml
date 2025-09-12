@@ -20,6 +20,9 @@ nvs-html-core = { path = "../nvs-html-core" }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 
+[dev-dependencies]
+tempfile = "3"
+
 [[bin]]
 name = "chunk-html-cli"
 path = "src/bin/chunk-html-cli.rs"

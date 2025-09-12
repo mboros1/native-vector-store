@@ -19,6 +19,15 @@ impl Default for HtmlChunkOptions {
     }
 }
 
+/// Parse an HTML file and chunk its sections using the shared chunker.
+///
+/// Example (no_run)
+/// ```no_run
+/// let path = std::path::Path::new("/path/to/file.html");
+/// let chunks = nvs_html::parse_to_chunks(path, &nvs_html::HtmlChunkOptions::default())?;
+/// println!("chunks={} first_len={}", chunks.len(), chunks.get(0).map(|c| c.token_count).unwrap_or(0));
+/// # anyhow::Ok(())
+/// ```
 pub fn parse_to_chunks(html_path: &Path, opts: &HtmlChunkOptions) -> Result<Vec<nvs_core::chunker::Chunk>> {
     Ok(parse_to_chunks_with_stats(html_path, opts)?.0)
 }
@@ -39,6 +48,15 @@ pub struct ChunkStats {
     pub final_ms: u128,
 }
 
+/// Like [`parse_to_chunks`], but also returns timing breakdowns of the pipeline.
+///
+/// Example (no_run)
+/// ```no_run
+/// let path = std::path::Path::new("/path/to/file.html");
+/// let (chunks, stats) = nvs_html::parse_to_chunks_with_stats(path, &nvs_html::HtmlChunkOptions::default())?;
+/// println!("chunks={} total_ms={}", chunks.len(), stats.total_ms);
+/// # anyhow::Ok(())
+/// ```
 pub fn parse_to_chunks_with_stats(html_path: &Path, opts: &HtmlChunkOptions) -> Result<(Vec<nvs_core::chunker::Chunk>, ChunkStats)> {
     use std::time::Instant;
     let t0 = Instant::now();
@@ -67,7 +85,37 @@ pub fn parse_to_chunks_with_stats(html_path: &Path, opts: &HtmlChunkOptions) -> 
     Ok((chunks, stats))
 }
 
+/// Write chunks to a JSON file with `mimetype:"text/html"` in the header.
+///
+/// Example (no_run)
+/// ```no_run
+/// let path = std::path::Path::new("/path/to/file.html");
+/// let out = std::path::Path::new("/tmp/out.json");
+/// let chunks = nvs_html::parse_to_chunks(path, &nvs_html::HtmlChunkOptions::default())?;
+/// nvs_html::write_chunks_json(path, &chunks, out)?;
+/// # anyhow::Ok(())
+/// ```
 pub fn write_chunks_json(html_path: &Path, chunks: &[nvs_core::chunker::Chunk], out_path: &Path) -> Result<()> {
     json::write_chunks_json(html_path, chunks, out_path)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn parse_and_write_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let html_path = dir.path().join("sample.html");
+        fs::write(&html_path, "<html><body><h1>Title</h1><p>Hello world.</p></body></html>").unwrap();
+        let opts = HtmlChunkOptions { max_tokens: 64, min_tokens: 1, overlap_tokens: 0, section_limit: None };
+        let (chunks, _stats) = parse_to_chunks_with_stats(&html_path, &opts).unwrap();
+        assert!(!chunks.is_empty());
+        let out = dir.path().join("out.json");
+        write_chunks_json(&html_path, &chunks, &out).unwrap();
+        let data = fs::read_to_string(&out).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert!(v.is_array());
+    }
+}

@@ -1,5 +1,18 @@
 use std::collections::HashMap;
 
+/// Greedy longest-match tokenizer backed by a compact trie.
+///
+/// Example
+/// ```
+/// // Build tokenizer from embedded cl100k binary.
+/// let tm = tokenmonster::GreedyTokenizer::from_cl100k_bin();
+/// let ids = tm.encode("hello");
+/// assert!(!ids.is_empty());
+/// let bytes = tm.decode(&ids);
+/// assert_eq!(String::from_utf8(bytes).unwrap(), "hello");
+/// // Fast token counting
+/// assert!(tm.count_tokens("some text") > 0);
+/// ```
 #[derive(Default)]
 pub struct GreedyTokenizer {
     trie: Vec<Node>,

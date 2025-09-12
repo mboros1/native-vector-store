@@ -14,6 +14,15 @@ pub struct HtmlExtractBreakdown {
     pub total_ms: u128,
 }
 
+/// High-level entry: mmap a file and extract sections as (text, section_index).
+///
+/// Example (no_run)
+/// ```no_run
+/// let path = std::path::Path::new("/path/to/file.html");
+/// let (sections, stats) = nvs_html_core::fast_extract_sections_with_stats(path, Some(10))?;
+/// assert!(sections.len() <= 10);
+/// # anyhow::Ok(())
+/// ```
 // High-level entry: mmap a file and extract sections
 pub fn fast_extract_sections_with_stats(
     path: &Path,
@@ -31,6 +40,15 @@ pub fn fast_extract_sections_with_stats(
     Ok((sections, br))
 }
 
+/// Variant from provided bytes (already in memory).
+///
+/// Example
+/// ```
+/// let html = br#"<html><body><h1>Title</h1><p>Hello</p></body></html>"#;
+/// let (sections, stats) = nvs_html_core::fast_extract_sections_from_bytes_with_stats(html, None)?;
+/// assert!(!sections.is_empty());
+/// # anyhow::Ok(())
+/// ```
 // Variant from provided bytes (already in memory)
 pub fn fast_extract_sections_from_bytes_with_stats(
     data: &[u8],
@@ -73,3 +91,13 @@ pub fn fast_extract_sections_from_bytes_with_stats(
     ))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn extract_basic_sections() {
+        let html = br#"<html><body><h1>Title</h1><p>A</p><h2>Sub</h2><p>B</p></body></html>"#;
+        let (sections, _stats) = fast_extract_sections_from_bytes_with_stats(html, None).unwrap();
+        assert!(sections.len() >= 2);
+    }
+}

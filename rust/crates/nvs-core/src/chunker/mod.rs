@@ -57,6 +57,21 @@ impl Default for ChunkOptions {
     }
 }
 
+/// Chunk a list of (text, page_index) into semantic chunks.
+///
+/// Example
+/// ```
+/// use nvs_core::chunker::{chunk_pages, ChunkOptions};
+/// let pages = vec![
+///     ("# Title\nIntro paragraph.".to_string(), 0),
+///     ("## Section\nSome content here.".to_string(), 1),
+/// ];
+/// let tok = tokenmonster::GreedyTokenizer::from_cl100k_bin();
+/// let opts = ChunkOptions { max_tokens: 64, min_tokens: 8, overlap_tokens: 4 };
+/// let chunks = chunk_pages(&pages, &tok, &opts);
+/// assert!(!chunks.is_empty());
+/// assert!(chunks[0].token_count > 0);
+/// ```
 pub fn chunk_pages(pages: &[(String, i32)], tokenizer: &dyn TokenCounter, opts: &ChunkOptions) -> Vec<Chunk> {
     if pages.is_empty() { return Vec::new(); }
 
@@ -82,6 +97,18 @@ pub struct ChunkerStats {
     pub total_ms: u128,
 }
 
+/// Like [`chunk_pages`], but also returns timing breakdowns of each stage.
+///
+/// Example
+/// ```
+/// use nvs_core::chunker::{chunk_pages_with_stats, ChunkOptions};
+/// let pages = vec![("# H\nBody".to_string(), 0)];
+/// let tok = tokenmonster::GreedyTokenizer::from_cl100k_bin();
+/// let opts = ChunkOptions { max_tokens: 64, min_tokens: 8, overlap_tokens: 0 };
+/// let (chunks, stats) = chunk_pages_with_stats(&pages, &tok, &opts);
+/// assert_eq!(chunks.len() > 0, true);
+/// assert!(stats.total_ms >= 0);
+/// ```
 pub fn chunk_pages_with_stats(
     pages: &[(String, i32)],
     tokenizer: &dyn TokenCounter,

@@ -29,7 +29,15 @@ impl Default for PdfChunkOptions {
     }
 }
 
-// Convenience: end-to-end chunking from a PDF path to chunk objects
+/// End-to-end chunking from a PDF path to chunk objects.
+///
+/// Example (no_run)
+/// ```no_run
+/// let path = std::path::Path::new("/path/to/file.pdf");
+/// let chunks = nvs_pdf::parse_to_chunks(path, &nvs_pdf::PdfChunkOptions::default())?;
+/// println!("{} chunks", chunks.len());
+/// # anyhow::Ok(())
+/// ```
 pub fn parse_to_chunks(pdf_path: &Path, opts: &PdfChunkOptions) -> Result<Vec<nvs_core::chunker::Chunk>> {
     Ok(parse_to_chunks_with_stats(pdf_path, opts)?.0)
 }
@@ -53,6 +61,14 @@ pub struct ChunkStats {
     pub final_ms: u128,
 }
 
+/// Like [`parse_to_chunks`], but also returns timing breakdowns.
+///
+/// Example (no_run)
+/// ```no_run
+/// let (chunks, stats) = nvs_pdf::parse_to_chunks_with_stats(std::path::Path::new("/path.pdf"), &nvs_pdf::PdfChunkOptions::default())?;
+/// println!("chunks={} total_ms={}", chunks.len(), stats.total_ms);
+/// # anyhow::Ok(())
+/// ```
 pub fn parse_to_chunks_with_stats(pdf_path: &Path, opts: &PdfChunkOptions) -> Result<(Vec<nvs_core::chunker::Chunk>, ChunkStats)> {
     use std::time::Instant;
     let t0 = Instant::now();
@@ -83,7 +99,16 @@ pub fn parse_to_chunks_with_stats(pdf_path: &Path, opts: &PdfChunkOptions) -> Re
     Ok((chunks, stats))
 }
 
-// Convenience: write JSON array matching fast-pdf-parser chunker output
+/// Write JSON array matching fast-pdf-parser chunk schema.
+///
+/// Example (no_run)
+/// ```no_run
+/// let path = std::path::Path::new("/path.pdf");
+/// let out = std::path::Path::new("/tmp/chunks.json");
+/// let chunks = nvs_pdf::parse_to_chunks(path, &nvs_pdf::PdfChunkOptions::default())?;
+/// nvs_pdf::write_chunks_json(path, &chunks, out)?;
+/// # anyhow::Ok(())
+/// ```
 pub fn write_chunks_json(pdf_path: &Path, chunks: &[nvs_core::chunker::Chunk], out_path: &Path) -> Result<()> {
     json::write_chunks_json(pdf_path, chunks, out_path)
 }

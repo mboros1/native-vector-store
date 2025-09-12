@@ -30,6 +30,14 @@ pub struct ProbeResult {
     pub filter_runlength: bool,
 }
 
+/// Probe PDF bytes for quick stats (filters, encryption, rough page count).
+///
+/// Example
+/// ```
+/// let bytes = b"%PDF-1.7\n1 0 obj\n<</Type /Page>>\nendobj\n";
+/// let pr = nvs_pdf_core::probe_pdf_bytes("mem.pdf", bytes);
+/// assert!(pr.page_candidates >= 0);
+/// ```
 pub fn probe_pdf_bytes(path: &str, data: &[u8]) -> ProbeResult {
     // Heuristic, fast regex scans; not a full parser.
     let s = std::str::from_utf8(data).unwrap_or_else(|_| "");
@@ -71,6 +79,14 @@ fn byte_count(hay: &[u8], needle: &[u8]) -> usize {
     hay.windows(needle.len()).filter(|w| *w == needle).count()
 }
 
+/// Probe a PDF on disk via memory-mapping.
+///
+/// Example (no_run)
+/// ```no_run
+/// let pr = nvs_pdf_core::probe_path(std::path::Path::new("/path/to/file.pdf"))?;
+/// println!("pages_est={}", pr.page_candidates);
+/// # anyhow::Ok(())
+/// ```
 pub fn probe_path(path: &Path) -> Result<ProbeResult> {
     use memmap2::MmapOptions;
     let f = std::fs::File::open(path)?;
@@ -111,6 +127,14 @@ pub fn summarize(results: &[ProbeResult]) -> ProbeSummary {
 
 // Fast path stub: attempt to extract pages using Rust fast-path. Returns
 // Ok(Some(pages)) when supported, Ok(None) to signal fallback to PDFium.
+/// Try the fast Rust extractor; returns `Ok(None)` if unsupported (e.g., encrypted).
+///
+/// Example (no_run)
+/// ```no_run
+/// let out = nvs_pdf_core::fast_extract_pages(std::path::Path::new("/path/to/file.pdf"), Some(2))?;
+/// if let Some(pages) = out { println!("{}", pages.len()); }
+/// # anyhow::Ok(())
+/// ```
 pub fn fast_extract_pages(
     path: &Path,
     page_limit: Option<usize>,
@@ -133,6 +157,14 @@ pub struct FastExtractBreakdown {
     pub total_ms: u128,
 }
 
+/// Fast extractor with timing breakdown. Returns `Ok((None, ...))` when unsupported.
+///
+/// Example (no_run)
+/// ```no_run
+/// let (pages_opt, stats) = nvs_pdf_core::fast_extract_pages_with_stats(std::path::Path::new("/path.pdf"), None)?;
+/// assert!(stats.total_ms >= 0);
+/// # anyhow::Ok(())
+/// ```
 pub fn fast_extract_pages_with_stats(
     path: &Path,
     page_limit: Option<usize>,
@@ -213,6 +245,15 @@ pub fn fast_extract_pages_with_stats(
 }
 
 // Variant that operates directly on provided bytes (skips file IO/mmapping).
+/// Fast extractor variant from in-memory bytes.
+///
+/// Example
+/// ```
+/// let dummy_pdf = b"%PDF-1.7\n1 0 obj<<>>endobj\nxref\n0 1\n0000000000 65535 f \ntrailer<<>>startxref\n0\n%%EOF";
+/// let (_pages, stats) = nvs_pdf_core::fast_extract_pages_from_bytes_with_stats(dummy_pdf, None)?;
+/// assert!(stats.total_ms >= 0);
+/// # anyhow::Ok(())
+/// ```
 pub fn fast_extract_pages_from_bytes_with_stats(
     data: &[u8],
     page_limit: Option<usize>,
