@@ -174,7 +174,7 @@ pub fn decode_runlength(input: &[u8]) -> Result<Vec<u8>> {
             i += n;
         } else {
             // b in 129..=255
-            let n = (257 - b as usize);
+            let n = 257 - b as usize;
             if i >= input.len() {
                 return Err(anyhow!("runlength: repeat missing byte"));
             }
@@ -267,7 +267,7 @@ impl LzwState {
         if self.early_change {
             (1u16 << self.code_size) - 1
         } else {
-            (1u16 << self.code_size)
+            1u16 << self.code_size
         }
     }
 

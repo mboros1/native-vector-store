@@ -18,7 +18,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     fs::create_dir_all(&cli.out).context("create output dir")?;
     let pb = indicatif::ProgressBar::new_spinner();
-    let style = indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap();
+    let style = indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")?;
     pb.set_style(style);
 
     let t0 = std::time::Instant::now();

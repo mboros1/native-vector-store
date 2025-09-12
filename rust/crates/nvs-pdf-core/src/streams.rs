@@ -114,12 +114,12 @@ fn apply_filter_with_params(
                     let columns = dp.get("Columns").and_then(as_int).unwrap_or(1) as u32;
                     decoded = apply_predictor(&decoded, predictor, colors, bpc, columns)
                         .map_err(|e| anyhow!("predictor_apply failed pred={} cols={} colors={} bpc={} in_len={} err={}", predictor, columns, colors, bpc, decoded.len(), e))?;
-                    crate::stats::add_decode_duration(tp.elapsed().as_nanos() as u128);
+                    crate::stats::add_decode_duration(tp.elapsed().as_nanos());
                 }
             }
         }
     }
-    crate::stats::add_decode_duration(tdec.elapsed().as_nanos() as u128);
+    crate::stats::add_decode_duration(tdec.elapsed().as_nanos());
     Ok(decoded)
 }
 

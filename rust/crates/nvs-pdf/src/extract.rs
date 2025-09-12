@@ -49,16 +49,16 @@ pub fn extract_text_pages_with_stats(
         let t0 = Instant::now();
         let t_bind = Instant::now();
         static BIND_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-        let _g = BIND_MUTEX.lock().unwrap();
+        let _g = BIND_MUTEX.lock()?;
         let pdfium = {
             let bundle_dir_build = option_env!("PDFIUM_BUNDLE_DIR").map(|s| s.to_string());
             let lib_path_build = option_env!("PDFIUM_LIBRARY_PATH").map(|s| s.to_string());
             let lib_dir_build = option_env!("PDFIUM_LIB_DIR").map(|s| s.to_string());
             let bindings = if let Some(lib_path) = lib_path_build.or_else(|| std::env::var("PDFIUM_LIBRARY_PATH").ok()) {
-                let p = std::path::Path::new(&lib_path);
+                let p = Path::new(&lib_path);
                 Pdfium::bind_to_library(p).map_err(|e| anyhow::anyhow!("bind pdfium at {}: {}", lib_path, e))?
             } else if let Some(lib_dir) = lib_dir_build.or_else(|| std::env::var("PDFIUM_LIB_DIR").ok()).or(bundle_dir_build) {
-                let dir = std::path::Path::new(&lib_dir);
+                let dir = Path::new(&lib_dir);
                 let name = Pdfium::pdfium_platform_library_name_at_path(dir);
                 Pdfium::bind_to_library(name).map_err(|e| anyhow::anyhow!("bind pdfium in {}: {}", lib_dir, e))?
             } else {
@@ -82,13 +82,16 @@ pub fn extract_text_pages_with_stats(
         }
         let pages_ms = t_pages.elapsed().as_millis();
         let total_ms = t0.elapsed().as_millis();
-        return Ok((out, ExtractStats { bind_open_ms, pages_ms, total_ms }));
+        Ok((out, ExtractStats { bind_open_ms, pages_ms, total_ms }))
     }
 
-    // If we reach here without the pdfium feature, the fast path couldn’t extract text.
-    Err(anyhow::anyhow!(
-        "PDF requires pdfium fallback, but feature 'pdfium' is not enabled"
-    ))
+    // If PDFium is not enabled and Rust backend yielded no pages, return an error.
+    #[cfg(not(feature = "pdfium"))]
+    {
+        bail!(
+            "no pages extracted with Rust backend and pdfium feature is disabled"
+        );
+    }
 }
 
 #[cfg(feature = "pdfium")]
@@ -97,7 +100,6 @@ pub fn extract_text_pages_with_pdfium(
     pdf_path: &Path,
     page_limit: Option<usize>,
 ) -> Result<(Vec<(String, i32)>, ExtractStats)> {
-    use pdfium_render::prelude::*;
     let t0 = Instant::now();
     let t_open = Instant::now();
     let doc = pdfium

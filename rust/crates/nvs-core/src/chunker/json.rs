@@ -57,11 +57,11 @@ pub fn write_chunks_json_with_mimetype(
                 "mimetype": mimetype,
                 "binary_hash": binary_hash,
                 "filename": filename,
-                "uri": serde_json::Value::Null,
+                "uri": Value::Null,
             },
             "doc_items": [],
             "headings": [],
-            "captions": serde_json::Value::Null,
+            "captions": Value::Null,
         });
         let obj = json!({
             "text": c.text,

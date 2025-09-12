@@ -60,7 +60,7 @@ pub fn read_docs(input_dir: &Path) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
     let mut docs = Vec::new();
     let mut receipts: Vec<(String, usize)> = Vec::new();
     let pb = indicatif::ProgressBar::new_spinner();
-    pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
+    pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}")?);
     pb.set_message("Scanning JSON files...");
     let mut _total = 0usize;
     let mut skipped = 0usize;
@@ -120,14 +120,14 @@ pub fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Do
     struct Job { _path: PathBuf, buf: Buf }
 
     let pb = indicatif::ProgressBar::new_spinner();
-    pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}").unwrap());
+    pb.set_style(indicatif::ProgressStyle::with_template("{spinner:.green} {msg}")?);
     pb.set_message("Scanning JSON files (fast)...");
 
     let (tx, rx) = chan::bounded::<Job>(64);
     {
         let tx = tx.clone();
         let input_dir = input_dir.to_path_buf();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             for entry in WalkDir::new(&input_dir).into_iter().filter_map(|e| e.ok()) {
                 if !(entry.file_type().is_file() && entry.path().extension().map(|e| e == "json").unwrap_or(false)) { continue; }
                 let path = entry.path().to_path_buf();
@@ -145,7 +145,7 @@ pub fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Do
         });
     }
 
-    let nthreads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let nthreads = thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let mut handles = Vec::new();
     for _ in 0..nthreads {
         let rx = rx.clone();
@@ -165,7 +165,7 @@ pub fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Do
                     fn visit_seq<A>(self, mut seq: A) -> Result<(), A::Error>
                     where A: SeqAccess<'de> {
                         while let Some(raw) = seq.next_element::<InputDocRaw>()? {
-                            if let Some((embedding, meta_other)) = raw.metadata.and_then(super::loader::extract_embedding_and_meta) {
+                            if let Some((embedding, meta_other)) = raw.metadata.and_then(extract_embedding_and_meta) {
                                 let text = raw.text.or(raw.content).unwrap_or_default();
                                 if !embedding.is_empty() {
                                     let id = raw.id.unwrap_or_else(|| {
@@ -193,7 +193,7 @@ pub fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Do
                                 _ => { let _: serde_json::Value = map.next_value()?; }
                             }
                         }
-                        if let Some((embedding, meta_other)) = metadata.and_then(super::loader::extract_embedding_and_meta) {
+                        if let Some((embedding, meta_other)) = metadata.and_then(extract_embedding_and_meta) {
                             let the_text = text.or(content).unwrap_or_default();
                             if !embedding.is_empty() {
                                 let the_id = id.unwrap_or_else(|| {
@@ -212,7 +212,7 @@ pub fn read_docs_fast(input_dir: &Path, mmap_threshold: usize) -> Result<(Vec<Do
                     // fallback: try single object
                     match serde_json::from_slice::<InputDocRaw>(bytes) {
                         Ok(r) => {
-                            if let Some(doc) = super::loader::build_doc_from_raw(r, None) {
+                            if let Some(doc) = build_doc_from_raw(r, None) {
                                 out.push(doc); receipts.push((file_name, 1));
                             } else { receipts.push((file_name, 0)); }
                         }

@@ -43,14 +43,14 @@ pub fn extract_page_text(doc: &PdfDoc, page: (u32, u16)) -> Result<String> {
     let dict = as_dict(&val).ok_or_else(|| anyhow::anyhow!("page not dict"))?;
 
     // Collect resources (fonts, xobjects)
-    let res = crate::measure!(MetricKey::Resources, { collect_resources(doc, dict) })?;
+    let res = crate::measure!(MetricKey::Resources,  collect_resources(doc, dict) )?;
 
     // Resolve + decode Contents (handles Array/Ref/Stream)
     let contents = match dict.get("Contents") {
         Some(v) => v,
         None => return Ok(String::new()), // pages without content → empty text
     };
-    let buffers = crate::measure!(MetricKey::Streams, { resolve_contents(doc, contents) })?;
+    let buffers = crate::measure!(MetricKey::Streams,  resolve_contents(doc, contents) )?;
 
     // Interpret to text using the shared interpreter
     let text = crate::measure!(MetricKey::Interpret, {
@@ -58,8 +58,8 @@ pub fn extract_page_text(doc: &PdfDoc, page: (u32, u16)) -> Result<String> {
     })?;
 
     // Normalize whitespace/newlines
-    let norm = crate::measure!(MetricKey::Normalize, { normalize_page_text(&text) });
-    crate::stats::add_page_total_duration(t_page.elapsed().as_nanos() as u128);
+    let norm = crate::measure!(MetricKey::Normalize,  normalize_page_text(&text) );
+    crate::stats::add_page_total_duration(t_page.elapsed().as_nanos());
     Ok(norm)
 }
 

@@ -96,7 +96,7 @@ pub fn process_dir_rust(
                 let page_count = pages_opt.as_ref().map(|v| v.len()).unwrap_or(0);
                 let pages: Vec<(String, i32)> = pages_opt.unwrap_or_default();
                     let (chunks, cstats) =
-                    chunker::chunk_pages_with_stats(&pages, &*GLOBAL_TOKENIZER, &nvs_core::chunker::ChunkOptions {
+                    chunker::chunk_pages_with_stats(&pages, &*GLOBAL_TOKENIZER, &chunker::ChunkOptions {
                         max_tokens: opts.max_tokens,
                         min_tokens: opts.min_tokens,
                         overlap_tokens: opts.overlap_tokens,

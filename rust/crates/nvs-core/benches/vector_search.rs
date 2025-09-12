@@ -58,7 +58,7 @@ fn bench_vector_search(c: &mut Criterion) {
         b.iter_batched(
             || {
                 // pick a random query
-                let qid = (rand::random::<usize>() % 16) as usize;
+                let qid = rand::random::<usize>() % 16;
                 &queries[qid * dim..(qid + 1) * dim]
             },
             |q| {

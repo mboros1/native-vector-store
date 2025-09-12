@@ -376,7 +376,7 @@ fn probe_xref_streams(bytes: &[u8]) -> Vec<XrefStreamDebug> {
                 if let Some(end) = find_token_local(bytes, j2 + 3, b"endobj") {
                     let slice = &bytes[i..end + 6];
                     if let Ok(val) = parse_indirect_object(slice) {
-                        if let crate::objects::PdfValue::Stream { dict, data } = val {
+                        if let objects::PdfValue::Stream { dict, data } = val {
                             if dict.get("Type").and_then(|v| as_name_local(v)) == Some("XRef") {
                                 let mut d = XrefStreamDebug {
                                     obj: objnum,
@@ -385,10 +385,10 @@ fn probe_xref_streams(bytes: &[u8]) -> Vec<XrefStreamDebug> {
                                 };
                                 if let Some(fv) = dict.get("Filter") {
                                     match fv {
-                                        crate::objects::PdfValue::Name(n) => {
+                                        objects::PdfValue::Name(n) => {
                                             d.filter.push(n.clone())
                                         }
-                                        crate::objects::PdfValue::Array(arr) => {
+                                        objects::PdfValue::Array(arr) => {
                                             for f in arr {
                                                 if let Some(n) = as_name_local(f) {
                                                     d.filter.push(n.to_string());
@@ -405,8 +405,8 @@ fn probe_xref_streams(bytes: &[u8]) -> Vec<XrefStreamDebug> {
                                     d.w = warr
                                         .iter()
                                         .filter_map(|v| match v {
-                                            crate::objects::PdfValue::Int(i) => Some(*i),
-                                            crate::objects::PdfValue::Real(f) => Some(*f as i64),
+                                            objects::PdfValue::Int(i) => Some(*i),
+                                            objects::PdfValue::Real(f) => Some(*f as i64),
                                             _ => None,
                                         })
                                         .collect();
@@ -415,19 +415,19 @@ fn probe_xref_streams(bytes: &[u8]) -> Vec<XrefStreamDebug> {
                                 {
                                     d.index_len = idx.len();
                                 }
-                                if let Some(crate::objects::PdfValue::Int(sz)) = dict.get("Size") {
+                                if let Some(objects::PdfValue::Int(sz)) = dict.get("Size") {
                                     d.size = Some(*sz);
                                 }
                                 if let Some(lenv) = dict.get("Length") {
                                     d.length = match lenv {
-                                        crate::objects::PdfValue::Int(i) => Some(*i),
-                                        crate::objects::PdfValue::Real(f) => Some(*f as i64),
+                                        objects::PdfValue::Int(i) => Some(*i),
+                                        objects::PdfValue::Real(f) => Some(*f as i64),
                                         _ => None,
                                     };
                                 }
                                 d.data_len = Some(data.len());
                                 d.data_preview_hex = Some(hex_preview(&data, 16));
-                                match crate::streams::get_stream_data_with_filters(
+                                match streams::get_stream_data_with_filters(
                                     &dict,
                                     data.clone(),
                                 ) {
@@ -488,7 +488,7 @@ fn probe_objstm_streams(bytes: &[u8]) -> Vec<ObjStmDebug> {
                 if let Some(end) = find_token_local(bytes, j2 + 3, b"endobj") {
                     let slice = &bytes[i..end + 6];
                     if let Ok(val) = parse_indirect_object(slice) {
-                        if let crate::objects::PdfValue::Stream { dict, data } = val {
+                        if let objects::PdfValue::Stream { dict, data } = val {
                             if dict.get("Type").and_then(|v| as_name_local(v)) == Some("ObjStm") {
                                 let mut d = ObjStmDebug {
                                     obj: objnum,
@@ -497,10 +497,10 @@ fn probe_objstm_streams(bytes: &[u8]) -> Vec<ObjStmDebug> {
                                 };
                                 if let Some(fv) = dict.get("Filter") {
                                     match fv {
-                                        crate::objects::PdfValue::Name(n) => {
+                                        objects::PdfValue::Name(n) => {
                                             d.filter.push(n.clone())
                                         }
-                                        crate::objects::PdfValue::Array(arr) => {
+                                        objects::PdfValue::Array(arr) => {
                                             for f in arr {
                                                 if let Some(n) = as_name_local(f) {
                                                     d.filter.push(n.to_string());
@@ -515,20 +515,20 @@ fn probe_objstm_streams(bytes: &[u8]) -> Vec<ObjStmDebug> {
                                 }
                                 if let Some(lenv) = dict.get("Length") {
                                     d.length = match lenv {
-                                        crate::objects::PdfValue::Int(i) => Some(*i),
-                                        crate::objects::PdfValue::Real(f) => Some(*f as i64),
+                                        objects::PdfValue::Int(i) => Some(*i),
+                                        objects::PdfValue::Real(f) => Some(*f as i64),
                                         _ => None,
                                     };
                                 }
-                                if let Some(crate::objects::PdfValue::Int(nv)) = dict.get("N") {
+                                if let Some(objects::PdfValue::Int(nv)) = dict.get("N") {
                                     d.n = Some(*nv);
                                 }
-                                if let Some(crate::objects::PdfValue::Int(fv)) = dict.get("First") {
+                                if let Some(objects::PdfValue::Int(fv)) = dict.get("First") {
                                     d.first = Some(*fv);
                                 }
                                 d.data_len = Some(data.len());
                                 d.data_preview_hex = Some(hex_preview(&data, 16));
-                                match crate::streams::get_stream_data_with_filters(
+                                match streams::get_stream_data_with_filters(
                                     &dict,
                                     data.clone(),
                                 ) {
@@ -567,7 +567,7 @@ fn parse_uint_local(bytes: &[u8], mut i: usize) -> (Option<i64>, usize) {
     (None, i)
 }
 fn skip_ws_local(bytes: &[u8], mut i: usize) -> usize {
-    while i < bytes.len() && crate::objects::is_ws(bytes[i]) {
+    while i < bytes.len() && objects::is_ws(bytes[i]) {
         i += 1;
     }
     i
@@ -581,28 +581,28 @@ fn find_token_local(bytes: &[u8], mut i: usize, token: &[u8]) -> Option<usize> {
     }
     None
 }
-fn as_name_local(v: &crate::objects::PdfValue) -> Option<&str> {
-    if let crate::objects::PdfValue::Name(ref s) = v {
+fn as_name_local(v: &objects::PdfValue) -> Option<&str> {
+    if let objects::PdfValue::Name(ref s) = v {
         Some(s.as_str())
     } else {
         None
     }
 }
-fn as_array_local(v: &crate::objects::PdfValue) -> Option<&Vec<crate::objects::PdfValue>> {
-    if let crate::objects::PdfValue::Array(ref a) = v {
+fn as_array_local(v: &objects::PdfValue) -> Option<&Vec<objects::PdfValue>> {
+    if let objects::PdfValue::Array(ref a) = v {
         Some(a)
     } else {
         None
     }
 }
-fn get_predictor_local(dp: &crate::objects::PdfValue) -> Option<i64> {
+fn get_predictor_local(dp: &objects::PdfValue) -> Option<i64> {
     match dp {
-        crate::objects::PdfValue::Dict(d) => d.get("Predictor").and_then(|v| match v {
-            crate::objects::PdfValue::Int(i) => Some(*i),
-            crate::objects::PdfValue::Real(f) => Some(*f as i64),
+        objects::PdfValue::Dict(d) => d.get("Predictor").and_then(|v| match v {
+            objects::PdfValue::Int(i) => Some(*i),
+            objects::PdfValue::Real(f) => Some(*f as i64),
             _ => None,
         }),
-        crate::objects::PdfValue::Array(arr) => {
+        objects::PdfValue::Array(arr) => {
             for v in arr {
                 if let Some(i) = get_predictor_local(v) {
                     return Some(i);

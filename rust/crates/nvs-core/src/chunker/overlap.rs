@@ -8,7 +8,7 @@ pub fn add_overlap(chunks: &mut [TmpChunk], overlap_tokens: usize, tokenizer: &d
         if prev_text.is_empty() { continue; }
 
         // Heuristic: aim for up to ~5 chars per token from the tail, but ensure char boundaries
-        let max_tail_chars = (overlap_tokens.saturating_mul(5)).max(8);
+        let max_tail_chars = overlap_tokens.saturating_mul(5).max(8);
         // Build char boundary index vector (byte offsets)
         let mut char_pos: Vec<usize> = prev_text.char_indices().map(|(idx, _)| idx).collect();
         char_pos.push(prev_text.len()); // end sentinel for safe slicing

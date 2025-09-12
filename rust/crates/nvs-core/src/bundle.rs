@@ -16,7 +16,7 @@ struct MetaIdxEntry {
     padding: u32,
 }
 
-const META_IDX_ENTRY_SIZE: usize = std::mem::size_of::<MetaIdxEntry>();
+const META_IDX_ENTRY_SIZE: usize = size_of::<MetaIdxEntry>();
 
 #[derive(Debug)]
 pub struct Bundle {
@@ -603,20 +603,20 @@ mod tests {
         add_entry(0, 3, &mut postings); // doc0
         add_entry(2, 1, &mut postings); // doc2 (prev=0 -> +2)
         lex.extend_from_slice(&offset.to_le_bytes());
-        lex.extend_from_slice(&(2u32).to_le_bytes());
-        lex.extend_from_slice(&(2u32).to_le_bytes());
+        lex.extend_from_slice(&2u32.to_le_bytes());
+        lex.extend_from_slice(&2u32.to_le_bytes());
         offset += 2 * 8;
         // banana: 1 entry (doc1)
         add_entry(1, 3, &mut postings);
         lex.extend_from_slice(&offset.to_le_bytes());
-        lex.extend_from_slice(&(1u32).to_le_bytes());
-        lex.extend_from_slice(&(1u32).to_le_bytes());
+        lex.extend_from_slice(&1u32.to_le_bytes());
+        lex.extend_from_slice(&1u32.to_le_bytes());
         offset += 1 * 8;
         // cherry: 1 entry (doc2)
         add_entry(1, 2, &mut postings); // from prev doc1 -> doc2 delta=1
         lex.extend_from_slice(&offset.to_le_bytes());
-        lex.extend_from_slice(&(1u32).to_le_bytes());
-        lex.extend_from_slice(&(1u32).to_le_bytes());
+        lex.extend_from_slice(&1u32.to_le_bytes());
+        lex.extend_from_slice(&1u32.to_le_bytes());
 
         {
             let mut f = File::create(dir.join("postings.bin")).unwrap();
@@ -690,8 +690,8 @@ mod tests {
             add(1, 1, &mut postings); // doc1
             add(1, 1, &mut postings); // doc2
             lexicon.extend_from_slice(&offset.to_le_bytes());
-            lexicon.extend_from_slice(&(3u32).to_le_bytes());
-            lexicon.extend_from_slice(&(3u32).to_le_bytes());
+            lexicon.extend_from_slice(&3u32.to_le_bytes());
+            lexicon.extend_from_slice(&3u32.to_le_bytes());
             let mut pf = File::create(dir.join("postings.bin")).unwrap();
             pf.write_all(&postings).unwrap();
             let mut lf = File::create(dir.join("lexicon.bin")).unwrap();
@@ -959,12 +959,12 @@ mod tests {
         // Tokenize and collect BM25 stats
         let tok = SimpleTokenizer::new();
         let mut doc_tokens: Vec<Vec<String>> = Vec::with_capacity(docs.len());
-        let mut df_map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut postings_map: std::collections::HashMap<String, Vec<(usize, u32)>> =
-            std::collections::HashMap::new();
+        let mut df_map: HashMap<String, usize> = HashMap::new();
+        let mut postings_map: HashMap<String, Vec<(usize, u32)>> =
+            HashMap::new();
         for (i, d) in docs.iter().enumerate() {
             let tokens = tok.split(&d.text);
-            let mut tf: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+            let mut tf: HashMap<&str, u32> = HashMap::new();
             for t in &tokens {
                 *tf.entry(t.as_str()).or_insert(0) += 1;
             }
@@ -1054,7 +1054,7 @@ mod tests {
             }
             // idx entry
             idx.extend_from_slice(&block_id.to_le_bytes());
-            idx.extend_from_slice(&(cur_usize).to_le_bytes());
+            idx.extend_from_slice(&cur_usize.to_le_bytes());
             idx.extend_from_slice(&(rec_size as u32).to_le_bytes());
             idx.extend_from_slice(&0u32.to_le_bytes());
             // write record
@@ -1207,7 +1207,7 @@ mod tests {
         for _ in 0..topics.len() {
             let mut v: Vec<f32> = (0..dim).map(|_| rng.gen_range(-0.5f32..0.5f32)).collect();
             // normalize
-            let n = (v.iter().map(|x| x * x).sum::<f32>()).sqrt().max(1e-6);
+            let n = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
             for x in &mut v {
                 *x /= n;
             }
@@ -1240,7 +1240,7 @@ mod tests {
                     e[d] = base[d] + noise;
                 }
                 // renormalize
-                let n = (e.iter().map(|x| x * x).sum::<f32>()).sqrt().max(1e-6);
+                let n = e.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-6);
                 for x in &mut e {
                     *x /= n;
                 }

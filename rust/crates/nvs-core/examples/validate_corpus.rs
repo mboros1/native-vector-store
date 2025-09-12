@@ -50,6 +50,19 @@ fn parse_args() -> (String, String, usize) {
     (b, q, k)
 }
 
+fn print_results(store: &VectorStore, results: &[(u32, f32)]) {
+    for (rank, (id, score)) in results.iter().enumerate() {
+        let (doc_id, text, _meta) = store.get_document(*id).unwrap_or_default();
+        println!(
+            "  {:>2}. {:<24}  score={:.4}  {}",
+            rank + 1,
+            doc_id,
+            score,
+            &text.chars().take(80).collect::<String>()
+        );
+    }
+}
+
 fn main() {
     let (bundle_dir, queries_path, k) = parse_args();
     let store = VectorStore::open(&bundle_dir).expect("open bundle");
@@ -77,41 +90,14 @@ fn main() {
 
         let vres = store.search_vector(&q.embedding, k);
         println!("Vector top-{}:", k);
-        for (rank, (id, score)) in vres.iter().enumerate() {
-            let (doc_id, text, _meta) = store.get_document(*id).unwrap_or_default();
-            println!(
-                "  {:>2}. {:<24}  score={:.4}  {}",
-                rank + 1,
-                doc_id,
-                score,
-                &text.chars().take(80).collect::<String>()
-            );
-        }
+        print_results(&store, &vres);
 
         let bres = store.search_bm25(&q.query, k);
         println!("BM25 top-{}:", k);
-        for (rank, (id, score)) in bres.iter().enumerate() {
-            let (doc_id, text, _meta) = store.get_document(*id).unwrap_or_default();
-            println!(
-                "  {:>2}. {:<24}  score={:.4}  {}",
-                rank + 1,
-                doc_id,
-                score,
-                &text.chars().take(80).collect::<String>()
-            );
-        }
+        print_results(&store, &bres);
 
         let hres = store.search_hybrid(&q.embedding, &q.query, k, 0.5);
         println!("Hybrid(0.5) top-{}:", k);
-        for (rank, (id, score)) in hres.iter().enumerate() {
-            let (doc_id, text, _meta) = store.get_document(*id).unwrap_or_default();
-            println!(
-                "  {:>2}. {:<24}  score={:.4}  {}",
-                rank + 1,
-                doc_id,
-                score,
-                &text.chars().take(80).collect::<String>()
-            );
-        }
+        print_results(&store, &hres);
     }
 }
