@@ -18,3 +18,4 @@ pub fn contains(mark: &str) -> bool {
 pub fn size() -> usize {
     PUNCTS.get_or_init(build).len()
 }
+

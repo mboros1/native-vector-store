@@ -375,12 +375,12 @@ fn is_word(cp: u32) -> bool {
 
 fn is_abbreviation(tok: &str) -> bool {
     // Case-insensitive check using imported list (lowercase)
-    crate::english_abbreviations::contains(tok)
+    crate::bm25::english_abbreviations::contains(tok)
 }
 
 pub fn is_stopword(tok: &str) -> bool {
     // Use the comprehensive embedded list
-    crate::english_stop_words::contains(tok)
+    crate::bm25::english_stop_words::contains(tok)
 }
 
 #[cfg(test)]
@@ -434,7 +434,7 @@ mod bm25_norm_tests {
 
 fn is_punctuation(tok: &str) -> bool {
     // Use the imported punctuation list
-    crate::english_punctuations::contains(tok)
+    crate::bm25::english_punctuations::contains(tok)
 }
 
 #[cfg(test)]
