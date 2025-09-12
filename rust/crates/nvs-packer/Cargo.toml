@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT"
 description = "CLI: Convert JSON docs to native-vector-store bundle (Rust)"
 
+[lib]
+name = "nvs_packer"
+path = "src/lib.rs"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
@@ -23,3 +27,11 @@ dashmap = "5"
 fxhash = "0.2"
 crossbeam-channel = "0.5"
 memmap2 = "0.9"
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "bm25_pack"
+harness = false

@@ -809,6 +809,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "criterion",
  "nvs-core",
  "nvs-html-core",
  "serde",
@@ -824,6 +825,7 @@ name = "nvs-html-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "criterion",
  "encoding_rs",
  "html5ever",
  "markup5ever",
@@ -840,6 +842,7 @@ dependencies = [
  "anyhow",
  "clap",
  "console",
+ "criterion",
  "crossbeam-channel",
  "dashmap",
  "fxhash",
@@ -851,6 +854,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "tempfile",
  "walkdir",
  "xxhash-rust",
  "zstd",
@@ -862,6 +866,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "criterion",
  "crossbeam-channel",
  "indicatif",
  "memmap2",
@@ -883,6 +888,7 @@ name = "nvs-pdf-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "criterion",
  "encoding_rs",
  "memmap2",
  "miniz_oxide",
@@ -1392,6 +1398,7 @@ name = "tokenmonster"
 version = "0.1.0"
 dependencies = [
  "ahash",
+ "criterion",
  "once_cell",
  "serde_json",
 ]
