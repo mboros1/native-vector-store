@@ -1,0 +1,73 @@
+pub mod extract;
+pub mod json;
+
+use anyhow::Result;
+use std::path::Path;
+use tokenmonster::GreedyTokenizer;
+
+#[derive(Clone, Debug)]
+pub struct HtmlChunkOptions {
+    pub max_tokens: usize,
+    pub min_tokens: usize,
+    pub overlap_tokens: usize,
+    pub section_limit: Option<usize>,
+}
+
+impl Default for HtmlChunkOptions {
+    fn default() -> Self {
+        Self { max_tokens: 512, min_tokens: 150, overlap_tokens: 50, section_limit: None }
+    }
+}
+
+pub fn parse_to_chunks(html_path: &Path, opts: &HtmlChunkOptions) -> Result<Vec<nvs_core::chunker::Chunk>> {
+    Ok(parse_to_chunks_with_stats(html_path, opts)?.0)
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ChunkStats {
+    pub sections: usize,
+    pub chunks: usize,
+    pub extract_ms: u128,
+    pub chunk_ms: u128,
+    pub total_ms: u128,
+    pub annotate_ms: u128,
+    pub group_ms: u128,
+    pub pack_ms: u128,
+    pub overlap_ms: u128,
+    pub merge_ms: u128,
+    pub split_ms: u128,
+    pub final_ms: u128,
+}
+
+pub fn parse_to_chunks_with_stats(html_path: &Path, opts: &HtmlChunkOptions) -> Result<(Vec<nvs_core::chunker::Chunk>, ChunkStats)> {
+    use std::time::Instant;
+    let t0 = Instant::now();
+    let tokenizer = GreedyTokenizer::from_cl100k_bin();
+    let (sections, estats) = nvs_html_core::fast_extract_sections_with_stats(html_path, opts.section_limit)?;
+    let (chunks, cstats) = nvs_core::chunker::chunk_pages_with_stats(&sections, &tokenizer, &nvs_core::chunker::ChunkOptions {
+        max_tokens: opts.max_tokens,
+        min_tokens: opts.min_tokens,
+        overlap_tokens: opts.overlap_tokens,
+    });
+    let t3 = Instant::now();
+    let stats = ChunkStats {
+        sections: sections.len(),
+        chunks: chunks.len(),
+        extract_ms: estats.total_ms,
+        chunk_ms: cstats.total_ms,
+        total_ms: (t3 - t0).as_millis(),
+        annotate_ms: cstats.annotate_ms,
+        group_ms: cstats.group_ms,
+        pack_ms: cstats.pack_ms,
+        overlap_ms: cstats.overlap_ms,
+        merge_ms: cstats.merge_ms,
+        split_ms: cstats.split_ms,
+        final_ms: cstats.final_ms,
+    };
+    Ok((chunks, stats))
+}
+
+pub fn write_chunks_json(html_path: &Path, chunks: &[nvs_core::chunker::Chunk], out_path: &Path) -> Result<()> {
+    json::write_chunks_json(html_path, chunks, out_path)
+}
+

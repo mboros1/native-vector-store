@@ -1,0 +1,25 @@
+[package]
+name = "nvs-html"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Native Vector Store — HTML orchestrator and chunking (Rust)"
+
+[lib]
+name = "nvs_html"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+tokenmonster = { path = "../tokenmonster" }
+nvs-core = { path = "../nvs-core" }
+nvs-html-core = { path = "../nvs-html-core" }
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+
+[[bin]]
+name = "chunk-html-cli"
+path = "src/bin/chunk-html-cli.rs"

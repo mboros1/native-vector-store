@@ -17,6 +17,7 @@ pub mod search;
 pub mod simd;
 pub mod tokenizer;
 pub mod vector_store;
+pub mod chunker;
 
 pub use bundle::Bundle;
 pub use vector_store::VectorStore;

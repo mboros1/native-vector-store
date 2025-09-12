@@ -5,6 +5,8 @@ members = [
     "crates/tokenmonster",
     "crates/nvs-pdf",
     "crates/nvs-pdf-core",
+    "crates/nvs-html-core",
+    "crates/nvs-html",
 ]
 
 resolver = "2"

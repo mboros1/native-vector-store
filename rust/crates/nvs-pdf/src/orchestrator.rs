@@ -1,5 +1,5 @@
-use crate::chunker;
-use crate::ChunkOptions;
+use nvs_core::chunker;
+use crate::PdfChunkOptions;
 use crossbeam_channel as chan;
 use memmap2::Mmap;
 use once_cell::sync::Lazy;
@@ -43,7 +43,7 @@ static GLOBAL_TOKENIZER: Lazy<tokenmonster::GreedyTokenizer> =
 pub fn process_dir_rust(
     pdfs: Vec<PathBuf>,
     out_dir: PathBuf,
-    opts: ChunkOptions,
+    opts: PdfChunkOptions,
     n_workers: usize,
 ) -> (Aggregates, usize) {
     let (tx, rx) = chan::bounded::<(PathBuf, Mmap)>(64);
@@ -95,8 +95,12 @@ pub fn process_dir_rust(
                 };
                 let page_count = pages_opt.as_ref().map(|v| v.len()).unwrap_or(0);
                 let pages: Vec<(String, i32)> = pages_opt.unwrap_or_default();
-                let (chunks, cstats) =
-                    chunker::chunk_pages_with_stats(&pages, &*GLOBAL_TOKENIZER, &opts);
+                    let (chunks, cstats) =
+                    chunker::chunk_pages_with_stats(&pages, &*GLOBAL_TOKENIZER, &nvs_core::chunker::ChunkOptions {
+                        max_tokens: opts.max_tokens,
+                        min_tokens: opts.min_tokens,
+                        overlap_tokens: opts.overlap_tokens,
+                    });
                 // Write JSON
                 let out_path = {
                     let stem = pdf_path

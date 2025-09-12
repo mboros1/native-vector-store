@@ -1,5 +1,4 @@
 pub mod extract;
-pub mod chunker;
 pub mod json;
 pub mod orchestrator;
 // pdfium binding handled within extractor for now
@@ -7,9 +6,10 @@ pub mod orchestrator;
 use anyhow::Result;
 use std::path::Path;
 use tokenmonster::GreedyTokenizer;
+pub use nvs_core::chunker::ChunkerStats;
 
 #[derive(Clone, Debug)]
-pub struct ChunkOptions {
+pub struct PdfChunkOptions {
     pub max_tokens: usize,
     pub min_tokens: usize,
     pub overlap_tokens: usize,
@@ -17,7 +17,7 @@ pub struct ChunkOptions {
     pub page_limit: Option<usize>,
 }
 
-impl Default for ChunkOptions {
+impl Default for PdfChunkOptions {
     fn default() -> Self {
         Self {
             max_tokens: 512,
@@ -30,7 +30,7 @@ impl Default for ChunkOptions {
 }
 
 // Convenience: end-to-end chunking from a PDF path to chunk objects
-pub fn parse_to_chunks(pdf_path: &Path, opts: &ChunkOptions) -> Result<Vec<chunker::Chunk>> {
+pub fn parse_to_chunks(pdf_path: &Path, opts: &PdfChunkOptions) -> Result<Vec<nvs_core::chunker::Chunk>> {
     Ok(parse_to_chunks_with_stats(pdf_path, opts)?.0)
 }
 
@@ -53,12 +53,16 @@ pub struct ChunkStats {
     pub final_ms: u128,
 }
 
-pub fn parse_to_chunks_with_stats(pdf_path: &Path, opts: &ChunkOptions) -> Result<(Vec<chunker::Chunk>, ChunkStats)> {
+pub fn parse_to_chunks_with_stats(pdf_path: &Path, opts: &PdfChunkOptions) -> Result<(Vec<nvs_core::chunker::Chunk>, ChunkStats)> {
     use std::time::Instant;
     let t0 = Instant::now();
     let tokenizer = GreedyTokenizer::from_cl100k_bin();
-    let (pages, estats) = extract::extract_text_pages_with_stats(pdf_path, opts.page_limit, opts.thread_count)?;
-    let (chunks, cstats) = chunker::chunk_pages_with_stats(&pages, &tokenizer, opts);
+    let (pages, estats) = extract::extract_text_pages_with_stats(pdf_path, opts.page_limit, 0)?;
+    let (chunks, cstats) = nvs_core::chunker::chunk_pages_with_stats(&pages, &tokenizer, &nvs_core::chunker::ChunkOptions {
+        max_tokens: opts.max_tokens,
+        min_tokens: opts.min_tokens,
+        overlap_tokens: opts.overlap_tokens,
+    });
     let t3 = Instant::now();
     let stats = ChunkStats {
         pages: pages.len(),
@@ -80,6 +84,6 @@ pub fn parse_to_chunks_with_stats(pdf_path: &Path, opts: &ChunkOptions) -> Resul
 }
 
 // Convenience: write JSON array matching fast-pdf-parser chunker output
-pub fn write_chunks_json(pdf_path: &Path, chunks: &[chunker::Chunk], out_path: &Path) -> Result<()> {
+pub fn write_chunks_json(pdf_path: &Path, chunks: &[nvs_core::chunker::Chunk], out_path: &Path) -> Result<()> {
     json::write_chunks_json(pdf_path, chunks, out_path)
 }
