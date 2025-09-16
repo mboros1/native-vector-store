@@ -1,5 +1,5 @@
-use std::collections::BTreeSet;
 use super::{AnnotatedLine, LineType};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug)]
 pub struct SemanticUnit {
@@ -12,7 +12,13 @@ pub struct SemanticUnit {
 
 impl Default for SemanticUnit {
     fn default() -> Self {
-        Self { lines: Vec::new(), total_tokens: 0, pages: BTreeSet::new(), has_major_heading: false, min_heading_level: i32::MAX }
+        Self {
+            lines: Vec::new(),
+            total_tokens: 0,
+            pages: BTreeSet::new(),
+            has_major_heading: false,
+            min_heading_level: i32::MAX,
+        }
     }
 }
 
@@ -28,7 +34,10 @@ impl SemanticUnit {
     }
     pub fn text(&self) -> String {
         let mut s = String::new();
-        for l in &self.lines { s.push_str(&l.text); s.push('\n'); }
+        for l in &self.lines {
+            s.push_str(&l.text);
+            s.push('\n');
+        }
         s
     }
 }
@@ -41,8 +50,11 @@ pub fn group_semantic_units(lines: &[AnnotatedLine]) -> Vec<SemanticUnit> {
         match l.line_type {
             LineType::MajorHeading | LineType::MinorHeading => break_here = !cur.lines.is_empty(),
             LineType::Blank => {
-                if let Some(nxt) = lines.get(i+1) {
-                    if matches!(nxt.line_type, LineType::MajorHeading | LineType::MinorHeading) {
+                if let Some(nxt) = lines.get(i + 1) {
+                    if matches!(
+                        nxt.line_type,
+                        LineType::MajorHeading | LineType::MinorHeading
+                    ) {
                         break_here = !cur.lines.is_empty();
                     }
                 }
@@ -57,6 +69,8 @@ pub fn group_semantic_units(lines: &[AnnotatedLine]) -> Vec<SemanticUnit> {
             cur.add(l);
         }
     }
-    if !cur.lines.is_empty() { out.push(cur); }
+    if !cur.lines.is_empty() {
+        out.push(cur);
+    }
     out
 }

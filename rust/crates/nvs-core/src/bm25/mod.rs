@@ -15,7 +15,11 @@ pub fn search(bundle: &Bundle, query: &str, k: usize) -> Vec<(u32, f32)> {
             *tf.entry(norm).or_insert(0) += 1;
         }
     }
-    search_terms(bundle, &tf.keys().map(|s| s.as_str()).collect::<Vec<_>>(), k)
+    search_terms(
+        bundle,
+        &tf.keys().map(|s| s.as_str()).collect::<Vec<_>>(),
+        k,
+    )
 }
 
 pub fn search_terms(bundle: &Bundle, query_terms: &[&str], k: usize) -> Vec<(u32, f32)> {
@@ -24,8 +28,7 @@ pub fn search_terms(bundle: &Bundle, query_terms: &[&str], k: usize) -> Vec<(u32
     let mut scores: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
     for term in query_terms {
         if let Some((off, len, df)) = lookup_term(bundle, term) {
-            let idf = (((bundle.manifest.num_docs as f32) - df as f32 + 0.5)
-                / (df as f32 + 0.5)
+            let idf = (((bundle.manifest.num_docs as f32) - df as f32 + 0.5) / (df as f32 + 0.5)
                 + 1.0)
                 .ln();
             let mut i = off as usize;
@@ -62,7 +65,7 @@ fn lookup_term(bundle: &Bundle, term: &str) -> Option<(u64, u32, u32)> {
 }
 
 // BM25 dictionaries and helpers (moved under bm25/)
-pub mod english_stop_words;
 pub mod english_abbreviations;
 pub mod english_punctuations;
+pub mod english_stop_words;
 pub mod tokenizer;

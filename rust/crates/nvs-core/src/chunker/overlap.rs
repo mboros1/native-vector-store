@@ -1,11 +1,15 @@
-use super::{TokenCounter};
 use super::pack::TmpChunk;
+use super::TokenCounter;
 
 pub fn add_overlap(chunks: &mut [TmpChunk], overlap_tokens: usize, tokenizer: &dyn TokenCounter) {
-    if overlap_tokens == 0 { return; }
+    if overlap_tokens == 0 {
+        return;
+    }
     for i in 1..chunks.len() {
         let prev_text = &chunks[i - 1].text;
-        if prev_text.is_empty() { continue; }
+        if prev_text.is_empty() {
+            continue;
+        }
 
         // Heuristic: aim for up to ~5 chars per token from the tail, but ensure char boundaries
         let max_tail_chars = overlap_tokens.saturating_mul(5).max(8);
@@ -30,7 +34,9 @@ pub fn add_overlap(chunks: &mut [TmpChunk], overlap_tokens: usize, tokenizer: &d
             start_byte = char_pos[start_idx];
             overlap = prev_text[start_byte..].to_string();
             // adapt step down if extremely short string remains
-            if overlap.len() < 32 && advance_chars > 1 { advance_chars = 1; }
+            if overlap.len() < 32 && advance_chars > 1 {
+                advance_chars = 1;
+            }
         }
 
         // Prepend overlap explicitly to chunk text to influence token_count downstream

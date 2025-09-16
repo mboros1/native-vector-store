@@ -2,6 +2,7 @@ use anyhow::Result;
 use rustc_hash::FxHashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use rayon::prelude::*;
 
 use crate::loader::Doc;
 
@@ -15,7 +16,6 @@ pub struct Bm25Stats {
 pub fn compute_doc_tfs(
     docs: &[Doc],
 ) -> (Vec<FxHashMap<String, u32>>, Vec<AtomicUsize>, std::time::Duration) {
-    use rayon::prelude::*;
     let doc_lens: Vec<AtomicUsize> = (0..docs.len()).map(|_| AtomicUsize::new(0)).collect();
     let mut doc_tfs: Vec<FxHashMap<String, u32>> = (0..docs.len()).map(|_| FxHashMap::default()).collect();
     let t_tf_start = std::time::Instant::now();
@@ -41,7 +41,6 @@ pub fn write_doc_lengths(doc_lens: &[AtomicUsize], out: &Path) -> Result<()> {
 pub fn build_local_maps(
     doc_tfs: &[FxHashMap<String, u32>],
 ) -> (Vec<FxHashMap<String, Vec<(usize, u32)>>>, std::time::Duration, usize) {
-    use rayon::prelude::*;
     let t_local_start = std::time::Instant::now();
     let n = doc_tfs.len();
     let threads = std::thread::available_parallelism().map(|x| x.get()).unwrap_or(4);
@@ -64,7 +63,6 @@ pub fn bucket_kway_merge(
     local_maps: &[FxHashMap<String, Vec<(usize, u32)>>],
     buckets: usize,
 ) -> (Vec<BucketOut>, std::time::Duration) {
-    use rayon::prelude::*;
     let bucket_out: Vec<std::sync::Mutex<Option<BucketOut>>> = (0..buckets).map(|_| std::sync::Mutex::new(None)).collect();
     let t_merge_start = std::time::Instant::now();
     (0..buckets).into_par_iter().for_each(|b| {

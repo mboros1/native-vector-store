@@ -177,4 +177,3 @@ pub fn contains(abbr: &str) -> bool {
 pub fn size() -> usize {
     ABBR.get_or_init(build).len()
 }
-

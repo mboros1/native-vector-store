@@ -410,4 +410,3 @@ pub fn contains(word: &str) -> bool {
 pub fn size() -> usize {
     STOPWORDS.get_or_init(build).len()
 }
-

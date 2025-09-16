@@ -173,14 +173,20 @@ impl SimpleTokenizer {
 // - Dehyphenate line breaks: "word-\nnext" -> "word next"
 // - Collapse multiple whitespace into single spaces
 pub fn preprocess_bm25(input: &str) -> String {
-    if input.is_empty() { return String::new(); }
+    if input.is_empty() {
+        return String::new();
+    }
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
             '\u{00AD}' | '\u{200B}' | '\u{FEFF}' => { /* skip soft hyphen/zero-width/BOM */ }
-            '\r' | '\t' => { out.push(' '); }
-            '\x0C' => { out.push(' '); } // form feed
+            '\r' | '\t' => {
+                out.push(' ');
+            }
+            '\x0C' => {
+                out.push(' ');
+            } // form feed
             '-' => {
                 // If hyphen is followed by a line break or whitespace+linebreak, treat as hyphenation -> space
                 let it = chars.clone();
@@ -194,18 +200,26 @@ pub fn preprocess_bm25(input: &str) -> String {
                     } else if nc == '\r' || nc == '\t' || nc == ' ' {
                         consumed += 1;
                         continue;
-                    } else { break; }
+                    } else {
+                        break;
+                    }
                 }
                 if is_break {
                     // consume the peeked whitespace/break
-                    for _ in 0..consumed { let _ = chars.next(); }
+                    for _ in 0..consumed {
+                        let _ = chars.next();
+                    }
                     out.push(' ');
                 } else {
                     out.push('-');
                 }
             }
-            '\n' => { out.push(' '); }
-            c if c.is_control() => { out.push(' '); }
+            '\n' => {
+                out.push(' ');
+            }
+            c if c.is_control() => {
+                out.push(' ');
+            }
             c => out.push(c),
         }
     }
@@ -248,32 +262,99 @@ fn strip_possessive(s: &str) -> &str {
 }
 
 pub fn bm25_keep_token(mut tok: &str) -> bool {
-    if tok.is_empty() { return false; }
+    if tok.is_empty() {
+        return false;
+    }
     // Trim common leading/trailing punctuation
-    fn is_trim_punct(c: char) -> bool { matches!(c, '.'|','|';'|':'|'"'|'\''|'(' |')'|'['|']'|'{'|'}'|'!'|'?'|'%'|'+'|'-'|'/'|'\\'|'*'|'&'|'#'|'@'|'~'|'`'|'|') }
+    fn is_trim_punct(c: char) -> bool {
+        matches!(
+            c,
+            '.' | ','
+                | ';'
+                | ':'
+                | '"'
+                | '\''
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '!'
+                | '?'
+                | '%'
+                | '+'
+                | '-'
+                | '/'
+                | '\\'
+                | '*'
+                | '&'
+                | '#'
+                | '@'
+                | '~'
+                | '`'
+                | '|'
+        )
+    }
     tok = tok.trim_matches(is_trim_punct);
-    if tok.len() < 2 { return false; }
+    if tok.len() < 2 {
+        return false;
+    }
     // Strip possessive endings: 's or ’s (safe on char boundaries)
     tok = strip_possessive(tok);
-    if tok.len() < 2 { return false; }
+    if tok.len() < 2 {
+        return false;
+    }
     // Drop URL tracking params
-    if tok.len() >= 4 && tok.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") { return false; }
+    if tok.len() >= 4 && tok.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") {
+        return false;
+    }
     // Drop tokens with triple hyphen runs (formatting/artifacts)
-    if tok.contains("---") { return false; }
+    if tok.contains("---") {
+        return false;
+    }
     let mut has_ascii_letter = false;
     let mut upper_seq_only = true;
     for ch in tok.chars() {
-        if ch.is_ascii_alphabetic() { has_ascii_letter = true; }
-        if !matches!(ch, 'A'|'C'|'D'|'E'|'F'|'G'|'H'|'I'|'K'|'L'|'M'|'N'|'P'|'Q'|'R'|'S'|'T'|'V'|'W'|'Y'|'-') { upper_seq_only = false; }
+        if ch.is_ascii_alphabetic() {
+            has_ascii_letter = true;
+        }
+        if !matches!(
+            ch,
+            'A' | 'C'
+                | 'D'
+                | 'E'
+                | 'F'
+                | 'G'
+                | 'H'
+                | 'I'
+                | 'K'
+                | 'L'
+                | 'M'
+                | 'N'
+                | 'P'
+                | 'Q'
+                | 'R'
+                | 'S'
+                | 'T'
+                | 'V'
+                | 'W'
+                | 'Y'
+                | '-'
+        ) {
+            upper_seq_only = false;
+        }
     }
     if has_ascii_letter {
         // Drop long amino-acid sequence-like tokens
-        if upper_seq_only && tok.len() >= 10 { return false; }
+        if upper_seq_only && tok.len() >= 10 {
+            return false;
+        }
         return true; // keep alpha-containing tokens
     }
     // No letters: numeric-like? Allow only digits and simple numeric punctuation
     for ch in tok.chars() {
-        if !(ch.is_ascii_digit() || matches!(ch, '+'|'-'|'.'|','|'/'|'\\')) {
+        if !(ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | ',' | '/' | '\\')) {
             // Contains other symbols; drop
             return false;
         }
@@ -284,31 +365,100 @@ pub fn bm25_keep_token(mut tok: &str) -> bool {
 
 // Return a normalized token for BM25 (trim punctuation, strip possessive), or None to drop.
 pub fn bm25_normalize_token(tok: &str) -> Option<String> {
-    if tok.is_empty() { return None; }
+    if tok.is_empty() {
+        return None;
+    }
     // Drop tokens with triple hyphens anywhere (formatting/artifacts)
-    if tok.contains("---") { return None; }
-    fn is_trim_punct(c: char) -> bool { matches!(c, '.'|','|';'|':'|'"'|'\''|'(' |')'|'['|']'|'{'|'}'|'!'|'?'|'%'|'+'|'-'|'/'|'\\'|'*'|'&'|'#'|'@'|'~'|'`'|'|') }
+    if tok.contains("---") {
+        return None;
+    }
+    fn is_trim_punct(c: char) -> bool {
+        matches!(
+            c,
+            '.' | ','
+                | ';'
+                | ':'
+                | '"'
+                | '\''
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '!'
+                | '?'
+                | '%'
+                | '+'
+                | '-'
+                | '/'
+                | '\\'
+                | '*'
+                | '&'
+                | '#'
+                | '@'
+                | '~'
+                | '`'
+                | '|'
+        )
+    }
     let mut s = tok.trim_matches(is_trim_punct);
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
     s = strip_possessive(s);
-    if s.len() < 2 { return None; }
+    if s.len() < 2 {
+        return None;
+    }
     // Normalize case by caller; still apply filters
-    if s.len() >= 4 && s.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") { return None; }
-    if s.contains("---") { return None; }
+    if s.len() >= 4 && s.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") {
+        return None;
+    }
+    if s.contains("---") {
+        return None;
+    }
     // Check letters and AA-sequence drop
     let mut has_ascii_letter = false;
     let mut upper_seq_only = true;
     for ch in s.chars() {
-        if ch.is_ascii_alphabetic() { has_ascii_letter = true; }
-        if !matches!(ch, 'A'|'C'|'D'|'E'|'F'|'G'|'H'|'I'|'K'|'L'|'M'|'N'|'P'|'Q'|'R'|'S'|'T'|'V'|'W'|'Y'|'-') { upper_seq_only = false; }
+        if ch.is_ascii_alphabetic() {
+            has_ascii_letter = true;
+        }
+        if !matches!(
+            ch,
+            'A' | 'C'
+                | 'D'
+                | 'E'
+                | 'F'
+                | 'G'
+                | 'H'
+                | 'I'
+                | 'K'
+                | 'L'
+                | 'M'
+                | 'N'
+                | 'P'
+                | 'Q'
+                | 'R'
+                | 'S'
+                | 'T'
+                | 'V'
+                | 'W'
+                | 'Y'
+                | '-'
+        ) {
+            upper_seq_only = false;
+        }
     }
     if has_ascii_letter {
-        if upper_seq_only && s.len() >= 10 { return None; }
+        if upper_seq_only && s.len() >= 10 {
+            return None;
+        }
         return Some(s.to_string());
     }
     // No letters: numeric-like allowed chars
     for ch in s.chars() {
-        if !(ch.is_ascii_digit() || matches!(ch, '+'|'-'|'.'|','|'/'|'\\')) {
+        if !(ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | ',' | '/' | '\\')) {
             return None;
         }
     }
@@ -422,13 +572,22 @@ mod bm25_norm_tests {
     fn normalize_keeps_biomedical_patterns() {
         assert_eq!(bm25_normalize_token("il-6").as_deref(), Some("il-6"));
         assert_eq!(bm25_normalize_token("p53").as_deref(), Some("p53"));
-        assert_eq!(bm25_normalize_token("covid-19").as_deref(), Some("covid-19"));
+        assert_eq!(
+            bm25_normalize_token("covid-19").as_deref(),
+            Some("covid-19")
+        );
     }
 
     #[test]
     fn normalize_trims_leading_punct() {
-        assert_eq!(bm25_normalize_token("&chibnall").as_deref(), Some("chibnall"));
-        assert_eq!(bm25_normalize_token("'administrators'").as_deref(), Some("administrators"));
+        assert_eq!(
+            bm25_normalize_token("&chibnall").as_deref(),
+            Some("chibnall")
+        );
+        assert_eq!(
+            bm25_normalize_token("'administrators'").as_deref(),
+            Some("administrators")
+        );
     }
 }
 
@@ -510,7 +669,7 @@ mod simple_tokenizer_tests {
     fn periods_and_abbrev() {
         let t = SimpleTokenizer::new();
         assert_eq!(t.split("...").as_slice(), [".", ".", "."]); // ellipsis split
-        // Abbreviations keep period when in-word
+                                                                // Abbreviations keep period when in-word
         assert_eq!(t.split("Dr. Smith").as_slice(), ["Dr.", "Smith"]);
         // Multi-part: "U.S." -> split trailing period per C++ behavior, known limitation
         assert_eq!(

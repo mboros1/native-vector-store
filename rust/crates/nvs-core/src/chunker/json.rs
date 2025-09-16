@@ -99,10 +99,7 @@ mod tests {
         // The doc path only contributes name/hash; it need not exist
         let doc_path = dir.path().join("sample.html");
 
-        let chunks = vec![
-            make_chunk("Hello", 2, 2, 2),
-            make_chunk("World", 3, 3, 4),
-        ];
+        let chunks = vec![make_chunk("Hello", 2, 2, 2), make_chunk("World", 3, 3, 4)];
 
         write_chunks_json_with_mimetype(&doc_path, "text/html", &chunks, &out_path).unwrap();
 
@@ -117,20 +114,38 @@ mod tests {
 
         for (i, item) in arr.iter().enumerate() {
             let obj = item.as_object().unwrap();
-            assert_eq!(obj.get("text").unwrap().as_str().unwrap(), if i == 0 { "Hello" } else { "World" });
+            assert_eq!(
+                obj.get("text").unwrap().as_str().unwrap(),
+                if i == 0 { "Hello" } else { "World" }
+            );
             let meta = obj.get("meta").unwrap().as_object().unwrap();
-            assert_eq!(meta.get("schema_name").unwrap().as_str().unwrap(), "docling_core.transforms.chunker.DocMeta");
+            assert_eq!(
+                meta.get("schema_name").unwrap().as_str().unwrap(),
+                "docling_core.transforms.chunker.DocMeta"
+            );
             assert_eq!(meta.get("version").unwrap().as_str().unwrap(), "1.0.0");
             assert_eq!(meta.get("chunk_index").unwrap().as_i64().unwrap(), i as i64);
             assert_eq!(meta.get("total_chunks").unwrap().as_i64().unwrap(), 2);
-            assert_eq!(meta.get("page_count").unwrap().as_i64().unwrap(), expected_page_count);
+            assert_eq!(
+                meta.get("page_count").unwrap().as_i64().unwrap(),
+                expected_page_count
+            );
             let origin = meta.get("origin").unwrap().as_object().unwrap();
-            assert_eq!(origin.get("mimetype").unwrap().as_str().unwrap(), "text/html");
-            assert_eq!(origin.get("filename").unwrap().as_str().unwrap(), "sample.html");
+            assert_eq!(
+                origin.get("mimetype").unwrap().as_str().unwrap(),
+                "text/html"
+            );
+            assert_eq!(
+                origin.get("filename").unwrap().as_str().unwrap(),
+                "sample.html"
+            );
             // Verify binary_hash is as expected for the provided path string
             let path_str = doc_path.to_string_lossy();
             let expected_hash = xxh64(path_str.as_bytes(), 0) as i64;
-            assert_eq!(origin.get("binary_hash").unwrap().as_i64().unwrap(), expected_hash);
+            assert_eq!(
+                origin.get("binary_hash").unwrap().as_i64().unwrap(),
+                expected_hash
+            );
         }
     }
 }

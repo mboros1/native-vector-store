@@ -21,20 +21,29 @@ pub struct AnnotatedLine {
 
 fn detect_line_type(line: &str) -> (LineType, i32) {
     let s = line.trim();
-    if s.is_empty() { return (LineType::Blank, 0); }
+    if s.is_empty() {
+        return (LineType::Blank, 0);
+    }
     // markdown-style headings
     if let Some(stripped) = s.strip_prefix('#') {
         let mut level = 1;
         let mut rest = stripped;
-        while let Some(r) = rest.strip_prefix('#') { level += 1; rest = r; }
-        if level <= 2 { return (LineType::MajorHeading, level as i32); }
+        while let Some(r) = rest.strip_prefix('#') {
+            level += 1;
+            rest = r;
+        }
+        if level <= 2 {
+            return (LineType::MajorHeading, level as i32);
+        }
         return (LineType::MinorHeading, level as i32);
     }
     // list items
     if s.starts_with('-') || s.starts_with('*') || s.starts_with('+') {
         return (LineType::ListItem, 0);
     }
-    if s.chars().all(|c| c == '`') { return (LineType::CodeBlock, 0); }
+    if s.chars().all(|c| c == '`') {
+        return (LineType::CodeBlock, 0);
+    }
     (LineType::Normal, 0)
 }
 

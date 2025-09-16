@@ -960,8 +960,7 @@ mod tests {
         let tok = SimpleTokenizer::new();
         let mut doc_tokens: Vec<Vec<String>> = Vec::with_capacity(docs.len());
         let mut df_map: HashMap<String, usize> = HashMap::new();
-        let mut postings_map: HashMap<String, Vec<(usize, u32)>> =
-            HashMap::new();
+        let mut postings_map: HashMap<String, Vec<(usize, u32)>> = HashMap::new();
         for (i, d) in docs.iter().enumerate() {
             let tokens = tok.split(&d.text);
             let mut tf: HashMap<&str, u32> = HashMap::new();

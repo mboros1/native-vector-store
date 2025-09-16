@@ -6,9 +6,10 @@ use std::path::PathBuf;
 #[command(about = "Pack JSON docs into a native-vector-store bundle", long_about = None)]
 pub struct Cli {
     /// Input directory containing JSON files (expects docs.json array by default)
+    #[arg(default_value = "../samples/json-rust-embedded")]
     pub input: PathBuf,
     /// Output directory (created if missing)
-    #[arg(short = 'o', long = "out", default_value = "./nvs-bundle")]
+    #[arg(short = 'o', long = "out", default_value = "./.nvs-bundle")]
     pub out: PathBuf,
     /// Metadata block size in bytes
     #[arg(long = "block-size", default_value_t = 131072)]

@@ -5,9 +5,9 @@ use std::time::Instant;
 
 mod annotate;
 mod group;
-mod pack;
-mod overlap;
 mod merge;
+mod overlap;
+mod pack;
 mod split;
 
 pub use annotate::{annotate_lines, AnnotatedLine, LineType};
@@ -24,7 +24,9 @@ pub trait TokenCounter {
 
 // Implement TokenCounter for the GreedyTokenizer from the tokenmonster crate
 impl TokenCounter for tokenmonster::GreedyTokenizer {
-    fn count_tokens(&self, text: &str) -> usize { self.count_tokens(text) }
+    fn count_tokens(&self, text: &str) -> usize {
+        self.count_tokens(text)
+    }
 }
 
 // Allow passing a global Lazy<GreedyTokenizer> directly (used by CLI bins)
@@ -53,7 +55,11 @@ pub struct ChunkOptions {
 
 impl Default for ChunkOptions {
     fn default() -> Self {
-        Self { max_tokens: 512, min_tokens: 150, overlap_tokens: 50 }
+        Self {
+            max_tokens: 512,
+            min_tokens: 150,
+            overlap_tokens: 50,
+        }
     }
 }
 
@@ -72,8 +78,14 @@ impl Default for ChunkOptions {
 /// assert!(!chunks.is_empty());
 /// assert!(chunks[0].token_count > 0);
 /// ```
-pub fn chunk_pages(pages: &[(String, i32)], tokenizer: &dyn TokenCounter, opts: &ChunkOptions) -> Vec<Chunk> {
-    if pages.is_empty() { return Vec::new(); }
+pub fn chunk_pages(
+    pages: &[(String, i32)],
+    tokenizer: &dyn TokenCounter,
+    opts: &ChunkOptions,
+) -> Vec<Chunk> {
+    if pages.is_empty() {
+        return Vec::new();
+    }
 
     let annotated = annotate_lines(pages, tokenizer);
     let semantic_units = group_semantic_units(&annotated);
