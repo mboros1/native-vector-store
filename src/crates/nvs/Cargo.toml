@@ -1,0 +1,39 @@
+[package]
+name = "nvs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Unified CLI for Native Vector Store: chunk, embed, pack, query"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+indicatif = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+chrono = { version = "0.4", features = ["serde"] }
+num_cpus = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+crossbeam-channel = "0.5"
+memmap2 = "0.9"
+futures = "0.3"
+
+nvs-core = { path = "../nvs-core" }
+nvs-pdf = { path = "../nvs-pdf" }
+nvs-html = { path = "../nvs-html" }
+nvs-embed = { path = "../nvs-embed" }
+nvs-packer = { path = "../nvs-packer" }
+
+[[bin]]
+name = "nvs"
+path = "src/main.rs"
+
+[features]
+default = ["local-embed"]
+# Re-export local-embed feature from nvs-embed so users can enable it via: 
+#   cargo run -p nvs --features local-embed -- ...
+local-embed = ["nvs-embed/local-embed"]
+local-embed-accel = ["nvs-embed/local-embed-accel"]
