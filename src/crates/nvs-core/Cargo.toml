@@ -3,7 +3,20 @@ name = "nvs-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Native Vector Store (Rust) core reader library"
+description = "Native Vector Store (Rust) core: bundle format, mmap reader, vector/BM25/hybrid search"
+repository = "https://github.com/martinboros/native-vector-store"
+readme = "README.md"
+keywords = ["vector", "search", "bm25", "retrieval", "embedding"]
+categories = ["algorithms", "data-structures", "database-implementations"]
+
+# Keep the published crate lean
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+    "src/**",
+    "benches/**",
+]
 
 [lib]
 name = "nvs_core"
@@ -21,7 +34,7 @@ cpufeatures = "0.2"
 ordered-float = "4"
 half = "2"
 zstd = "0.13"
-tokenmonster = { path = "../tokenmonster" }
+tokenmonster = { version = "0.1.0", path = "../tokenmonster" }
 once_cell = "1"
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 

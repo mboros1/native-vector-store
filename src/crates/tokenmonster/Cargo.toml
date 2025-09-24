@@ -4,6 +4,19 @@ version = "0.1.0"
 edition = "2021"
 description = "Greedy tiktoken-like tokenizer with embedded vocabulary (cl100k-base approximator)"
 license = "MIT"
+repository = "https://github.com/martinboros/native-vector-store"
+readme = "README.md"
+keywords = ["tokenizer", "nlp", "tiktoken"]
+categories = ["text-processing", "algorithms"]
+
+# Keep the published crate lean
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+    "src/**",
+    "benches/**",
+]
 
 [features]
 # Use a tiny inline vocabulary for tests and examples.
