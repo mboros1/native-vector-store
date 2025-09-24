@@ -188,7 +188,7 @@ function avg(arr) { return arr.reduce((a,b)=>a+b,0) / (arr.length || 1); }
 async function main() {
   // Defaults
   const cwd = process.cwd();
-  const bin = path.join(cwd, 'rust', 'target', 'release', 'nvs-packer');
+  const bin = path.join(cwd, 'src', 'target', 'release', 'nvs-packer');
   const input = process.argv.find(a => a.startsWith('--input='))?.split('=')[1] || path.join(cwd, 'samples', 'embedded_docs');
   const outDir = process.argv.find(a => a.startsWith('--out='))?.split('=')[1] || path.join(cwd, 'nvs-bundle');
   const runs = parseInt(process.argv.find(a => a.startsWith('--runs='))?.split('=')[1] || '3', 10);

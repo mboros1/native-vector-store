@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/nvs-core",
+    "crates/nvs-packer",
+    "crates/tokenmonster",
+    "crates/nvs-pdf",
+    "crates/nvs-pdf-core",
+    "crates/nvs-html-core",
+    "crates/nvs-html",
+    "crates/nvs-embed",
+    "crates/nvs-cli",
+    "crates/nvs",
+]
+
+resolver = "2"

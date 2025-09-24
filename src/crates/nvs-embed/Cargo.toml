@@ -1,0 +1,57 @@
+[package]
+name = "nvs-embed"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Embedder for chunked JSON docs using OpenAI embeddings"
+
+[lib]
+name = "nvs_embed"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+reqwest = { version = "0.11", features = ["json", "gzip", "brotli", "deflate", "stream"] }
+futures = "0.3"
+thiserror = "1"
+console = "0.15"
+indicatif = "0.17"
+clap = { version = "4", features = ["derive"] }
+walkdir = "2"
+async-trait = "0.1"
+num_cpus = "1"
+
+# Optional: local CPU-only embedding backend (Candle + tokenizers)
+tokenizers = { version = "0.19", optional = true }
+hf-hub = { version = "0.3", default-features = true, optional = true }
+candle-core = { version = "0.9.1", optional = true }
+candle-nn = { version = "0.9.1", optional = true }
+candle-transformers = { version = "0.9.1", optional = true }
+
+[features]
+default = ["local-embed"]
+local-embed = [
+    "tokenizers",
+    "hf-hub",
+    "candle-core",
+    "candle-nn",
+    "candle-transformers",
+]
+local-embed-accel = [
+    "local-embed",
+    "candle-core/accelerate",
+]
+
+# On macOS, enable Candle's Accelerate backend automatically when local-embed is used.
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.9.1", optional = true, features = ["accelerate"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "embed-cli"
+path = "src/bin/embed-cli.rs"

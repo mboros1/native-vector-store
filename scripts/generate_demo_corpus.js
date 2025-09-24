@@ -47,7 +47,7 @@ const topics = [
   },
   {
     name: 'software',
-    keywords: ['rust', 'memory', 'safety', 'concurrency', 'compiler', 'borrow', 'ownership', 'performance'],
+    keywords: ['src', 'memory', 'safety', 'concurrency', 'compiler', 'borrow', 'ownership', 'performance'],
     patterns: [
       (kw, name, i) => `${kw[0]} ${kw[6]} model enables ${kw[2]} and ${kw[3]} with strong ${kw[1]} guarantees.`,
       (kw, name, i) => `The ${kw[4]} enforces ${kw[5]} rules to improve ${kw[7]} and ${kw[2]}.`,
@@ -94,7 +94,7 @@ async function generate() {
   console.log(`  1) Add embeddings:  OPENAI_API_KEY=... npm run embed -- ${OUT_DIR}`);
   console.log('  2) Pack bundle (Rust): cargo run -p nvs-packer --', OUT_DIR, '-o out_bundle');
   console.log('  3) Generate query embeddings: node scripts/generate_queries.js out_queries.json');
-  console.log('  4) Validate (Rust): cargo run --example validate_corpus --manifest-path rust/crates/nvs-core/Cargo.toml -- --bundle out_bundle --queries out_queries.json --k 5');
+  console.log('  4) Validate (Rust): cargo run --example validate_corpus --manifest-path src/crates/nvs-core/Cargo.toml -- --bundle out_bundle --queries out_queries.json --k 5');
 }
 
 generate().catch((e) => { console.error(e); process.exit(1); });
