@@ -18,7 +18,7 @@ Rust stable is recommended (via `rustup default stable`).
 
 - `crates/nvs-core` — Core bundle reader (manifest parsing, mmap access) + BM25/vector/hybrid search and tokenization.
 - `crates/nvs-packer` — CLI to convert JSON docs (with embeddings) into a bundle: writes vectors, postings, metadata blocks, manifest.
-- `crates/nvs-embed` — Embedding utilities with OpenAI backend and a tiny local GTE‑small backend (offline path).
+- `crates/nvs-embed` — Embedding utilities with OpenAI backend and a local GTE‑small backend. The repository includes the required GTE‑small files under `src/models/gte-small`, enabling fully offline CPU embeddings out of the box.
 - `crates/nvs-cli` — Interactive CLI to open bundles and run vector/BM25/hybrid queries.
 - `crates/nvs-pdf-core`, `crates/nvs-pdf` — PDF parsing and chunking pipeline.
 - `crates/nvs-html-core`, `crates/nvs-html` — HTML parsing and extraction utilities.
@@ -91,7 +91,7 @@ Sample data: a compressed Open VSX‑style dump lives at `src/vsx.ndjson.zst` (N
 
 Suggested first pass (end‑to‑end):
 - Prepare: map each record to a short text: `"<displayName> — <description>. Tags: ... Categories: ..."` and keep high‑signal numeric/meta fields.
-- Embed: use the local GTE‑small backend in `nvs-embed` (offline) to produce `{ text, metadata: { embedding, ... } }` docs.
+- Embed: use the local GTE‑small backend in `nvs-embed` to produce `{ text, metadata: { embedding, ... } }` docs. The model files are already included at `src/models/gte-small` and are auto‑discovered; set `NVS_LOCAL_EMBED_MODEL_DIR` to override.
 - Pack: `nvs-packer` to build a bundle (consider `--quantize f16`, `--compress zstd`).
 - Query: open with `nvs-cli` and try BM25/hybrid queries, then iterate on field weighting.
 
