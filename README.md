@@ -133,7 +133,6 @@ write_chunks_json(pdf, &chunks, Path::new("./chunks.json"))?;
 ## Related Docs
 
 - `documentation/MANIFEST_SPEC.md` — Bundle format.
-- `documentation/RUST_PARITY.md` — Implementation parity notes.
  - `ROADMAP.md` — Tiny search engine plan and TODOs.
 
 ## License
