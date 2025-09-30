@@ -1,23 +1,25 @@
-Local GTE-small model files
+GTE-small (local embedding model)
 
-Place the following files in this directory to enable fully offline embedding with the local CPU backend:
+This repository already includes the files needed to run the GTE-small model fully offline on CPU. The model comes from the Hugging Face repository thenlper/gte-small and produces 384‑dimensional sentence embeddings suitable for semantic search and hybrid ranking.
 
+What’s included here
 - tokenizer.json
+- tokenizer_config.json
 - config.json
 - model.safetensors
 
-These are from the Hugging Face repo: thenlper/gte-small
-https://huggingface.co/thenlper/gte-small
+How it’s used
+- The `nvs-embed` crate’s local backend automatically discovers this directory (one of several well‑known locations) and loads the model at runtime.
+- The embed CLI and autopilot use that backend to generate embeddings without network access.
+- If local files are not found, the backend falls back to the Hugging Face Hub cache for `thenlper/gte-small`.
 
-Once present, the embed CLI and autopilot will discover them automatically.
+Model details (brief)
+- Architecture: BERT‑style encoder with mean pooling and L2 normalization.
+- Embedding size: 384 floats per text.
+- Typical max input length used here: 256 tokens.
 
-Git LFS
+Configuration
+- To use a different on‑disk location, set `NVS_LOCAL_EMBED_MODEL_DIR` to a directory containing `tokenizer.json`, `config.json`, and `model.safetensors`.
 
-The model.safetensors file is large. Track it with Git LFS so your repo stays lean:
-
-1. Install Git LFS once: git lfs install
-2. Track safetensors: git lfs track "*.safetensors"
-3. Add and commit files: git add rust/models/gte-small/* && git commit -m "Add local gte-small model"
-
-You can also set NVS_LOCAL_EMBED_MODEL_DIR to point to a custom directory instead of using this path.
-
+Reference
+thenlper/gte-small — https://huggingface.co/thenlper/gte-small
