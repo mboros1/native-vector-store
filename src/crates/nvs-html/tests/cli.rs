@@ -10,7 +10,7 @@ fn chunk_html_cli_processes_file() {
         &html_path,
         "<html><body><h1>T</h1><p>Hello</p></body></html>",
     )
-        .unwrap();
+    .unwrap();
     let status = std::process::Command::new(exe)
         .args([
             "-i",

@@ -68,7 +68,7 @@ pub fn extract_page_text_with_debug(
                       filters: &mut Vec<String>,
                       preds: &mut Vec<i64>,
                       buffers: &mut Vec<u8>|
-                      -> Result<()> {
+     -> Result<()> {
         if let PdfValue::Stream { dict: sdict, data } = vv {
             if let Some(fv) = sdict.get("Filter") {
                 match fv {

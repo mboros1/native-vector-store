@@ -1,6 +1,6 @@
 use nvs_core::VectorStore;
 
-// Run with: 
+// Run with:
 //   cargo run -p nvs-core --example basic_hybrid -- <BUNDLE_DIR>
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -16,9 +16,13 @@ fn main() -> anyhow::Result<()> {
     println!("Top-{} results:", hits.len());
     for (id, score) in hits.iter() {
         if let Some(doc) = store.get_document_parsed(*id) {
-            println!("- id={} score={:.4} text={}...", doc.id, score, doc.text.chars().take(60).collect::<String>());
+            println!(
+                "- id={} score={:.4} text={}...",
+                doc.id,
+                score,
+                doc.text.chars().take(60).collect::<String>()
+            );
         }
     }
     Ok(())
 }
-

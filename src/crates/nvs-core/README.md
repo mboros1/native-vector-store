@@ -27,16 +27,16 @@ Quick start
 use nvs_core::VectorStore;
 
 // Open a bundle (directory containing manifest.json, vectors, meta.* etc.)
-let store = VectorStore::open("/path/to/bundle")?;
+let store = VectorStore::open("/path/to/bundle") ?;
 
 // Hybrid search
 let embedding: Vec<f32> = vec![0.0, 1.0, 0.0];
 let q = "keywords";
-let hits = store.search_hybrid(&embedding, q, 5, 0.6);
+let hits = store.search_hybrid( & embedding, q, 5, 0.6);
 
 // Fetch full documents for the top-k
-let ids: Vec<u32> = hits.iter().map(|(id, _)| *id).collect();
-let docs = store.get_documents(&ids);
+let ids: Vec<u32> = hits.iter().map( | (id, _) | * id).collect();
+let docs = store.get_documents( & ids);
 ```
 
 More

@@ -110,16 +110,27 @@ fn strip_repeated_headers_footers(pages: &[(String, i32)]) -> Vec<(String, i32)>
     for (txt, _p) in pages {
         let lines: Vec<&str> = txt.split('\n').collect();
         // find first non-empty
-        let first = lines.iter().find(|l| !l.trim().is_empty()).map(|s| s.trim());
+        let first = lines
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .map(|s| s.trim());
         // find last non-empty
-        let last = lines.iter().rev().find(|l| !l.trim().is_empty()).map(|s| s.trim());
+        let last = lines
+            .iter()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .map(|s| s.trim());
         heads.push(first.map(|s| s.to_string()));
         foots.push(last.map(|s| s.to_string()));
         if let Some(h) = &heads.last().unwrap() {
-            if h.len() > 3 { *first_map.entry(h.clone()).or_insert(0) += 1; }
+            if h.len() > 3 {
+                *first_map.entry(h.clone()).or_insert(0) += 1;
+            }
         }
         if let Some(f) = &foots.last().unwrap() {
-            if f.len() > 3 { *last_map.entry(f.clone()).or_insert(0) += 1; }
+            if f.len() > 3 {
+                *last_map.entry(f.clone()).or_insert(0) += 1;
+            }
         }
     }
     let n = pages.len().max(1);
@@ -140,10 +151,18 @@ fn strip_repeated_headers_footers(pages: &[(String, i32)]) -> Vec<(String, i32)>
         let f = foots.remove(0);
         let mut lines: Vec<&str> = txt.split('\n').collect();
         if let (Some(ch), Some(hs)) = (&common_head, &h) {
-            if hs == ch { if let Some(idx) = lines.iter().position(|l| l.trim() == hs) { lines.remove(idx); } }
+            if hs == ch {
+                if let Some(idx) = lines.iter().position(|l| l.trim() == hs) {
+                    lines.remove(idx);
+                }
+            }
         }
         if let (Some(cf), Some(fs)) = (&common_foot, &f) {
-            if fs == cf { if let Some(idx) = lines.iter().rposition(|l| l.trim() == fs) { lines.remove(idx); } }
+            if fs == cf {
+                if let Some(idx) = lines.iter().rposition(|l| l.trim() == fs) {
+                    lines.remove(idx);
+                }
+            }
         }
         out.push((lines.join("\n"), *p));
     }
@@ -152,7 +171,9 @@ fn strip_repeated_headers_footers(pages: &[(String, i32)]) -> Vec<(String, i32)>
 
 fn is_mostly_numeric(s: &str) -> bool {
     let trimmed = s.trim();
-    if trimmed.is_empty() { return true; }
+    if trimmed.is_empty() {
+        return true;
+    }
     let digits = trimmed.chars().filter(|c| c.is_ascii_digit()).count();
     digits * 2 >= trimmed.chars().count() // >= 50% digits
 }

@@ -100,7 +100,11 @@ fn main() -> Result<()> {
 
     let row_bytes = dim * if dtype == "f16" { 2 } else { 4 };
     let aligned = ((row_bytes + 63) / 64) * 64;
-    let vec_name = if dtype == "f16" { "vectors.f16" } else { "vectors.f32" };
+    let vec_name = if dtype == "f16" {
+        "vectors.f16"
+    } else {
+        "vectors.f32"
+    };
     let bundle_size: u64 = [
         "manifest.json",
         vec_name,
@@ -111,12 +115,12 @@ fn main() -> Result<()> {
         "meta.idx",
         "meta.blocks",
     ]
-        .iter()
-        .filter_map(|name| {
-            let p = cli.out.join(name);
-            fs::metadata(&p).ok().map(|m| m.len())
-        })
-        .sum();
+    .iter()
+    .filter_map(|name| {
+        let p = cli.out.join(name);
+        fs::metadata(&p).ok().map(|m| m.len())
+    })
+    .sum();
     // Allocated (physical) size on disk
     #[cfg(unix)]
     use std::os::unix::fs::MetadataExt;
@@ -131,12 +135,12 @@ fn main() -> Result<()> {
         "meta.idx",
         "meta.blocks",
     ]
-        .iter()
-        .filter_map(|name| {
-            let p = cli.out.join(name);
-            fs::metadata(&p).ok().map(|m| m.blocks() * 512)
-        })
-        .sum();
+    .iter()
+    .filter_map(|name| {
+        let p = cli.out.join(name);
+        fs::metadata(&p).ok().map(|m| m.blocks() * 512)
+    })
+    .sum();
     #[cfg(not(unix))]
     let allocated_size: u64 = 0;
 

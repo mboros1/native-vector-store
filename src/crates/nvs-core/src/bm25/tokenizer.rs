@@ -669,7 +669,7 @@ mod simple_tokenizer_tests {
     fn periods_and_abbrev() {
         let t = SimpleTokenizer::new();
         assert_eq!(t.split("...").as_slice(), [".", ".", "."]); // ellipsis split
-        // Abbreviations keep period when in-word
+                                                                // Abbreviations keep period when in-word
         assert_eq!(t.split("Dr. Smith").as_slice(), ["Dr.", "Smith"]);
         // Multi-part: "U.S." -> split trailing period per C++ behavior, known limitation
         assert_eq!(

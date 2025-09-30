@@ -87,7 +87,7 @@ impl PdfDoc {
         parse_indirect_object(&self.data[range])
     }
 
-    pub fn iter_objects(&self) -> impl Iterator<Item=((u32, u16), Range<usize>)> + '_ {
+    pub fn iter_objects(&self) -> impl Iterator<Item = ((u32, u16), Range<usize>)> + '_ {
         self.objects.iter().map(|(k, v)| (*k, v.clone()))
     }
 
@@ -108,9 +108,9 @@ impl PdfDoc {
                             Err(_e1) => {
                                 // Try scan-based slice
                                 if let Ok(PdfValue::Stream {
-                                              dict: d2,
-                                              data: dbytes,
-                                          }) = self.parse_stream_at_range_scan(range.clone())
+                                    dict: d2,
+                                    data: dbytes,
+                                }) = self.parse_stream_at_range_scan(range.clone())
                                 {
                                     match crate::streams::get_stream_data_with_filters(
                                         &d2,

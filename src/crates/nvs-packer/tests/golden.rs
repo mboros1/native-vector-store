@@ -67,10 +67,10 @@ fn golden_bundle_fields_no_embeddings_in_meta() {
     let cols = files.vectors.cols.unwrap_or(0) as usize;
     let row_bytes = cols
         * if files.vectors.dtype.as_deref() == Some("f16") {
-        2
-    } else {
-        4
-    };
+            2
+        } else {
+            4
+        };
     let stride = row_bytes.div_ceil(64) * 64;
     assert_eq!(vec_md.len() as usize, rows * stride);
 
