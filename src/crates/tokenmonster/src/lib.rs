@@ -21,6 +21,12 @@ struct Vocab {
     decoder: HashMap<i32, String>,
 }
 
+impl Default for TokenMonster {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 static VOCAB: Lazy<Vocab> = Lazy::new(|| {
     #[cfg(feature = "tiny_vocab")]
     let mut v = Vocab::default();
