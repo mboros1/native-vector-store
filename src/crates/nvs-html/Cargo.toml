@@ -20,6 +20,10 @@ nvs-html-core = { path = "../nvs-html-core" }
 clap = { version = "4", features = ["derive"] }
 walkdir = "2"
 
+[features]
+default = []
+dev-bin = []
+
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
 tempfile = "3"
@@ -31,3 +35,4 @@ harness = false
 [[bin]]
 name = "chunk-html-cli"
 path = "src/bin/chunk-html-cli.rs"
+required-features = ["dev-bin"]
