@@ -1,9 +1,6 @@
-name: Prebuild
+name: Prebuild (manual)
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 jobs:

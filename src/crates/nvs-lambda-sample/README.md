@@ -1,6 +1,7 @@
 # nvs-lambda-sample
 
 Sample AWS Lambda handler for Native Vector Store that:
+
 - Loads bundles by name (e.g., "1" or "2") from a `BUNDLES_ROOT` directory.
 - Caches opened bundles across warm invocations.
 - Exposes a single Hybrid search that returns full documents with a `score` field (Spring AI/LangChain style).
@@ -51,11 +52,13 @@ Response shape (JSON):
 
 ## Deploying to AWS
 
-- Zip runtime (if bundles are not included): deploy the function code, mount EFS at runtime, and set `BUNDLES_ROOT` to the EFS path.
+- Zip runtime (if bundles are not included): deploy the function code, mount EFS at runtime, and set `BUNDLES_ROOT` to
+  the EFS path.
 - Container image: bake this binary and optionally the bundles at `/opt/bundles`, set `BUNDLES_ROOT=/opt/bundles`.
 - VPC/EFS: attach VPC + SG, mount EFS to the function; use `BUNDLES_ROOT=/mnt/efs/bundles`.
 
 Environment variables:
+
 - `BUNDLES_ROOT` (default: `./bundles`)
 - `RAYON_NUM_THREADS` (optional, to tune concurrency)
 
@@ -74,7 +77,9 @@ Environment variables:
 ```
 
 ## Notes
+
 - The handler lazily opens `bundle` on first use and caches it; subsequent warm invocations reuse the mmap’d data.
-- For large bundles on Lambda in VPC, prefer EFS and optionally copy to `/tmp` in your own fork for the fastest page faults.
+- For large bundles on Lambda in VPC, prefer EFS and optionally copy to `/tmp` in your own fork for the fastest page
+  faults.
 
 License: MIT

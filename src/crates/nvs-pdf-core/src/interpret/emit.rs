@@ -1,6 +1,6 @@
 use crate::fonts::map_bytes_with_tounicode_or_base;
-use encoding_rs::WINDOWS_1252;
 use crate::resources::FontInfo;
+use encoding_rs::WINDOWS_1252;
 use std::collections::BTreeMap;
 
 fn suspicious_score(s: &str) -> usize {

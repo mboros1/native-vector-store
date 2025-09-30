@@ -17,4 +17,7 @@ futures = "0.3"
 [[bin]]
 name = "vsx-scrape"
 path = "src/bin/vsx-scrape.rs"
-
+required-features = ["dev-bin"]
+[features]
+default = []
+dev-bin = []

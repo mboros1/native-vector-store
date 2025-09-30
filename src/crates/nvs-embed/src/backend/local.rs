@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
-use candle_transformers::models::bert as bert;
+use candle_transformers::models::bert;
 use hf_hub::api::sync::Api;
 use tokenizers::parallelism::set_parallelism;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
@@ -68,7 +68,10 @@ impl LocalGTEBackendBuilder {
                     paths
                 } else {
                     // 3) Fetch/cached files from HF Hub
-                    eprintln!("  · local model files not found; falling back to HF Hub fetch for {}", model_id);
+                    eprintln!(
+                        "  · local model files not found; falling back to HF Hub fetch for {}",
+                        model_id
+                    );
                     let api = Api::new()?;
                     let repo = api.model(model_id.clone());
                     let tok = repo
@@ -100,11 +103,16 @@ impl LocalGTEBackendBuilder {
         let config_file = File::open(&config_path)?;
         let config: bert::Config =
             serde_json::from_reader(config_file).context("bad BERT config.json")?;
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
+        let vb =
+            unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
         let model = bert::BertModel::load(vb, &config)?;
 
         Ok(LocalGTEBackend {
-            inner: Arc::new(Inner { tokenizer, model, device }),
+            inner: Arc::new(Inner {
+                tokenizer,
+                model,
+                device,
+            }),
             max_len: self.max_len,
         })
     }
@@ -173,10 +181,7 @@ fn embed_batch_cpu(inner: &Inner, texts: &[String], _max_len: usize) -> Result<V
     let mask_3d = mask_f.unsqueeze(2)?; // (B,S,1)
     let masked_hidden = hidden.broadcast_mul(&mask_3d)?; // (B,S,H)
     let sum_hidden = masked_hidden.sum(1)?; // (B,H)
-    let counts = mask_f
-        .sum(1)?
-        .clamp(1e-9f32, f32::MAX)?
-        .unsqueeze(1)?; // (B,1)
+    let counts = mask_f.sum(1)?.clamp(1e-9f32, f32::MAX)?.unsqueeze(1)?; // (B,1)
     let mean = sum_hidden.broadcast_div(&counts)?; // (B,H)
 
     // L2 normalize row-wise
@@ -186,7 +191,9 @@ fn embed_batch_cpu(inner: &Inner, texts: &[String], _max_len: usize) -> Result<V
     Ok(normed.to_vec2::<f32>()?)
 }
 
-fn find_model_files_in(dir: &std::path::Path) -> Option<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)> {
+fn find_model_files_in(
+    dir: &std::path::Path,
+) -> Option<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)> {
     let tok = dir.join("tokenizer.json");
     let wts = dir.join("model.safetensors");
     let cfg = dir.join("config.json");

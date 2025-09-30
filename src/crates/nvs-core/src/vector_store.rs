@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::bundle::Bundle;
 use crate::{bm25, hybrid};
 use rayon::prelude::*;
-use std::cmp::Ordering;
 use serde_json::Value as JsonValue;
+use std::cmp::Ordering;
 
 pub struct VectorStore {
     bundle: Arc<Bundle>,

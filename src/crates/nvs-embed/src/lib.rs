@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-pub use backend::openai::{OpenAIBackend, OpenAIBackendBuilder};
-pub use backend::EmbeddingBackend;
 #[cfg(feature = "local-embed")]
 pub use backend::local::{LocalGTEBackend, LocalGTEBackendBuilder};
+pub use backend::openai::{OpenAIBackend, OpenAIBackendBuilder};
+pub use backend::EmbeddingBackend;
 
 #[derive(Debug, Clone)]
 pub struct EmbedOptions {

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use lambda_runtime::{run, service_fn, Error, LambdaEvent};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,9 @@ struct StoreCache {
 
 impl StoreCache {
     fn new() -> Self {
-        Self { inner: RwLock::new(HashMap::new()) }
+        Self {
+            inner: RwLock::new(HashMap::new()),
+        }
     }
     fn get(&self, key: &str) -> Option<Arc<nvs_core::VectorStore>> {
         self.inner.read().ok()?.get(key).cloned()
@@ -24,7 +26,9 @@ impl StoreCache {
     fn put(&self, key: String, store: Arc<nvs_core::VectorStore>) {
         if let Ok(mut w) = self.inner.write() {
             if w.len() >= 4 && !w.contains_key(&key) {
-                if let Some(first) = w.keys().next().cloned() { let _ = w.remove(&first); }
+                if let Some(first) = w.keys().next().cloned() {
+                    let _ = w.remove(&first);
+                }
             }
             w.insert(key, store);
         }
@@ -58,14 +62,20 @@ fn resolve_bundle_dir(bundle_name: &str) -> Result<PathBuf> {
     let root = std::env::var("BUNDLES_ROOT").unwrap_or_else(|_| "./bundles".to_string());
     let p = PathBuf::from(root).join(bundle_name);
     if !p.join("manifest.json").exists() {
-        return Err(anyhow!("bundle '{}' not found at {}", bundle_name, p.display()));
+        return Err(anyhow!(
+            "bundle '{}' not found at {}",
+            bundle_name,
+            p.display()
+        ));
     }
     Ok(p)
 }
 
 async fn load_or_get(bundle: &str) -> Result<Arc<nvs_core::VectorStore>> {
     let cache = CACHE.get_or_init(StoreCache::new);
-    if let Some(s) = cache.get(bundle) { return Ok(s); }
+    if let Some(s) = cache.get(bundle) {
+        return Ok(s);
+    }
     let dir = resolve_bundle_dir(bundle)?;
     let dir_s = dir.to_string_lossy().to_string();
     let store = task::spawn_blocking(move || nvs_core::VectorStore::open(dir_s)).await??;
@@ -76,12 +86,17 @@ async fn load_or_get(bundle: &str) -> Result<Arc<nvs_core::VectorStore>> {
 
 async fn handler(ev: LambdaEvent<serde_json::Value>) -> Result<serde_json::Value, Error> {
     // Optional: configure rayon threads via env
-    if let Some(n) = std::env::var("RAYON_NUM_THREADS").ok().and_then(|s| s.parse::<usize>().ok()) {
-        let _ = rayon::ThreadPoolBuilder::new().num_threads(n).build_global();
+    if let Some(n) = std::env::var("RAYON_NUM_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+    {
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(n)
+            .build_global();
     }
 
-    let event: Event = serde_json::from_value(ev.payload)
-        .map_err(|e| anyhow!("invalid event JSON: {}", e))?;
+    let event: Event =
+        serde_json::from_value(ev.payload).map_err(|e| anyhow!("invalid event JSON: {}", e))?;
     let bundle = event.bundle.clone();
     let store = load_or_get(&bundle).await?;
 
@@ -90,7 +105,12 @@ async fn handler(ev: LambdaEvent<serde_json::Value>) -> Result<serde_json::Value
     let mut docs: Vec<ScoredDocument> = Vec::with_capacity(hits.len());
     for (id, score) in hits.into_iter() {
         if let Some(doc) = store.get_document_parsed(id) {
-            docs.push(ScoredDocument { id: doc.id, text: doc.text, metadata: doc.metadata, score });
+            docs.push(ScoredDocument {
+                id: doc.id,
+                text: doc.text,
+                metadata: doc.metadata,
+                score,
+            });
         }
     }
     Ok(serde_json::to_value(serde_json::json!({

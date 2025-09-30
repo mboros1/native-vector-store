@@ -9,10 +9,6 @@ test/benchmark_data/
 test_data/
 .VSCodeCounter/
 
-# C++ build artifacts
-src/bin/
-src/obj/
-
 # Test bundles and temporary directories
 src/test-bundle/
 src/stress_test_bundle/
@@ -49,7 +45,6 @@ config.status
 docs/
 
 samples/
-bin/
 
 # Rust build artifacts
 src/target/

@@ -29,9 +29,15 @@ impl ToUnicodeMap {
     }
 
     pub fn insert_range(&mut self, key_len: usize, start: u32, end: u32, start_cp: u32) {
-        if key_len == 0 || key_len > 4 || start > end { return; }
+        if key_len == 0 || key_len > 4 || start > end {
+            return;
+        }
         self.max_key_len = self.max_key_len.max(key_len);
-        let r = Range { start, end, start_cp };
+        let r = Range {
+            start,
+            end,
+            start_cp,
+        };
         match key_len {
             1 => self.ranges1.push(r),
             2 => self.ranges2.push(r),
@@ -51,15 +57,19 @@ impl ToUnicodeMap {
     }
 
     fn find_in_ranges(ranges: &Vec<Range>, code: u32) -> Option<u32> {
-        if ranges.is_empty() { return None; }
+        if ranges.is_empty() {
+            return None;
+        }
         let mut lo = 0usize;
         let mut hi = ranges.len();
         while lo < hi {
             let mid = (lo + hi) / 2;
             let r = ranges[mid];
-            if code < r.start { hi = mid; }
-            else if code > r.end { lo = mid + 1; }
-            else {
+            if code < r.start {
+                hi = mid;
+            } else if code > r.end {
+                lo = mid + 1;
+            } else {
                 // inside range
                 return Some(r.start_cp + (code - r.start));
             }
@@ -68,7 +78,12 @@ impl ToUnicodeMap {
     }
 
     pub fn map_bytes(&self, bytes: &[u8]) -> String {
-        if self.map.is_empty() && self.ranges1.is_empty() && self.ranges2.is_empty() && self.ranges3.is_empty() && self.ranges4.is_empty() {
+        if self.map.is_empty()
+            && self.ranges1.is_empty()
+            && self.ranges2.is_empty()
+            && self.ranges3.is_empty()
+            && self.ranges4.is_empty()
+        {
             return bytes.iter().map(|&b| b as char).collect();
         }
         let mut out = String::new();
@@ -95,7 +110,11 @@ impl ToUnicodeMap {
                     _ => None,
                 };
                 if let Some(cp) = cp_opt {
-                    if let Some(ch) = std::char::from_u32(cp) { out.push(ch); } else { out.push('\u{FFFD}'); }
+                    if let Some(ch) = std::char::from_u32(cp) {
+                        out.push(ch);
+                    } else {
+                        out.push('\u{FFFD}');
+                    }
                     i += l;
                     matched = true;
                     break;
@@ -110,7 +129,11 @@ impl ToUnicodeMap {
         out
     }
     pub fn is_empty(&self) -> bool {
-        self.map.is_empty() && self.ranges1.is_empty() && self.ranges2.is_empty() && self.ranges3.is_empty() && self.ranges4.is_empty()
+        self.map.is_empty()
+            && self.ranges1.is_empty()
+            && self.ranges2.is_empty()
+            && self.ranges3.is_empty()
+            && self.ranges4.is_empty()
     }
 }
 
@@ -145,15 +168,27 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> ToUnicodeMap {
             if let Some(end) = s[i..].find("endbfrange") {
                 let block = &s[i..i + end];
                 for line in block.lines() {
-                    if let (Some(start_hex), Some(end_hex)) = (extract_hex(line, 0), extract_hex(line, 1)) {
-                        let start_bytes = match hex_to_bytes(&start_hex) { Some(v) => v, None => continue };
-                        let end_bytes = match hex_to_bytes(&end_hex) { Some(v) => v, None => continue };
-                        if start_bytes.len() != end_bytes.len() { continue; }
+                    if let (Some(start_hex), Some(end_hex)) =
+                        (extract_hex(line, 0), extract_hex(line, 1))
+                    {
+                        let start_bytes = match hex_to_bytes(&start_hex) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        let end_bytes = match hex_to_bytes(&end_hex) {
+                            Some(v) => v,
+                            None => continue,
+                        };
+                        if start_bytes.len() != end_bytes.len() {
+                            continue;
+                        }
                         if let Some(vec_hex) = extract_hex_array(line) {
                             // Array of explicit destinations
                             let mut cur = start_bytes.clone();
                             for dh in vec_hex {
-                                if cur > end_bytes { break; }
+                                if cur > end_bytes {
+                                    break;
+                                }
                                 if let Some(u) = hex_to_string(&dh) {
                                     map.insert(cur.clone(), u);
                                 }
@@ -167,7 +202,12 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> ToUnicodeMap {
                                 if let (Some(first), None) = (chars.next(), chars.next()) {
                                     let start_code = be_to_u32(&start_bytes);
                                     let end_code = be_to_u32(&end_bytes);
-                                    map.insert_range(start_bytes.len(), start_code, end_code, first as u32);
+                                    map.insert_range(
+                                        start_bytes.len(),
+                                        start_code,
+                                        end_code,
+                                        first as u32,
+                                    );
                                 } else {
                                     // Complex multi-codepoint dst for start only
                                     map.insert(start_bytes.clone(), u);
@@ -259,12 +299,14 @@ fn extract_hex_array(line: &str) -> Option<Vec<String>> {
 }
 
 fn hex_to_bytes(h: &str) -> Option<Vec<u8>> {
-    if h.len() % 2 != 0 { return None; }
+    if h.len() % 2 != 0 {
+        return None;
+    }
     let mut out = Vec::with_capacity(h.len() / 2);
     let bytes = h.as_bytes();
     let mut i = 0usize;
     while i + 1 < bytes.len() {
-        let part = &h[i..i+2];
+        let part = &h[i..i + 2];
         let val = u8::from_str_radix(part, 16).ok()?;
         out.push(val);
         i += 2;
@@ -302,13 +344,20 @@ fn hex_to_string(h: &str) -> Option<String> {
 fn incr_be_bytes(b: &mut [u8]) {
     // Increment big-endian byte vector by 1
     for i in (0..b.len()).rev() {
-        if b[i] == 0xFF { b[i] = 0x00; } else { b[i] += 1; break; }
+        if b[i] == 0xFF {
+            b[i] = 0x00;
+        } else {
+            b[i] += 1;
+            break;
+        }
     }
 }
 
 fn be_to_u32(bytes: &[u8]) -> u32 {
     let mut v: u32 = 0;
-    for &b in bytes { v = (v << 8) | (b as u32); }
+    for &b in bytes {
+        v = (v << 8) | (b as u32);
+    }
     v
 }
 
@@ -359,17 +408,25 @@ pub fn map_bytes_with_tounicode_or_base(
         }
         let mut out = Vec::with_capacity(s.len());
         for ch in s.chars() {
-            if let Some(b) = cpbyte(ch) { out.push(b); } else { return None; }
+            if let Some(b) = cpbyte(ch) {
+                out.push(b);
+            } else {
+                return None;
+            }
         }
         Some(out)
     }
     fn repair_mojibake(decoded: &str) -> Option<String> {
         let before = suspicious_score(decoded);
-        if before == 0 { return None; }
+        if before == 0 {
+            return None;
+        }
         if let Some(bytes) = cp1252_reverse_encode(decoded) {
             if let Ok(red) = String::from_utf8(bytes) {
                 let after = suspicious_score(&red);
-                if after < before { return Some(red); }
+                if after < before {
+                    return Some(red);
+                }
             }
         }
         None
@@ -377,7 +434,9 @@ pub fn map_bytes_with_tounicode_or_base(
     if let Some(m) = tu {
         if !m.is_empty() {
             let s = m.map_bytes(bytes);
-            if let Some(fixed) = repair_mojibake(&s) { return fixed; }
+            if let Some(fixed) = repair_mojibake(&s) {
+                return fixed;
+            }
             return s;
         }
     }
@@ -404,16 +463,22 @@ pub fn map_bytes_with_tounicode_or_base(
                 let uscore = suspicious_score(utf8);
                 if uscore < bscore {
                     let good = utf8.to_string();
-                    if let Some(fixed) = repair_mojibake(&good) { return fixed; }
+                    if let Some(fixed) = repair_mojibake(&good) {
+                        return fixed;
+                    }
                     return good;
                 }
             }
-            if let Some(fixed) = repair_mojibake(&base_decoded) { return fixed; }
+            if let Some(fixed) = repair_mojibake(&base_decoded) {
+                return fixed;
+            }
             return base_decoded;
         }
     }
     // Fallback: naive byte→char mapping
     let s: String = bytes.iter().map(|&b| b as char).collect();
-    if let Some(fixed) = repair_mojibake(&s) { return fixed; }
+    if let Some(fixed) = repair_mojibake(&s) {
+        return fixed;
+    }
     s
 }

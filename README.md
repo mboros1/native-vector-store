@@ -1,8 +1,8 @@
-# Native Vector Store — Rust Tooling
+# Native Vector Store — Rust Workspace
 
-This repository includes a Rust workspace under `rust/` that implements the next‑gen Native Vector Store: bundle format readers/writers, a packer CLI, a PDF text chunker, and supporting utilities.
+This repository contains a Rust workspace under `src/` that implements a compact, mmap‑friendly search bundle: bundle readers/writers, BM25 + vector + hybrid search, embedding utilities, and extractors.
 
-If you’re here to build, test, or use the Rust code, start with this guide.
+If you’re here to build, test, or use the Rust code, start here.
 
 ## Quick Start
 
@@ -16,13 +16,16 @@ Rust stable is recommended (via `rustup default stable`).
 
 ## Workspace Layout
 
-- `crates/nvs-core` — Core reader library for the bundle format (manifest parsing, mmap access, BM25/vector search – in progress).
-- `crates/nvs-packer` — CLI to convert JSON docs with embeddings into a Native Vector Store bundle.
-- `crates/nvs-pdf-core` — Fast-path, text‑only PDF utilities (low‑level parser/prober for future extraction paths).
-- `crates/nvs-pdf` — Library for PDF extraction + chunking (TokenMonster tokenizer), with optional PDFium integration.
-- `crates/tokenmonster` — Greedy tokenizer and embedded vocabulary used by the PDF chunker.
+- `crates/nvs-core` — Core bundle reader (manifest parsing, mmap access) + BM25/vector/hybrid search and tokenization.
+- `crates/nvs-packer` — CLI to convert JSON docs (with embeddings) into a bundle: writes vectors, postings, metadata blocks, manifest.
+- `crates/nvs-embed` — Embedding utilities with OpenAI backend and a tiny local GTE‑small backend (offline path).
+- `crates/nvs-cli` — Interactive CLI to open bundles and run vector/BM25/hybrid queries.
+- `crates/nvs-pdf-core`, `crates/nvs-pdf` — PDF parsing and chunking pipeline.
+- `crates/nvs-html-core`, `crates/nvs-html` — HTML parsing and extraction utilities.
+- `crates/tokenmonster` — Greedy tokenizer used by chunkers.
+- `crates/tiny-search-engine` — Small utilities (e.g., `vsx-scrape`) supporting the “tiny search engine” demo flow.
 
-Workspace manifest: `rust/Cargo.toml`.
+Workspace manifest: `src/Cargo.toml`.
 
 ## Toolchain & Prerequisites
 
@@ -77,6 +80,21 @@ Outputs a bundle directory with `manifest.json`, `meta.blocks`, `vectors.bin`, a
 - Validates bundle structure and metadata, and provides reading/search capabilities (WIP for full vector/BM25 search APIs).
 - Benchmarks live under `crates/nvs-core/benches`. Run with `cargo bench -p nvs-core`.
 
+## Tiny Search Engine (Demo Roadmap)
+
+This repo also houses a compact, local “tiny search engine” demo: BM25 candidate search + tiny embedding rerank over a small marketplace‑like corpus (plugin titles/descriptions/tags) with lightweight popularity/quality signals. See `ROADMAP.md` for the scoped plan and concrete TODOs.
+
+Sample data: a compressed Open VSX‑style dump lives at `src/vsx.ndjson.zst` (NDJSON lines of full extension objects).
+
+- Decompress for quick inspection: `zstd -d -c src/vsx.ndjson.zst | head`
+- Size: ~6.6k items when decompressed (titles, descriptions, tags, downloads, ratings where available).
+
+Suggested first pass (end‑to‑end):
+- Prepare: map each record to a short text: `"<displayName> — <description>. Tags: ... Categories: ..."` and keep high‑signal numeric/meta fields.
+- Embed: use the local GTE‑small backend in `nvs-embed` (offline) to produce `{ text, metadata: { embedding, ... } }` docs.
+- Pack: `nvs-packer` to build a bundle (consider `--quantize f16`, `--compress zstd`).
+- Query: open with `nvs-cli` and try BM25/hybrid queries, then iterate on field weighting.
+
 ## PDF Extraction & Chunking
 
 `nvs-pdf` provides a tokenizer‑aware PDF chunking pipeline. Two integration modes for PDFium:
@@ -114,8 +132,8 @@ write_chunks_json(pdf, &chunks, Path::new("./chunks.json"))?;
 
 - `documentation/MANIFEST_SPEC.md` — Bundle format.
 - `documentation/RUST_PARITY.md` — Implementation parity notes.
+ - `ROADMAP.md` — Tiny search engine plan and TODOs.
 
 ## License
 
 MIT (see `LICENSE`). Some crates offer dual‑license where noted in their `Cargo.toml`.
-

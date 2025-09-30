@@ -66,6 +66,4 @@ fn calc_idf(n: f32, df: f32) -> f32 {
 }
 
 #[cfg(test)]
-mod bm25_search_tests {
-
-}
+mod bm25_search_tests {}

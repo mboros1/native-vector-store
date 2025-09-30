@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use console::style;
 use crossbeam_channel as chan;
+use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use futures::{stream, StreamExt};
 use tokio::sync::Mutex as AsyncMutex;
 use walkdir::WalkDir;
 use xxhash_rust::xxh64::xxh64;
@@ -23,7 +23,8 @@ static DEFAULT_MODEL: &str = "text-embedding-3-small";
 
 #[derive(Parser, Debug)]
 #[command(name = "nvs")]
-#[command(about = "Unified CLI for Native Vector Store (Autopilot: nvs <INPUT>)", long_about = None)]
+#[command(about = "Unified CLI for Native Vector Store (Autopilot: nvs <INPUT>)", long_about = None
+)]
 struct Cli {
     /// Input directory or file (Autopilot mode). Use subcommands for fine control.
     input: Option<PathBuf>,
@@ -564,7 +565,10 @@ fn embed_openai_dir(input_dir: &Path, out_dir: &Path, cli: &Cli) -> Result<Stage
     let backend_arc: Arc<dyn nvs_embed::EmbeddingBackend> = match backend_choice.as_str() {
         #[cfg(feature = "local-embed")]
         s if s.eq_ignore_ascii_case("local") => {
-            eprintln!("    {} using local CPU backend (gte-small)", style("·").dim());
+            eprintln!(
+                "    {} using local CPU backend (gte-small)",
+                style("·").dim()
+            );
             let local = nvs_embed::LocalGTEBackendBuilder::new().build()?;
             Arc::new(local)
         }
@@ -1274,8 +1278,12 @@ impl RateLimiter {
 }
 
 fn build_rate_limiter_from_env() -> Option<Arc<RateLimiter>> {
-    let rps_env = std::env::var("NVS_EMBED_RPS").ok().and_then(|s| s.parse::<f64>().ok());
-    let rpm_env = std::env::var("NVS_EMBED_RPM").ok().and_then(|s| s.parse::<f64>().ok());
+    let rps_env = std::env::var("NVS_EMBED_RPS")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok());
+    let rpm_env = std::env::var("NVS_EMBED_RPM")
+        .ok()
+        .and_then(|s| s.parse::<f64>().ok());
     let rps = if let Some(rps) = rps_env {
         Some(rps)
     } else if let Some(rpm) = rpm_env {
@@ -1288,10 +1296,18 @@ fn build_rate_limiter_from_env() -> Option<Arc<RateLimiter>> {
 }
 
 fn embed_options_from_env(defaults: nvs_embed::EmbedOptions) -> nvs_embed::EmbedOptions {
-    let batch = std::env::var("NVS_EMBED_BATCH").ok().and_then(|s| s.parse::<usize>().ok());
-    let conc = std::env::var("NVS_EMBED_CONCURRENCY").ok().and_then(|s| s.parse::<usize>().ok());
-    let fconc = std::env::var("NVS_EMBED_FILE_CONCURRENCY").ok().and_then(|s| s.parse::<usize>().ok());
-    let tconc = std::env::var("NVS_EMBED_TOTAL_CONCURRENCY").ok().and_then(|s| s.parse::<usize>().ok());
+    let batch = std::env::var("NVS_EMBED_BATCH")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    let conc = std::env::var("NVS_EMBED_CONCURRENCY")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    let fconc = std::env::var("NVS_EMBED_FILE_CONCURRENCY")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
+    let tconc = std::env::var("NVS_EMBED_TOTAL_CONCURRENCY")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok());
     nvs_embed::EmbedOptions {
         batch_size: batch.unwrap_or(defaults.batch_size),
         concurrency: conc.unwrap_or(defaults.concurrency),

@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 
-pub mod openai;
 #[cfg(feature = "local-embed")]
 pub mod local;
+pub mod openai;
 
 #[async_trait]
 pub trait EmbeddingBackend: Send + Sync {
