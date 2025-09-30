@@ -11,9 +11,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust (from rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: stable
           components: clippy, rustfmt
 
       - name: Cache cargo build
