@@ -4,9 +4,17 @@ use crate::bundle::Bundle;
 use crate::{bm25, hybrid};
 use rayon::prelude::*;
 use std::cmp::Ordering;
+use serde_json::Value as JsonValue;
 
 pub struct VectorStore {
     bundle: Arc<Bundle>,
+}
+
+/// Parsed document record returned from the store.
+pub struct Document {
+    pub id: String,
+    pub text: String,
+    pub metadata: JsonValue,
 }
 
 impl VectorStore {
@@ -37,6 +45,22 @@ impl VectorStore {
 
     pub fn get_document(&self, doc_id: u32) -> Option<(String, String, String)> {
         self.bundle.get_document(doc_id)
+    }
+
+    /// Returns a parsed document with structured metadata.
+    pub fn get_document_parsed(&self, doc_id: u32) -> Option<Document> {
+        let (id, text, meta_json) = self.get_document(doc_id)?;
+        let metadata: JsonValue = serde_json::from_str(&meta_json).ok()?;
+        Some(Document { id, text, metadata })
+    }
+
+    /// Returns parsed documents for the given document IDs. Missing IDs are skipped.
+    pub fn get_documents(&self, doc_ids: &[u32]) -> Vec<Document> {
+        doc_ids
+            .iter()
+            .copied()
+            .filter_map(|id| self.get_document_parsed(id))
+            .collect()
     }
 
     pub fn search_vector(&self, query: &[f32], k: usize) -> Vec<(u32, f32)> {
@@ -139,7 +163,7 @@ impl VectorStore {
     }
 
     pub fn search_bm25(&self, query: &str, k: usize) -> Vec<(u32, f32)> {
-        bm25::search(&self.bundle, query, k)
+        bm25::search::search(&self.bundle, query, k)
     }
 
     pub fn search_hybrid(

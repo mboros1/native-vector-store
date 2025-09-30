@@ -64,3 +64,6 @@ out_queries.json
 nvs-bundle/
 
 .idea/
+
+vsx.json
+vsx.ndjson

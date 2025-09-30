@@ -108,7 +108,7 @@ fn strip_repeated_headers_footers(pages: &[(String, i32)]) -> Vec<(String, i32)>
     let mut heads: Vec<Option<String>> = Vec::with_capacity(pages.len());
     let mut foots: Vec<Option<String>> = Vec::with_capacity(pages.len());
     for (txt, _p) in pages {
-        let mut lines: Vec<&str> = txt.split('\n').collect();
+        let lines: Vec<&str> = txt.split('\n').collect();
         // find first non-empty
         let first = lines.iter().find(|l| !l.trim().is_empty()).map(|s| s.trim());
         // find last non-empty

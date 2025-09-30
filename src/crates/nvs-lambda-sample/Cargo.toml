@@ -1,0 +1,19 @@
+[package]
+name = "nvs-lambda-sample"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Sample AWS Lambda handler for Native Vector Store (loads bundles by name and runs queries)."
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+lambda_runtime = "0.14.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+once_cell = "1"
+rayon = "1"
+
+nvs-core = { path = "../nvs-core" }
+

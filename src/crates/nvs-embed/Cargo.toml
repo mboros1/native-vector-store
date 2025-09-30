@@ -55,3 +55,7 @@ tempfile = "3"
 [[bin]]
 name = "embed-cli"
 path = "src/bin/embed-cli.rs"
+
+[[bin]]
+name = "bench-local-embed"
+path = "src/bin/bench-local-embed.rs"

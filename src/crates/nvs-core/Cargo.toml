@@ -8,6 +8,8 @@ repository = "https://github.com/martinboros/native-vector-store"
 readme = "README.md"
 keywords = ["vector", "search", "bm25", "retrieval", "embedding"]
 categories = ["algorithms", "data-structures", "database-implementations"]
+homepage = "https://github.com/martinboros/native-vector-store"
+documentation = "https://docs.rs/nvs-core"
 
 # Keep the published crate lean
 include = [
@@ -16,6 +18,7 @@ include = [
     "LICENSE*",
     "src/**",
     "benches/**",
+    "examples/**",
 ]
 
 [lib]
@@ -47,3 +50,7 @@ xxhash-rust = { version = "0.8", features = ["xxh64"] }
 [[bench]]
 name = "vector_search"
 harness = false
+
+[package.metadata.docs.rs]
+all-features = false
+rustdoc-args = ["--cfg", "docsrs"]

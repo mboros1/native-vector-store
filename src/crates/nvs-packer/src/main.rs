@@ -49,6 +49,13 @@ fn main() -> Result<()> {
     write_vectors(&docs, dim, &cli.out, dtype)?;
     let t_vec = t1.elapsed();
 
+    // Remove stale opposite dtype vectors file to avoid double-counting size and confusion
+    if dtype == "f16" {
+        let _ = fs::remove_file(cli.out.join("vectors.f32"));
+    } else {
+        let _ = fs::remove_file(cli.out.join("vectors.f16"));
+    }
+
     // Sequential writer (pipeline removed)
     let lvl = cli.zstd_level.clamp(1, 22);
     pb.set_message("Building BM25 index...");
@@ -93,10 +100,10 @@ fn main() -> Result<()> {
 
     let row_bytes = dim * if dtype == "f16" { 2 } else { 4 };
     let aligned = ((row_bytes + 63) / 64) * 64;
+    let vec_name = if dtype == "f16" { "vectors.f16" } else { "vectors.f32" };
     let bundle_size: u64 = [
         "manifest.json",
-        "vectors.f32",
-        "vectors.f16",
+        vec_name,
         "doclen.u32",
         "lexicon.bin",
         "postings.bin",
@@ -116,8 +123,7 @@ fn main() -> Result<()> {
     #[cfg(unix)]
     let allocated_size: u64 = [
         "manifest.json",
-        "vectors.f32",
-        "vectors.f16",
+        vec_name,
         "doclen.u32",
         "lexicon.bin",
         "postings.bin",

@@ -10,6 +10,8 @@ members = [
     "crates/nvs-embed",
     "crates/nvs-cli",
     "crates/nvs",
+    "crates/nvs-lambda-sample",
+    "crates/tiny-search-engine",
 ]
 
 resolver = "2"

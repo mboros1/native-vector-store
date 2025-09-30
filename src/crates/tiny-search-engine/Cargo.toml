@@ -1,0 +1,20 @@
+[package]
+name = "tiny-search-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Tiny local search tooling (scrapers, preprocessors, utilities)"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.11", features = ["json", "gzip", "brotli", "deflate"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+futures = "0.3"
+
+[[bin]]
+name = "vsx-scrape"
+path = "src/bin/vsx-scrape.rs"
+
