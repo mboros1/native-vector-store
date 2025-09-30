@@ -6,7 +6,7 @@ If you’re here to build, test, or use the Rust code, start with this guide.
 
 ## Quick Start
 
-- `cd rust`
+- `cd src`
 - Build workspace: `cargo build`
 - Run tests: `cargo test`
 - Lint: `cargo clippy --all-targets --all-features -- -D warnings`
