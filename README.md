@@ -4,6 +4,8 @@ This repository contains a Rust workspace under `src/` that implements a compact
 
 If you’re here to build, test, or use the Rust code, start here.
 
+QUICK NOTE: Most documentation is AI generated currently, but working on improving that. If anything looks off/out of date let me know.
+
 ## Quick Start
 
 - `cd src`
