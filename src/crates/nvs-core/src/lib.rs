@@ -28,4 +28,4 @@ pub mod chunker;
 pub mod vector_store;
 
 pub use bundle::Bundle;
-pub use vector_store::{VectorStore, Document};
+pub use vector_store::{Document, VectorStore};

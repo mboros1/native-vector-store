@@ -132,7 +132,7 @@ mod tests {
             &html_path,
             "<html><body><h1>Title</h1><p>Hello world.</p></body></html>",
         )
-        .unwrap();
+            .unwrap();
         let opts = HtmlChunkOptions {
             max_tokens: 64,
             min_tokens: 1,

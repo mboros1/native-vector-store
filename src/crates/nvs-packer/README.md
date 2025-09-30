@@ -3,7 +3,9 @@
 CLI and library to convert JSON documents with embeddings into a Native Vector Store bundle.
 
 Input JSON format
-- Array of objects. Each element must contain `text` (or `content`) and `metadata.embedding` (array of floats). Optional additional metadata fields are preserved.
+
+- Array of objects. Each element must contain `text` (or `content`) and `metadata.embedding` (array of floats). Optional
+  additional metadata fields are preserved.
 
 Examples
 
@@ -16,6 +18,7 @@ cargo run -p nvs-packer -- \
 As a library, call the loader and writer modules directly for custom flows.
 
 Outputs
+
 - vectors.f32 or vectors.f16
 - meta.blocks + meta.idx
 - terms.dict, postings.bin, lexicon.bin, doclen.u32

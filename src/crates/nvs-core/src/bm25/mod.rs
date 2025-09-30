@@ -1,6 +1,3 @@
-use crate::Bundle;
-
-
 // BM25 dictionaries and helpers (moved under bm25/)
 pub mod english_abbreviations;
 pub mod english_punctuations;

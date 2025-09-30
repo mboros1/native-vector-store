@@ -6,6 +6,7 @@ Native Vector Store — Rust core library for read-only vector + lexical search 
 [![Docs.rs](https://docs.rs/nvs-core/badge.svg)](https://docs.rs/nvs-core)
 
 Features
+
 - Compact on-disk bundle format with manifest and checksums
 - Memory-mapped readers for vectors, metadata blocks, and BM25 index
 - Fast vector, BM25, and hybrid search via `nvs_core::VectorStore`
@@ -39,8 +40,10 @@ let docs = store.get_documents(&ids);
 ```
 
 More
+
 - Bundle format: https://github.com/martinboros/native-vector-store/blob/main/documentation/MANIFEST_SPEC.md
 - CLI packer (build bundles): https://crates.io/crates/nvs-packer
-- Lambda example (serverless query): https://github.com/martinboros/native-vector-store/tree/main/src/crates/nvs-lambda-sample
+- Lambda example (serverless
+  query): https://github.com/martinboros/native-vector-store/tree/main/src/crates/nvs-lambda-sample
 
 License: MIT

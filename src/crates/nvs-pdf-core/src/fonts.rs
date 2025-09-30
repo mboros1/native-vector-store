@@ -57,9 +57,7 @@ impl ToUnicodeMap {
         while lo < hi {
             let mid = (lo + hi) / 2;
             let r = ranges[mid];
-            if code < r.start { hi = mid; }
-            else if code > r.end { lo = mid + 1; }
-            else {
+            if code < r.start { hi = mid; } else if code > r.end { lo = mid + 1; } else {
                 // inside range
                 return Some(r.start_cp + (code - r.start));
             }
@@ -146,8 +144,14 @@ pub fn parse_tounicode_cmap(data: &[u8]) -> ToUnicodeMap {
                 let block = &s[i..i + end];
                 for line in block.lines() {
                     if let (Some(start_hex), Some(end_hex)) = (extract_hex(line, 0), extract_hex(line, 1)) {
-                        let start_bytes = match hex_to_bytes(&start_hex) { Some(v) => v, None => continue };
-                        let end_bytes = match hex_to_bytes(&end_hex) { Some(v) => v, None => continue };
+                        let start_bytes = match hex_to_bytes(&start_hex) {
+                            Some(v) => v,
+                            None => continue
+                        };
+                        let end_bytes = match hex_to_bytes(&end_hex) {
+                            Some(v) => v,
+                            None => continue
+                        };
                         if start_bytes.len() != end_bytes.len() { continue; }
                         if let Some(vec_hex) = extract_hex_array(line) {
                             // Array of explicit destinations
@@ -264,7 +268,7 @@ fn hex_to_bytes(h: &str) -> Option<Vec<u8>> {
     let bytes = h.as_bytes();
     let mut i = 0usize;
     while i + 1 < bytes.len() {
-        let part = &h[i..i+2];
+        let part = &h[i..i + 2];
         let val = u8::from_str_radix(part, 16).ok()?;
         out.push(val);
         i += 2;
@@ -302,7 +306,10 @@ fn hex_to_string(h: &str) -> Option<String> {
 fn incr_be_bytes(b: &mut [u8]) {
     // Increment big-endian byte vector by 1
     for i in (0..b.len()).rev() {
-        if b[i] == 0xFF { b[i] = 0x00; } else { b[i] += 1; break; }
+        if b[i] == 0xFF { b[i] = 0x00; } else {
+            b[i] += 1;
+            break;
+        }
     }
 }
 

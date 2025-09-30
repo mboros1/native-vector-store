@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use lambda_runtime::{run, service_fn, Error, LambdaEvent};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};

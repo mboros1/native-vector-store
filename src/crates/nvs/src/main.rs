@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use console::style;
 use crossbeam_channel as chan;
+use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,6 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
-use futures::{stream, StreamExt};
 use tokio::sync::Mutex as AsyncMutex;
 use walkdir::WalkDir;
 use xxhash_rust::xxh64::xxh64;
@@ -23,7 +23,8 @@ static DEFAULT_MODEL: &str = "text-embedding-3-small";
 
 #[derive(Parser, Debug)]
 #[command(name = "nvs")]
-#[command(about = "Unified CLI for Native Vector Store (Autopilot: nvs <INPUT>)", long_about = None)]
+#[command(about = "Unified CLI for Native Vector Store (Autopilot: nvs <INPUT>)", long_about = None
+)]
 struct Cli {
     /// Input directory or file (Autopilot mode). Use subcommands for fine control.
     input: Option<PathBuf>,
@@ -1187,9 +1188,9 @@ fn select_files(
         match gather_file_info(p) {
             Ok(info) => match receipt_map.get(&key) {
                 Some(entry)
-                    if entry.status == "ok"
-                        && entry.hash == info.hash
-                        && entry.size == info.size => {}
+                if entry.status == "ok"
+                    && entry.hash == info.hash
+                    && entry.size == info.size => {}
                 _ => out.push(p.clone()),
             },
             Err(_) => out.push(p.clone()),

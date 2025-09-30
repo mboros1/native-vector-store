@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::bundle::Bundle;
 use crate::{bm25, hybrid};
 use rayon::prelude::*;
-use std::cmp::Ordering;
 use serde_json::Value as JsonValue;
+use std::cmp::Ordering;
 
 pub struct VectorStore {
     bundle: Arc<Bundle>,
@@ -115,14 +115,14 @@ impl VectorStore {
                 if self.heap.len() < self.k {
                     self.heap.push(item);
                 } else if let Some(mut top) = self.heap.peek_mut() {
-                    if item.0 .0 > top.0 .0 {
+                    if item.0.0 > top.0.0 {
                         *top = item;
                     }
                 }
             }
             fn merge(mut self, other: Self) -> Self {
                 for it in other.heap.into_iter() {
-                    self.push(it.0 .0 .0, it.0 .1);
+                    self.push(it.0.0.0, it.0.1);
                 }
                 self
             }
@@ -151,7 +151,7 @@ impl VectorStore {
             .heap
             .into_sorted_vec()
             .into_iter()
-            .map(|r| (r.0 .1, r.0 .0 .0))
+            .map(|r| (r.0.1, r.0.0.0))
             .collect();
         // Ensure deterministic order: score desc, id asc
         out.sort_by(|a, b| {

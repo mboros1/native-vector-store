@@ -86,10 +86,10 @@ pub fn read_docs(input_dir: &Path) -> Result<(Vec<Doc>, Vec<(String, usize)>)> {
     for entry in WalkDir::new(input_dir).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file()
             && entry
-                .path()
-                .extension()
-                .map(|e| e == "json")
-                .unwrap_or(false)
+            .path()
+            .extension()
+            .map(|e| e == "json")
+            .unwrap_or(false)
         {
             let path = entry.path();
             pb.set_message(format!("Reading {}", path.display()));
@@ -212,10 +212,10 @@ pub fn read_docs_fast(
             for entry in WalkDir::new(&input_dir).into_iter().filter_map(|e| e.ok()) {
                 if !(entry.file_type().is_file()
                     && entry
-                        .path()
-                        .extension()
-                        .map(|e| e == "json")
-                        .unwrap_or(false))
+                    .path()
+                    .extension()
+                    .map(|e| e == "json")
+                    .unwrap_or(false))
                 {
                     continue;
                 }
@@ -470,7 +470,7 @@ mod tests {
                 "text": "A", "metadata": {"embedding": [1,2,3], "lang": "en"}
             })
         )
-        .unwrap();
+            .unwrap();
 
         // array with one valid and one invalid
         let mut f2 = File::create(dir.join("arr.json")).unwrap();
@@ -482,7 +482,7 @@ mod tests {
                 {"text": "C", "metadata": {"no_embedding": true }}
             ])
         )
-        .unwrap();
+            .unwrap();
 
         let (docs, receipts) = read_docs(&dir).expect("read");
         // Should load 2 docs (A, B)
