@@ -149,13 +149,9 @@ impl Bundle {
             4
         };
         let row_bytes = (manifest.dim as usize) * elem_size;
-        let align = manifest
-            .files
-            .vectors
-            .row_alignment
-            .unwrap_or(64)
-            .max(1) as usize;
-        let aligned_row_bytes = ((row_bytes + align - 1) / align) * align;
+        let aligned_row_bytes = ((row_bytes + self.vector_row_alignment() - 1)
+            / self.vector_row_alignment())
+            * self.vector_row_alignment();
         let expected = (manifest.num_docs as usize) * aligned_row_bytes;
         if vectors.len() != expected {
             return Err(NvsError::InvalidBundle("vectors size mismatch"));
@@ -335,13 +331,7 @@ impl Bundle {
     #[inline]
     pub(crate) fn row_stride_f32(&self) -> usize {
         let row_bytes = (self.manifest.dim as usize) * 4;
-        let align = self
-            .manifest
-            .files
-            .vectors
-            .row_alignment
-            .unwrap_or(64)
-            .max(1) as usize;
+        let align = self.vector_row_alignment();
         let aligned_row_bytes = ((row_bytes + align - 1) / align) * align;
         aligned_row_bytes / 4
     }
@@ -375,14 +365,17 @@ impl Bundle {
             4
         };
         let row = (self.manifest.dim as usize) * elem;
-        let align = self
-            .manifest
+        let align = self.vector_row_alignment();
+        ((row + align - 1) / align) * align
+    }
+    #[inline]
+    fn vector_row_alignment(&self) -> usize {
+        self.manifest
             .files
             .vectors
             .row_alignment
             .unwrap_or(64)
-            .max(1) as usize;
-        ((row + align - 1) / align) * align
+            .max(1) as usize
     }
 
     // BM25 search has moved to crate::bm25
