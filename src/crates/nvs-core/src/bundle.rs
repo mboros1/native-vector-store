@@ -7,6 +7,7 @@ use crate::manifest::Manifest;
 use nvs_format::{META_BLOCKS_MAGIC, META_IDX_ENTRY_SIZE, META_IDX_MAGIC};
 use memmap2::Mmap;
 use std::collections::HashMap;
+use byteorder::{ByteOrder, LittleEndian as LE};
 
 type MetaIdxEntry = nvs_format::MetaIdxEntry;
 
@@ -81,13 +82,11 @@ impl Bundle {
             if count as u64 != manifest.num_docs {
                 return Err(NvsError::InvalidBundle("meta.idx entry count mismatch"));
             }
-            let mut i = 0usize;
-            while i + META_IDX_ENTRY_SIZE <= payload.len() {
-                let block_id = u32::from_le_bytes(payload[i..i + 4].try_into().unwrap());
-                let offset_in_block = u32::from_le_bytes(payload[i + 4..i + 8].try_into().unwrap());
-                let doc_size = u32::from_le_bytes(payload[i + 8..i + 12].try_into().unwrap());
-                let reserved0 = u32::from_le_bytes(payload[i + 12..i + 16].try_into().unwrap());
-                i += META_IDX_ENTRY_SIZE;
+            for c in payload.chunks_exact(META_IDX_ENTRY_SIZE) {
+                let block_id = LE::read_u32(&c[0..4]);
+                let offset_in_block = LE::read_u32(&c[4..8]);
+                let doc_size = LE::read_u32(&c[8..12]);
+                let reserved0 = LE::read_u32(&c[12..16]);
                 meta_idx_entries.push(MetaIdxEntry { block_id, offset_in_block, doc_size, reserved0 });
             }
         }
@@ -132,10 +131,10 @@ impl Bundle {
         for _ in 0..block_count {
             let mut b = [0u8; 16];
             f.read_exact(&mut b)?;
-            let csz = u32::from_le_bytes(b[0..4].try_into().unwrap());
-            let dsz = u32::from_le_bytes(b[4..8].try_into().unwrap());
-            let dct = u32::from_le_bytes(b[8..12].try_into().unwrap());
-            let cod = u32::from_le_bytes(b[12..16].try_into().unwrap());
+            let csz = LE::read_u32(&b[0..4]);
+            let dsz = LE::read_u32(&b[4..8]);
+            let dct = LE::read_u32(&b[8..12]);
+            let cod = LE::read_u32(&b[12..16]);
             headers.push((csz, dsz, dct, cod));
         }
         let meta_blocks = unsafe { Mmap::map(&meta_blocks_file)? };
