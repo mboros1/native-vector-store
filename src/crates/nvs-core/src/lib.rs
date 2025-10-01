@@ -29,3 +29,4 @@ pub mod vector_store;
 
 pub use bundle::Bundle;
 pub use vector_store::{Document, VectorStore};
+pub use crate::simd::{dot, dot_f32_f16};

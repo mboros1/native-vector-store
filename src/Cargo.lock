@@ -2338,6 +2338,7 @@ dependencies = [
  "criterion",
  "half",
  "memmap2",
+ "nvs-format",
  "once_cell",
  "ordered-float",
  "rand 0.8.5",
@@ -2374,6 +2375,16 @@ dependencies = [
  "tokenizers",
  "tokio",
  "walkdir",
+]
+
+[[package]]
+name = "nvs-format"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2437,6 +2448,7 @@ dependencies = [
  "indicatif",
  "memmap2",
  "nvs-core",
+ "nvs-format",
  "rayon",
  "rustc-hash",
  "serde",
