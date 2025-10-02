@@ -1,0 +1,16 @@
+[package]
+name = "nvs-format"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Shared on-disk format constants and helpers for Native Vector Store"
+
+[lib]
+name = "nvs_format"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/nvs-format",
     "crates/nvs-core",
     "crates/nvs-packer",
     "crates/tokenmonster",

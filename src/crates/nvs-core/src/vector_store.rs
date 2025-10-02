@@ -47,11 +47,15 @@ impl VectorStore {
         self.bundle.get_document(doc_id)
     }
 
+    /// Returns a parsed document with structured metadata directly from the bundle.
+    pub fn get_document_value(&self, doc_id: u32) -> Option<Document> {
+        let (id, text, metadata) = self.bundle.get_document_value(doc_id)?;
+        Some(Document { id, text, metadata })
+    }
+
     /// Returns a parsed document with structured metadata.
     pub fn get_document_parsed(&self, doc_id: u32) -> Option<Document> {
-        let (id, text, meta_json) = self.get_document(doc_id)?;
-        let metadata: JsonValue = serde_json::from_str(&meta_json).ok()?;
-        Some(Document { id, text, metadata })
+        self.get_document_value(doc_id)
     }
 
     /// Returns parsed documents for the given document IDs. Missing IDs are skipped.
@@ -90,12 +94,11 @@ impl VectorStore {
     }
 
     fn search_vector_f16(&self, query: &[f32], k: usize) -> Vec<(u32, f32)> {
-        use half::f16;
         let n = self.size();
         let dim = self.dimensions();
         let stride = self.bundle.row_stride_bytes();
         let base = self.bundle.vectors_raw();
-        // Per-thread heap and buffer
+        // Per-thread heap
         #[derive(Default)]
         struct Tk {
             k: usize,
@@ -131,22 +134,16 @@ impl VectorStore {
             .into_par_iter()
             .with_min_len(1024)
             .fold(
-                || (Tk::new(k), vec![0f32; dim]),
-                |(mut tk, mut buf), id| {
+                || (Tk::new(k), ()),
+                |(mut tk, _), id| {
                     let start = (id as usize) * stride;
                     let row = &base[start..start + dim * 2];
-                    for j in 0..dim {
-                        let lo = row[j * 2] as u16;
-                        let hi = row[j * 2 + 1] as u16;
-                        let bits = lo | (hi << 8);
-                        buf[j] = f16::from_bits(bits).to_f32();
-                    }
-                    let s = crate::simd::dot(query, &buf);
+                    let s = crate::simd::dot_f32_f16(query, row, dim);
                     tk.push(s, id);
-                    (tk, buf)
+                    (tk, ())
                 },
             )
-            .reduce(|| (Tk::new(k), vec![]), |a, b| (a.0.merge(b.0), vec![]));
+            .reduce(|| (Tk::new(k), ()), |a, b| (a.0.merge(b.0), ()));
         let mut out: Vec<(u32, f32)> = heap
             .heap
             .into_sorted_vec()

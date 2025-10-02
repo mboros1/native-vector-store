@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 use xxhash_rust::xxh64::xxh64;
+use nvs_format::{META_BLOCKS_MAGIC, META_IDX_MAGIC, META_IDX_ENTRY_SIZE};
 
 use crate::loader::Doc;
 
@@ -171,6 +172,9 @@ pub fn write_meta_and_index(
         };
 
         let mut f = File::create(out.join("meta.blocks"))?;
+        // Magic + version
+        f.write_all(META_BLOCKS_MAGIC)?;
+        // Block count
         f.write_all(&(comp.len() as u32).to_le_bytes())?;
         // Write headers: (comp_size, decomp_size, doc_count, codec)
         for (i, (bytes, decomp_len, cod)) in comp.iter().enumerate() {
@@ -219,10 +223,11 @@ pub fn write_meta_and_index(
             }
         }
     }
-    // meta.idx (buffered)
+    // meta.idx (magic + buffered entries)
     {
         let f = File::create(out.join("meta.idx"))?;
         let mut bw = BufWriter::new(f);
+        bw.write_all(META_IDX_MAGIC)?;
         bw.write_all(&idx)?;
         bw.flush()?;
     }
@@ -247,6 +252,7 @@ pub fn write_manifest(
             rows: Some(n as u64),
             cols: Some(dim as u64),
             schema: None,
+            row_alignment: Some(64),
         },
         doclen: m::ManifestFilesEntry {
             path: "doclen.u32".into(),
@@ -254,6 +260,7 @@ pub fn write_manifest(
             rows: Some(n as u64),
             cols: None,
             schema: None,
+            row_alignment: None,
         },
         lexicon: m::ManifestFilesEntry {
             path: "lexicon.bin".into(),
@@ -261,6 +268,7 @@ pub fn write_manifest(
             rows: None,
             cols: None,
             schema: None,
+            row_alignment: None,
         },
         postings: m::ManifestFilesEntry {
             path: "postings.bin".into(),
@@ -268,6 +276,7 @@ pub fn write_manifest(
             rows: None,
             cols: None,
             schema: None,
+            row_alignment: None,
         },
         terms: m::ManifestFilesEntry {
             path: "terms.dict".into(),
@@ -275,13 +284,15 @@ pub fn write_manifest(
             rows: None,
             cols: None,
             schema: None,
+            row_alignment: None,
         },
         meta_idx: m::ManifestFilesEntry {
             path: "meta.idx".into(),
             dtype: None,
             rows: None,
             cols: None,
-            schema: Some("u32 block_id, u32 offset, u32 doc_size".into()),
+            schema: Some("u32 block_id, u32 offset, u32 doc_size, u32 reserved0".into()),
+            row_alignment: None,
         },
         meta: m::ManifestFilesMeta {
             path: "meta.blocks".into(),
@@ -296,6 +307,7 @@ pub fn write_manifest(
     };
     let manifest = m::Manifest {
         format: "nvs.v1".into(),
+        endianness: Some("little".into()),
         num_docs: n as u64,
         dim: dim as u64,
         embedding: m::ManifestEmbedding {
@@ -421,8 +433,12 @@ mod tests {
         ];
         let blocks = write_meta_and_index(&docs, 1024, &dir, "none", 3, true).unwrap();
         assert!(blocks >= 1);
-        let idx_len = fs::metadata(dir.join("meta.idx")).unwrap().len() as usize;
-        assert_eq!(idx_len, docs.len() * 16);
+        let idx_path = dir.join("meta.idx");
+        let idx_buf = fs::read(&idx_path).unwrap();
+        assert!(idx_buf.len() >= 8);
+        assert_eq!(&idx_buf[..8], nvs_format::META_IDX_MAGIC);
+        let payload = &idx_buf[8..];
+        assert_eq!(payload.len(), docs.len() * 16);
         assert!(dir.join("meta.blocks").exists());
 
         write_manifest(&dir, docs.len(), 2, 1024, 3.0, "model", "f32", "none").unwrap();

@@ -4,19 +4,12 @@ use std::path::{Path, PathBuf};
 
 use crate::errors::*;
 use crate::manifest::Manifest;
+use nvs_format::{META_BLOCKS_MAGIC, META_IDX_ENTRY_SIZE, META_IDX_MAGIC};
 use memmap2::Mmap;
 use std::collections::HashMap;
+use byteorder::{ByteOrder, LittleEndian as LE};
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-struct MetaIdxEntry {
-    block_id: u32,
-    offset_in_block: u32,
-    doc_size: u32,
-    padding: u32,
-}
-
-const META_IDX_ENTRY_SIZE: usize = size_of::<MetaIdxEntry>();
+type MetaIdxEntry = nvs_format::MetaIdxEntry;
 
 #[derive(Debug)]
 pub struct Bundle {
@@ -51,6 +44,11 @@ impl Bundle {
         if manifest.format != "nvs.v1" {
             return Err(NvsError::InvalidManifest("unsupported format"));
         }
+        if let Some(end) = &manifest.endianness {
+            if end.to_lowercase() != "little" {
+                return Err(NvsError::InvalidManifest("unsupported endianness (expected little)"));
+            }
+        }
         if manifest.num_docs == 0 {
             return Err(NvsError::InvalidManifest("num_docs must be > 0"));
         }
@@ -62,36 +60,34 @@ impl Bundle {
         let meta_idx_path = root.join(&manifest.files.meta_idx.path);
         let meta_idx_md = fs::metadata(&meta_idx_path)?;
         let sz = meta_idx_md.len() as usize;
-        if sz % META_IDX_ENTRY_SIZE != 0 {
-            return Err(NvsError::InvalidBundle(
-                "meta.idx not aligned to entry size",
-            ));
-        }
-        let count = sz / META_IDX_ENTRY_SIZE;
-        if count as u64 != manifest.num_docs {
-            return Err(NvsError::InvalidBundle("meta.idx entry count mismatch"));
-        }
-        let mut meta_idx_entries = Vec::with_capacity(count);
+        let mut meta_idx_entries: Vec<MetaIdxEntry> = Vec::new();
         {
             let mut f = File::open(&meta_idx_path)?;
             let mut buf = Vec::with_capacity(sz);
             f.read_to_end(&mut buf)?;
-            let mut i = 0usize;
-            while i + 16 <= buf.len() {
-                let block_id = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap());
-                i += 4;
-                let offset_in_block = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap());
-                i += 4;
-                let doc_size = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap());
-                i += 4;
-                let padding = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap());
-                i += 4;
-                meta_idx_entries.push(MetaIdxEntry {
-                    block_id,
-                    offset_in_block,
-                    doc_size,
-                    padding,
-                });
+            // Validate magic
+            if buf.len() < META_IDX_MAGIC.len() {
+                return Err(NvsError::InvalidBundle("meta.idx too small for magic"));
+            }
+            if &buf[..META_IDX_MAGIC.len()] != META_IDX_MAGIC {
+                return Err(NvsError::InvalidBundle("meta.idx magic mismatch"));
+            }
+            let payload = &buf[META_IDX_MAGIC.len()..];
+            if payload.len() % META_IDX_ENTRY_SIZE != 0 {
+                return Err(NvsError::InvalidBundle(
+                    "meta.idx payload not aligned to entry size",
+                ));
+            }
+            let count = payload.len() / META_IDX_ENTRY_SIZE;
+            if count as u64 != manifest.num_docs {
+                return Err(NvsError::InvalidBundle("meta.idx entry count mismatch"));
+            }
+            for c in payload.chunks_exact(META_IDX_ENTRY_SIZE) {
+                let block_id = LE::read_u32(&c[0..4]);
+                let offset_in_block = LE::read_u32(&c[4..8]);
+                let doc_size = LE::read_u32(&c[8..12]);
+                let reserved0 = LE::read_u32(&c[12..16]);
+                meta_idx_entries.push(MetaIdxEntry { block_id, offset_in_block, doc_size, reserved0 });
             }
         }
 
@@ -99,15 +95,20 @@ impl Bundle {
         let meta_blocks_path = root.join(&manifest.files.meta.path);
         let meta_blocks_file = File::open(&meta_blocks_path)?;
         let mut f = meta_blocks_file.try_clone()?;
+        // read magic + block_count
+        let mut magic = [0u8; 8];
+        f.read_exact(&mut magic)?;
+        if &magic != META_BLOCKS_MAGIC {
+            return Err(NvsError::InvalidBundle("meta.blocks magic mismatch"));
+        }
         let mut u32buf = [0u8; 4];
-        // read block_count
         f.read_exact(&mut u32buf)?;
         let block_count = u32::from_le_bytes(u32buf);
         if block_count == 0 {
             return Err(NvsError::InvalidBundle("block_count must be > 0"));
         }
-        // header size = 4 + block_count * 16
-        let header_size = 4u64 + (block_count as u64) * 16u64;
+        // header size = 8 (magic) + 4 + block_count * 16
+        let header_size = 8u64 + 4u64 + (block_count as u64) * 16u64;
         let total_size = fs::metadata(&meta_blocks_path)?.len();
         if total_size <= header_size {
             return Err(NvsError::InvalidBundle("meta.blocks too small for headers"));
@@ -130,10 +131,10 @@ impl Bundle {
         for _ in 0..block_count {
             let mut b = [0u8; 16];
             f.read_exact(&mut b)?;
-            let csz = u32::from_le_bytes(b[0..4].try_into().unwrap());
-            let dsz = u32::from_le_bytes(b[4..8].try_into().unwrap());
-            let dct = u32::from_le_bytes(b[8..12].try_into().unwrap());
-            let cod = u32::from_le_bytes(b[12..16].try_into().unwrap());
+            let csz = LE::read_u32(&b[0..4]);
+            let dsz = LE::read_u32(&b[4..8]);
+            let dct = LE::read_u32(&b[8..12]);
+            let cod = LE::read_u32(&b[12..16]);
             headers.push((csz, dsz, dct, cod));
         }
         let meta_blocks = unsafe { Mmap::map(&meta_blocks_file)? };
@@ -148,7 +149,13 @@ impl Bundle {
             4
         };
         let row_bytes = (manifest.dim as usize) * elem_size;
-        let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
+        let align = manifest
+            .files
+            .vectors
+            .row_alignment
+            .unwrap_or(64)
+            .max(1) as usize;
+        let aligned_row_bytes = ((row_bytes + align - 1) / align) * align;
         let expected = (manifest.num_docs as usize) * aligned_row_bytes;
         if vectors.len() != expected {
             return Err(NvsError::InvalidBundle("vectors size mismatch"));
@@ -209,7 +216,7 @@ impl Bundle {
 
     pub fn get_document(&self, doc_id: u32) -> Option<(String, String, String)> {
         let idx = *self.meta_idx.get(doc_id as usize)?;
-        let header_size = 4usize + (self.meta_block_count as usize) * 16usize;
+        let header_size = 8usize + 4usize + (self.meta_block_count as usize) * 16usize;
         let block_size = self.meta_block_size as usize;
         let base = &self.meta_blocks;
         let blocks_start = header_size;
@@ -316,12 +323,20 @@ impl Bundle {
         }
     }
 
+    /// Returns parsed JSON metadata directly for a document.
+    pub fn get_document_value(&self, doc_id: u32) -> Option<(String, String, serde_json::Value)> {
+        let (id, text, meta) = self.get_document(doc_id)?;
+        let v: serde_json::Value = serde_json::from_str(&meta).ok()?;
+        Some((id, text, v))
+    }
+
     // Hybrid search moved to vector_store + hybrid
 
     #[inline]
     pub(crate) fn row_stride_f32(&self) -> usize {
         let row_bytes = (self.manifest.dim as usize) * 4;
-        let aligned_row_bytes = row_bytes.div_ceil(64) * 64;
+        let align = self.vector_row_alignment();
+        let aligned_row_bytes = ((row_bytes + align - 1) / align) * align;
         aligned_row_bytes / 4
     }
 
@@ -329,10 +344,15 @@ impl Bundle {
 
     // Internal accessors for VectorStore
     pub(crate) fn vectors_as_f32(&self) -> &[f32] {
+        // Safety: only valid when dtype=f32
+        debug_assert!(self.manifest.embedding.dtype.eq_ignore_ascii_case("f32"));
         bytemuck::cast_slice(&self.vectors)
     }
     pub(crate) fn vectors_raw(&self) -> &[u8] {
         &self.vectors
+    }
+    pub(crate) fn vectors_dtype(&self) -> &str {
+        &self.manifest.embedding.dtype
     }
     #[allow(dead_code)]
     pub(crate) fn num_docs_usize(&self) -> usize {
@@ -349,7 +369,17 @@ impl Bundle {
             4
         };
         let row = (self.manifest.dim as usize) * elem;
-        ((row + 63) / 64) * 64
+        let align = self.vector_row_alignment();
+        ((row + align - 1) / align) * align
+    }
+    #[inline]
+    fn vector_row_alignment(&self) -> usize {
+        self.manifest
+            .files
+            .vectors
+            .row_alignment
+            .unwrap_or(64)
+            .max(1) as usize
     }
 
     // BM25 search has moved to crate::bm25
@@ -429,17 +459,18 @@ mod tests {
         let manifest = format!(
             r#"{{
   "format": "nvs.v1",
+  "endianness": "little",
   "num_docs": {},
   "dim": {},
   "embedding": {{"model": "test", "dtype": "f32"}},
   "bm25": {{"avgdl": 1.0, "k1": 1.2, "b": 0.75}},
   "files": {{
-    "vectors": {{"path": "vectors.f32", "dtype": "f32", "rows": {}, "cols": {}}},
+    "vectors": {{"path": "vectors.f32", "dtype": "f32", "rows": {}, "cols": {}, "row_alignment": 64}},
     "doclen": {{"path": "doclen.u32", "dtype": "u32", "rows": {}}},
     "lexicon": {{"path": "lexicon.bin"}},
     "postings": {{"path": "postings.bin"}},
     "terms": {{"path": "terms.dict"}},
-    "meta_idx": {{"path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size"}},
+    "meta_idx": {{"path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size, u32 reserved0"}},
     "meta": {{"path": "meta.blocks", "block_size": {}, "doc_aligned": true}}
   }}
 }}"#,
@@ -451,6 +482,8 @@ mod tests {
 
     fn write_meta_blocks(root: &Path, block_count: u32, block_size: u32) {
         let mut f = File::create(root.join("meta.blocks")).unwrap();
+        // magic + version, then block_count
+        f.write_all(nvs_format::META_BLOCKS_MAGIC).unwrap();
         f.write_all(&block_count.to_le_bytes()).unwrap();
         let hdr = [0u8; 16];
         for _ in 0..block_count {
@@ -464,16 +497,50 @@ mod tests {
 
     fn write_meta_idx(root: &Path, entries: usize) {
         let mut f = File::create(root.join("meta.idx")).unwrap();
+        // magic + version
+        f.write_all(nvs_format::META_IDX_MAGIC).unwrap();
         for _ in 0..entries {
             let entry = MetaIdxEntry {
                 block_id: 0,
                 offset_in_block: 0,
                 doc_size: 0,
-                padding: 0,
+                reserved0: 0,
             };
             let bytes: [u8; META_IDX_ENTRY_SIZE] = unsafe { std::mem::transmute(entry) };
             f.write_all(&bytes).unwrap();
         }
+    }
+
+    #[test]
+    fn open_fails_on_magic_mismatch() {
+        let dir = temp_dir("nvs_magic_bad");
+        write_manifest(&dir, 1, 4, 128);
+        // vectors OK
+        {
+            let row_bytes = 4 * 4;
+            let stride = ((row_bytes + 63) / 64) * 64;
+            let data = vec![0u8; stride];
+            let mut f = File::create(dir.join("vectors.f32")).unwrap();
+            f.write_all(&data).unwrap();
+        }
+        // doclen OK
+        {
+            let mut f = File::create(dir.join("doclen.u32")).unwrap();
+            f.write_all(&0u32.to_le_bytes()).unwrap();
+        }
+        touch(&dir, "lexicon.bin");
+        touch(&dir, "postings.bin");
+        touch(&dir, "terms.dict");
+        // write meta.idx without magic (bad)
+        {
+            let mut f = File::create(dir.join("meta.idx")).unwrap();
+            let entry = MetaIdxEntry { block_id: 0, offset_in_block: 0, doc_size: 0, reserved0: 0 };
+            let bytes: [u8; META_IDX_ENTRY_SIZE] = unsafe { std::mem::transmute(entry) };
+            f.write_all(&bytes).unwrap();
+        }
+        write_meta_blocks(&dir, 1, 128);
+        let res = Bundle::open(&dir);
+        assert!(res.is_err());
     }
 
     fn touch(root: &Path, name: &str) {
@@ -789,13 +856,15 @@ mod tests {
         File::create(dir.join("lexicon.bin")).unwrap();
         File::create(dir.join("postings.bin")).unwrap();
         File::create(dir.join("terms.dict")).unwrap();
-        // meta.blocks with 1 block and 2 docs
+        // meta.blocks with 1 block and 2 docs (with magic)
         let (id0, text0, meta0) = ("a", "text a", "{\"k\":1}");
         let (id1, text1, meta1) = ("b", "text b", "{\"k\":2}");
         let rec_size = |id: &str, tx: &str, mj: &str| 4 + id.len() + 4 + tx.len() + 4 + mj.len();
         let s0 = rec_size(id0, text0, meta0);
         let s1 = rec_size(id1, text1, meta1);
         let mut mb = Vec::<u8>::new();
+        // magic
+        mb.extend_from_slice(nvs_format::META_BLOCKS_MAGIC);
         // block_count = 1
         mb.extend_from_slice(&1u32.to_le_bytes());
         // header for block 0: [id, usize, dcount, pad]
@@ -816,7 +885,7 @@ mod tests {
         write_rec(id1, text1, meta1, &mut mb);
         // pad to block_size 128
         let block_size = 128usize;
-        let _header_size = 4 + 1 * 16;
+        let _header_size = 8 + 4 + 1 * 16;
         let data_len = s0 + s1;
         let pad_len = block_size - data_len;
         mb.extend(std::iter::repeat(0u8).take(pad_len));
@@ -826,6 +895,7 @@ mod tests {
         // meta.idx entries
         {
             let mut idx = Vec::<u8>::new();
+            idx.extend_from_slice(nvs_format::META_IDX_MAGIC);
             idx.extend_from_slice(&0u32.to_le_bytes());
             idx.extend_from_slice(&0u32.to_le_bytes());
             idx.extend_from_slice(&(s0 as u32).to_le_bytes());
@@ -1070,9 +1140,10 @@ mod tests {
             headers.push((block_id, cur_usize, cur_docs, 0));
             blocks.push(cur);
         }
-        // meta.blocks: write header and padded blocks
+        // meta.blocks: write magic, header and padded blocks
         {
             let mut f = File::create(dir.join("meta.blocks")).unwrap();
+            f.write_all(nvs_format::META_BLOCKS_MAGIC).unwrap();
             f.write_all(&(headers.len() as u32).to_le_bytes()).unwrap();
             for (id, usizeb, dcount, pad) in &headers {
                 f.write_all(&id.to_le_bytes()).unwrap();
@@ -1087,9 +1158,10 @@ mod tests {
                 }
             }
         }
-        // meta.idx
+        // meta.idx (magic + entries)
         {
             let mut f = File::create(dir.join("meta.idx")).unwrap();
+            f.write_all(nvs_format::META_IDX_MAGIC).unwrap();
             f.write_all(&idx).unwrap();
         }
         // manifest
@@ -1097,17 +1169,18 @@ mod tests {
             let manifest = format!(
                 r#"{{
   "format": "nvs.v1",
+  "endianness": "little",
   "num_docs": {},
   "dim": {},
   "embedding": {{"model": "test", "dtype": "f32"}},
   "bm25": {{"avgdl": 1.0, "k1": 1.2, "b": 0.75}},
   "files": {{
-    "vectors": {{"path": "vectors.f32", "dtype": "f32", "rows": {}, "cols": {}}},
+    "vectors": {{"path": "vectors.f32", "dtype": "f32", "rows": {}, "cols": {}, "row_alignment": 64}},
     "doclen": {{"path": "doclen.u32", "dtype": "u32", "rows": {}}},
     "lexicon": {{"path": "lexicon.bin"}},
     "postings": {{"path": "postings.bin"}},
     "terms": {{"path": "terms.dict"}},
-    "meta_idx": {{"path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size"}},
+    "meta_idx": {{"path": "meta.idx", "schema": "u32 block_id, u32 offset, u32 doc_size, u32 reserved0"}},
     "meta": {{"path": "meta.blocks", "block_size": {}, "doc_aligned": true}}
   }}
 }}"#,
@@ -1400,6 +1473,8 @@ mod tests {
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             let mut p = 0usize;
+            assert_eq!(&buf[p..p + 8], nvs_format::META_BLOCKS_MAGIC);
+            p += 8;
             let block_count = u32::from_le_bytes(buf[p..p + 4].try_into().unwrap()) as usize;
             p += 4;
             let mut hdrs = Vec::new();
@@ -1412,7 +1487,7 @@ mod tests {
                 hdrs.push((id, usizeb, dcount, pad));
             }
             let total_size = buf.len();
-            let header_size = 4 + block_count * 16;
+            let header_size = 8 + 4 + block_count * 16;
             let block_size = (total_size - header_size) / block_count;
             assert!(block_size > 0);
             let mut total_docs = 0usize;

@@ -78,14 +78,19 @@ fn golden_bundle_fields_no_embeddings_in_meta() {
     let dl_md = fs::metadata(output.join(&files.doclen.path)).unwrap();
     assert_eq!(dl_md.len(), manifest.num_docs * 4);
 
-    // meta.idx entries count equals num_docs and offsets within block
+    // meta.idx entries count equals num_docs (skip 8-byte magic)
     let idx_buf = fs::read(output.join(&files.meta_idx.path)).unwrap();
-    assert_eq!(idx_buf.len() % 16, 0);
-    assert_eq!(idx_buf.len() as u64 / 16, manifest.num_docs);
+    assert!(idx_buf.len() >= 8);
+    assert_eq!(&idx_buf[..8], b"NVSIDX\0\x01");
+    let payload = &idx_buf[8..];
+    assert_eq!(payload.len() % 16, 0);
+    assert_eq!(payload.len() as u64 / 16, manifest.num_docs);
 
     // Parse meta.blocks header and validate counts and a sample document
     let mbuf = fs::read(output.join(&files.meta.path)).unwrap();
     let mut p = 0usize;
+    assert_eq!(&mbuf[p..p + 8], b"NVSMETA\x01");
+    p += 8;
     let block_count = u32::from_le_bytes(mbuf[p..p + 4].try_into().unwrap()) as usize;
     p += 4;
     assert!(block_count >= 1);
@@ -113,7 +118,7 @@ fn golden_bundle_fields_no_embeddings_in_meta() {
 
     // Decode first block and verify meta JSON lacks embedding, but keeps other fields
     let (csize, dsize, _dcount, codec) = headers[0];
-    let header_bytes = 4 + block_count * 16;
+    let header_bytes = 8 + 4 + block_count * 16;
     let block0 = header_bytes;
     let slice = &mbuf[block0..block0 + block_size];
     let block = if codec == 1 {
@@ -149,7 +154,7 @@ fn golden_bundle_fields_no_embeddings_in_meta() {
 }
 
 fn inferred_block_size(buf: &[u8], block_count: usize) -> usize {
-    let header_size = 4 + block_count * 16;
+    let header_size = 8 + 4 + block_count * 16;
     (buf.len() - header_size) / block_count
 }
 

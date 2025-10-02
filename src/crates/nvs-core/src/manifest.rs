@@ -22,6 +22,8 @@ pub struct ManifestFilesEntry {
     pub cols: Option<u64>,
     #[serde(default)]
     pub schema: Option<String>,
+    #[serde(default)]
+    pub row_alignment: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +55,8 @@ pub struct ManifestBm25 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub format: String,
+    #[serde(default)]
+    pub endianness: Option<String>,
     pub num_docs: u64,
     pub dim: u64,
     pub embedding: ManifestEmbedding,
