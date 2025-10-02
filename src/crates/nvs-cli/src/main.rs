@@ -36,6 +36,8 @@ enum Commands {
     Stats(StatsArgs),
     /// Start interactive REPL (default when no subcommand is provided)
     Repl(ReplArgs),
+    /// Quick: embed a single chunks JSON, build a bundle, and run test queries
+    Quick(QuickArgs),
 }
 
 #[derive(Args, Debug)]
@@ -77,6 +79,28 @@ struct ReplArgs {
     /// Override embedding model used when querying
     #[arg(long = "model")]
     embed_model: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct QuickArgs {
+    /// Path to a chunks JSON file (array of {text, meta})
+    #[arg(long = "chunks", value_name = "FILE")]
+    chunks_file: PathBuf,
+    /// Output bundle directory
+    #[arg(short = 'o', long = "out", default_value = ".nvs-bundle-quick")]
+    out: PathBuf,
+    /// Quantization for vectors
+    #[arg(long = "quantize", default_value = "f32")]
+    quantize: String,
+    /// Compress metadata blocks
+    #[arg(long = "compress", default_value = "zstd")]
+    compress: String,
+    /// Model name to record in manifest
+    #[arg(long = "model", default_value = "gte-small-local")]
+    model: String,
+    /// Optional queries to run (repeatable). If none, derives keywords from the chunks file.
+    #[arg(long = "query", num_args=0.., value_name = "TEXT")]
+    queries: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -141,14 +165,23 @@ impl StoreState {
         if let Some(b) = &self.embed_backend {
             return Ok(b.clone());
         }
-        let model = self.embed_model.trim();
-        if model.is_empty() || model.eq_ignore_ascii_case("unknown") {
-            return Err(anyhow!(
-                "no embedding model configured—use `.set model <name>` or pass `--embed-model`"
-            ));
-        }
-        let backend = nvs_embed::OpenAIBackend::builder(model).build()?;
-        let arc: Arc<dyn EmbeddingBackend> = Arc::new(backend);
+        let choice = std::env::var("NVS_EMBED_BACKEND").unwrap_or_else(|_| "local".into());
+        // Prefer local backend for offline use; fall back to OpenAI only when requested.
+        let arc: Arc<dyn EmbeddingBackend> = if choice.eq_ignore_ascii_case("local") {
+            // Use local CPU backend; model name is not required for local.
+            let be = nvs_embed::LocalGTEBackendBuilder::new().build()?;
+            Arc::new(be)
+        } else {
+            // OpenAI backend path requires a model name.
+            let model = self.embed_model.trim();
+            if model.is_empty() || model.eq_ignore_ascii_case("unknown") {
+                return Err(anyhow!(
+                    "no embedding model configured—use `.set model <name>` or pass `--embed-model`"
+                ));
+            }
+            let be = nvs_embed::OpenAIBackend::builder(model).build()?;
+            Arc::new(be)
+        };
         self.embed_backend = Some(arc.clone());
         Ok(arc)
     }
@@ -195,8 +228,94 @@ fn main() -> Result<()> {
         Some(Commands::Repl(args)) => {
             run_repl_command(global_bundle.clone(), global_model.clone(), Some(args))
         }
+        Some(Commands::Quick(args)) => run_quick_command(args),
         None => run_repl_command(global_bundle.clone(), global_model.clone(), None),
     }
+}
+
+fn run_quick_command(args: QuickArgs) -> Result<()> {
+    use nvs_embed::{EmbedOptions, LocalGTEBackendBuilder};
+    use nvs_packer::writer::{write_checksums, write_manifest, write_meta_and_index, write_vectors};
+    use nvs_packer::bm25::write_bm25_and_terms;
+    use nvs_packer::loader::{read_docs_fast, Doc};
+
+    // Prepare paths
+    anyhow::ensure!(args.chunks_file.exists(), "chunks file not found: {}", args.chunks_file.display());
+    let work_dir = args.chunks_file.parent().unwrap_or(Path::new(".")).join(".nvs-quick");
+    std::fs::create_dir_all(&work_dir)?;
+    let docs_out = work_dir.join("docs.json");
+
+    // Local embed backend and embed chunks -> docs.json
+    let backend = LocalGTEBackendBuilder::new().build()?;
+    let rt = Runtime::new()?;
+    let opts = EmbedOptions { concurrency: num_cpus::get(), batch_size: 16, file_concurrency: 1, total_concurrency: num_cpus::get() };
+    rt.block_on(nvs_embed::embed_chunks_file_quiet(Arc::new(backend.clone()), &args.chunks_file, &docs_out, &opts))?;
+
+    // Pack bundle from docs.json in work dir
+    std::fs::create_dir_all(&args.out)?;
+    let (docs, _receipts) = read_docs_fast(&work_dir, 5_000_000)?;
+    anyhow::ensure!(!docs.is_empty(), "no docs produced by embed stage");
+    let dim = docs[0].embedding.len();
+    let docs: Vec<Doc> = docs.into_iter().filter(|d| d.embedding.len() == dim).collect();
+    write_vectors(&docs, dim, &args.out, &args.quantize)?;
+    let (avgdl, _terms, _postings_entries, _total_tokens, _bm_stats) = write_bm25_and_terms(&docs, &args.out, 0)?;
+    let block_size = 131_072usize;
+    let zstd_level = 3;
+    let _blocks = write_meta_and_index(&docs, block_size, &args.out, &args.compress, zstd_level, false)?;
+    let dtype = if args.quantize.eq_ignore_ascii_case("f16") { "f16" } else { "f32" };
+    write_manifest(&args.out, docs.len(), dim, block_size, avgdl, &args.model, dtype, &args.compress)?;
+    write_checksums(&args.out)?;
+
+    // Open and test queries
+    let store = nvs_core::VectorStore::from_bundle(nvs_core::Bundle::open(&args.out)?);
+    eprintln!("✔ Bundle ready at {} (docs={}, dim={})", args.out.display(), store.size(), store.dimensions());
+    let queries = if args.queries.is_empty() { derive_queries_from_chunks(&args.chunks_file, 4)? } else { args.queries };
+    let backend_q = LocalGTEBackendBuilder::new().build()?;
+    for q in queries.iter() {
+        let v = rt.block_on(backend_q.embed_batch(&[q.as_str()]))?;
+        let qv = &v[0];
+        let vs = store.search_vector(qv, 5);
+        let bm = store.search_bm25(q, 5);
+        let hy = store.search_hybrid(qv, q, 5, 0.6);
+        println!("\nQuery: {}", q);
+        print_hits("Vector", &store, &vs);
+        print_hits("BM25", &store, &bm);
+        print_hits("Hybrid", &store, &hy);
+    }
+    Ok(())
+}
+
+fn print_hits(label: &str, store: &nvs_core::VectorStore, hits: &[(u32, f32)]) {
+    println!("{}:", label);
+    for (rank, (id, score)) in hits.iter().enumerate() {
+        if let Some(doc) = store.get_document_value(*id) {
+            let title = doc.metadata.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let snippet = doc.text.chars().take(80).collect::<String>();
+            println!("  {:>2}. {:>5.3}  id={}  {}", rank+1, score, doc.id, title);
+            println!("      {}", snippet.replace('\n', " "));
+        }
+    }
+}
+
+fn derive_queries_from_chunks(path: &Path, k: usize) -> Result<Vec<String>> {
+    use std::io::Read;
+    use nvs_core::tokenizer::{preprocess_bm25, SimpleTokenizer, TokenizerOptions, bm25_normalize_token};
+    let mut s = String::new();
+    std::fs::File::open(path)?.read_to_string(&mut s)?;
+    let arr: Vec<serde_json::Value> = serde_json::from_str(&s)?;
+    let mut buf = String::new();
+    for v in arr.iter().take(8) {
+        if let Some(t) = v.get("text").and_then(|x| x.as_str()) { buf.push_str(t); buf.push(' '); }
+    }
+    let tok = SimpleTokenizer::with_options(TokenizerOptions{ lowercase:true, split_contractions:true, remove_stopwords:true, remove_punctuation:true });
+    let clean = preprocess_bm25(&buf);
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for t in tok.split(&clean) {
+        if let Some(norm) = bm25_normalize_token(&t) { *counts.entry(norm).or_insert(0) += 1; }
+    }
+    let mut items: Vec<(String, usize)> = counts.into_iter().collect();
+    items.sort_by(|a,b| b.1.cmp(&a.1));
+    Ok(items.into_iter().take(k).map(|(s,_)| s).collect())
 }
 
 fn run_query_command(

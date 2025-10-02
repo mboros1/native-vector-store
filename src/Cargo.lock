@@ -2320,8 +2320,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "num_cpus",
  "nvs-core",
  "nvs-embed",
+ "nvs-packer",
  "rustyline",
  "serde",
  "serde_json",

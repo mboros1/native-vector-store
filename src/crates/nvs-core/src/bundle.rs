@@ -149,9 +149,13 @@ impl Bundle {
             4
         };
         let row_bytes = (manifest.dim as usize) * elem_size;
-        let aligned_row_bytes = ((row_bytes + self.vector_row_alignment() - 1)
-            / self.vector_row_alignment())
-            * self.vector_row_alignment();
+        let align = manifest
+            .files
+            .vectors
+            .row_alignment
+            .unwrap_or(64)
+            .max(1) as usize;
+        let aligned_row_bytes = ((row_bytes + align - 1) / align) * align;
         let expected = (manifest.num_docs as usize) * aligned_row_bytes;
         if vectors.len() != expected {
             return Err(NvsError::InvalidBundle("vectors size mismatch"));
