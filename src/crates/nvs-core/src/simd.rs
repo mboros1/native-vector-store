@@ -44,11 +44,11 @@ pub fn dot_f32_f16(a: &[f32], row: &[u8], dim: usize) -> f32 {
     debug_assert!(row.len() >= dim * 2);
     #[cfg(target_arch = "x86_64")]
     {
-        if x86_avx2_fma::get() && x86_f16c::get() {
+        if x86_avx2_fma::get() && std::arch::is_x86_feature_detected!("f16c") {
             unsafe { return dot_f32_f16_avx2_fma_f16c(a, row, dim); }
-        } else if x86_avx2::get() && x86_f16c::get() {
+        } else if x86_avx2::get() && std::arch::is_x86_feature_detected!("f16c") {
             unsafe { return dot_f32_f16_avx2_f16c(a, row, dim); }
-        } else if x86_sse2::get() && x86_f16c::get() {
+        } else if x86_sse2::get() && std::arch::is_x86_feature_detected!("f16c") {
             unsafe { return dot_f32_f16_sse_f16c(a, row, dim); }
         }
         return dot_f32_f16_scalar(a, row, dim);
@@ -92,8 +92,6 @@ cpufeatures::new!(x86_avx2_fma, "avx2", "fma");
 cpufeatures::new!(x86_avx2, "avx2");
 #[cfg(target_arch = "x86_64")]
 cpufeatures::new!(x86_sse2, "sse2");
-#[cfg(target_arch = "x86_64")]
-cpufeatures::new!(x86_f16c, "f16c");
 
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
