@@ -47,8 +47,7 @@ local-embed-accel = [
 dev-bin = []
 
 # On macOS, enable Candle's Accelerate backend automatically when local-embed is used.
-[target.'cfg(target_os = "macos")'.dependencies]
-candle-core = { version = "0.9.1", optional = true, features = ["accelerate"] }
+# Accelerate backend is opt-in via the `local-embed-accel` feature; do not enable by default.
 
 [dev-dependencies]
 tempfile = "3"
