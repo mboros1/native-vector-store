@@ -16,7 +16,7 @@ pub struct MetaIdxEntry {
     pub reserved0: u32, // zero today; reserved for future use
 }
 
-pub const META_IDX_ENTRY_SIZE: usize = core::mem::size_of::<MetaIdxEntry>();
+pub const META_IDX_ENTRY_SIZE: usize = size_of::<MetaIdxEntry>();
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
