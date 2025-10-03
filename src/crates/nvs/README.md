@@ -14,11 +14,11 @@ nvs <INPUT> [--out BUNDLE_DIR] [--work DIR] [--quantize f32|f16] [--compress non
 
 Pipeline
 
-```
+```mermaid
 flowchart TD
   A[PDF/HTML] --> C[Chunk]
-  C --> E[Embed (local)] --> D[Docs JSON]
-  D --> P[Pack (nvs-packer)] --> B[(Bundle)]
+  C --> E[Embed] --> D[Docs JSON]
+  D --> P[Pack] --> B[(Bundle)]
   B --> V[Verify Open]
 ```
 

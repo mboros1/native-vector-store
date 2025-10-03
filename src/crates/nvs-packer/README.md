@@ -32,7 +32,7 @@ Binary layout highlights
 
 ```mermaid
 flowchart LR
-  Docs[JSON docs (text + metadata.embedding)] -->|write_vectors| Vec[vectors.f32/f16]
+  Docs["JSON docs (text + metadata.embedding)"] -->|write_vectors| Vec[vectors.f32/f16]
   Docs -->|write_bm25| Terms[terms.dict] & Lex[lexicon.bin] & Post[postings.bin] & DL[doclen.u32]
   Docs -->|write_meta_and_index| Meta[meta.blocks + meta.idx]
   Vec & Terms & Lex & Post & DL & Meta -->|write_manifest + checksums| Bundle[(Bundle dir)]

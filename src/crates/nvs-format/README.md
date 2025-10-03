@@ -20,11 +20,11 @@ Binary conventions
 
 Overview
 
-```
+```mermaid
 flowchart LR
-  MI[meta.idx (NVSIDX\x01)] -->|entries| Off[Offsets]
-  MB[meta.blocks (NVSMETA\x01)] -->|headers| H[Per‑block headers]
-  MB -->|payload| R[Length‑prefixed records]
+  MI["meta.idx (NVSIDX\x01)"] -->|entries| Off[Offsets]
+  MB["meta.blocks (NVSMETA\x01)"] -->|headers| H["Per-block headers"]
+  MB -->|payload| R["Length‑prefixed records"]
 ```
 
 License: MIT

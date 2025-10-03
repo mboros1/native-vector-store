@@ -18,7 +18,7 @@ nvs_pdf::write_chunks_json(path, &chunks, std::path::Path::new("/tmp/chunks.json
 
 Pipeline
 
-```
+```mermaid
 flowchart LR
   P[PDF] --> X[Extract text pages]
   X --> C[Chunk pages]

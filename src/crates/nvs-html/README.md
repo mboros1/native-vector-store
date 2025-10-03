@@ -18,7 +18,7 @@ nvs_html::write_chunks_json(path, &chunks, std::path::Path::new("/tmp/chunks.jso
 
 Pipeline
 
-```
+```mermaid
 flowchart LR
   H[HTML] --> X[Extract sections]
   X --> C[Chunk pages]
