@@ -13,6 +13,7 @@ Embedding backend
 
 - Defaults to local CPU backend when NVS_EMBED_BACKEND=local (recommended for offline use).
 - For OpenAI set NVS_EMBED_BACKEND=openai and pass --embed-model; requires OPENAI_API_KEY.
+- TODO: add other vendors, AWS Bedrock next I think
 
 Examples
 
@@ -31,11 +32,12 @@ nvs-cli Quick \
 
 Quick pipeline (high-level)
 
-```
+```mermaid
 flowchart LR
-  C[Chunks JSON {text, meta}] -->|embed (local)| D[Docs JSON {text, metadata.embedding}]
-  D -->|pack| B[(Bundle)]
-  B --> Q[Vector/BM25/Hybrid queries]
+C["Chunks JSON: text, meta"] -->|embed| D["Docs JSON: text, metadata.embedding"]
+D -->|pack| B(("Bundle"))
+B --> Q["Vector/BM25/Hybrid queries"]
+
 ```
 
 License: MIT
