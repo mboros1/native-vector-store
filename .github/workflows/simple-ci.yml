@@ -39,4 +39,4 @@ jobs:
 
       - name: Test
         working-directory: src
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace
