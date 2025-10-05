@@ -83,6 +83,7 @@ fn print_human(out: &DevcheckOut) {
     println!("OS/Arch   : {}/{}", out.cpu.os, out.cpu.arch);
     if let Some(b) = &out.cpu.brand { println!("CPU       : {}", b); }
     println!("Cores     : {}", out.cpu.logical_cores);
+    println!("Rustc     : {}", out.rustc_version);
     println!(
         "Features  : SSE4.2={} AVX2={} AVX512F={} NEON={} DOTPROD={}",
         out.cpu.features.sse4_2, out.cpu.features.avx2, out.cpu.features.avx512f,
