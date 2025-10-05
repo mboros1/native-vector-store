@@ -22,7 +22,6 @@ walkdir = "2"
 
 [features]
 default = []
-dev-bin = []
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["html_reports"] }
@@ -35,4 +34,3 @@ harness = false
 [[bin]]
 name = "chunk-html-cli"
 path = "src/bin/chunk-html-cli.rs"
-required-features = ["dev-bin"]

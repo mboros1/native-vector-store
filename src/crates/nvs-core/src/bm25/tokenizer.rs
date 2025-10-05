@@ -261,13 +261,9 @@ fn strip_possessive(s: &str) -> &str {
     s
 }
 
-pub fn bm25_keep_token(mut tok: &str) -> bool {
-    if tok.is_empty() {
-        return false;
-    }
-    // Trim common leading/trailing punctuation
-    fn is_trim_punct(c: char) -> bool {
-        matches!(
+// Trim common leading/trailing punctuation
+fn is_trim_punct(c: char) -> bool {
+    matches!(
             c,
             '.' | ','
                 | ';'
@@ -295,6 +291,11 @@ pub fn bm25_keep_token(mut tok: &str) -> bool {
                 | '`'
                 | '|'
         )
+}
+
+pub fn bm25_keep_token(mut tok: &str) -> bool {
+    if tok.is_empty() {
+        return false;
     }
     tok = tok.trim_matches(is_trim_punct);
     if tok.len() < 2 {
@@ -313,38 +314,7 @@ pub fn bm25_keep_token(mut tok: &str) -> bool {
     if tok.contains("---") {
         return false;
     }
-    let mut has_ascii_letter = false;
-    let mut upper_seq_only = true;
-    for ch in tok.chars() {
-        if ch.is_ascii_alphabetic() {
-            has_ascii_letter = true;
-        }
-        if !matches!(
-            ch,
-            'A' | 'C'
-                | 'D'
-                | 'E'
-                | 'F'
-                | 'G'
-                | 'H'
-                | 'I'
-                | 'K'
-                | 'L'
-                | 'M'
-                | 'N'
-                | 'P'
-                | 'Q'
-                | 'R'
-                | 'S'
-                | 'T'
-                | 'V'
-                | 'W'
-                | 'Y'
-                | '-'
-        ) {
-            upper_seq_only = false;
-        }
-    }
+    let (upper_seq_only, has_ascii_letter) = is_upper_only_or_has_ascii_letter(tok);
     if has_ascii_letter {
         // Drop long amino-acid sequence-like tokens
         if upper_seq_only && tok.len() >= 10 {
@@ -363,63 +333,9 @@ pub fn bm25_keep_token(mut tok: &str) -> bool {
     false
 }
 
-// Return a normalized token for BM25 (trim punctuation, strip possessive), or None to drop.
-pub fn bm25_normalize_token(tok: &str) -> Option<String> {
-    if tok.is_empty() {
-        return None;
-    }
-    // Drop tokens with triple hyphens anywhere (formatting/artifacts)
-    if tok.contains("---") {
-        return None;
-    }
-    fn is_trim_punct(c: char) -> bool {
-        matches!(
-            c,
-            '.' | ','
-                | ';'
-                | ':'
-                | '"'
-                | '\''
-                | '('
-                | ')'
-                | '['
-                | ']'
-                | '{'
-                | '}'
-                | '!'
-                | '?'
-                | '%'
-                | '+'
-                | '-'
-                | '/'
-                | '\\'
-                | '*'
-                | '&'
-                | '#'
-                | '@'
-                | '~'
-                | '`'
-                | '|'
-        )
-    }
-    let mut s = tok.trim_matches(is_trim_punct);
-    if s.is_empty() {
-        return None;
-    }
-    s = strip_possessive(s);
-    if s.len() < 2 {
-        return None;
-    }
-    // Normalize case by caller; still apply filters
-    if s.len() >= 4 && s.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") {
-        return None;
-    }
-    if s.contains("---") {
-        return None;
-    }
-    // Check letters and AA-sequence drop
-    let mut has_ascii_letter = false;
+fn is_upper_only_or_has_ascii_letter(s: &str) -> (bool, bool) {
     let mut upper_seq_only = true;
+    let mut has_ascii_letter = false;
     for ch in s.chars() {
         if ch.is_ascii_alphabetic() {
             has_ascii_letter = true;
@@ -450,6 +366,35 @@ pub fn bm25_normalize_token(tok: &str) -> Option<String> {
             upper_seq_only = false;
         }
     }
+    (upper_seq_only, has_ascii_letter)
+}
+
+// Return a normalized token for BM25 (trim punctuation, strip possessive), or None to drop.
+pub fn bm25_normalize_token(tok: &str) -> Option<String> {
+    if tok.is_empty() {
+        return None;
+    }
+    // Drop tokens with triple hyphens anywhere (formatting/artifacts)
+    if tok.contains("---") {
+        return None;
+    }
+    let mut s = tok.trim_matches(is_trim_punct);
+    if s.is_empty() {
+        return None;
+    }
+    s = strip_possessive(s);
+    if s.len() < 2 {
+        return None;
+    }
+    // Normalize case by caller; still apply filters
+    if s.len() >= 4 && s.as_bytes()[0..4].eq_ignore_ascii_case(b"utm_") {
+        return None;
+    }
+    if s.contains("---") {
+        return None;
+    }
+    // Check letters and AA-sequence drop
+    let (upper_seq_only, has_ascii_letter) = is_upper_only_or_has_ascii_letter(s);
     if has_ascii_letter {
         if upper_seq_only && s.len() >= 10 {
             return None;
