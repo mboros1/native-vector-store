@@ -267,7 +267,7 @@ fn run_quick_command(args: QuickArgs) -> Result<()> {
     write_checksums(&args.out)?;
 
     // Open and test queries
-    let store = nvs_core::VectorStore::from_bundle(nvs_core::Bundle::open(&args.out)?);
+    let store = VectorStore::from_bundle(Bundle::open(&args.out)?);
     eprintln!("✔ Bundle ready at {} (docs={}, dim={})", args.out.display(), store.size(), store.dimensions());
     let queries = if args.queries.is_empty() { derive_queries_from_chunks(&args.chunks_file, 4)? } else { args.queries };
     let backend_q = LocalGTEBackendBuilder::new().build()?;
@@ -285,7 +285,7 @@ fn run_quick_command(args: QuickArgs) -> Result<()> {
     Ok(())
 }
 
-fn print_hits(label: &str, store: &nvs_core::VectorStore, hits: &[(u32, f32)]) {
+fn print_hits(label: &str, store: &VectorStore, hits: &[(u32, f32)]) {
     println!("{}:", label);
     for (rank, (id, score)) in hits.iter().enumerate() {
         if let Some(doc) = store.get_document_value(*id) {

@@ -15,7 +15,6 @@ default = []
 pdfium = ["dep:pdfium-render", "pdfium-render/pdfium_latest"]
 pdfium-bundled = ["pdfium"]
 pdfium-system = ["pdfium"]
-dev-bin = []
 
 [dependencies]
 pdfium-render = { version = "0.8.35", optional = true }
@@ -44,4 +43,3 @@ harness = false
 [[bin]]
 name = "chunk-pdf-cli"
 path = "src/bin/chunk-pdf-cli.rs"
-required-features = ["dev-bin"]

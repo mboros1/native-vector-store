@@ -45,37 +45,37 @@ The manifest declares the bundle format and file locations. The reader validates
 
 ## File Layouts
 
-- `vectors.*`:
-  - `num_docs` rows, each `dim * sizeof(dtype)` bytes, padded to `files.vectors.row_alignment` bytes (default 64). DType is `f32` or `f16`.
+Below is a concise description of each binary file and its role. All integers are little‑endian. Vector rows are padded to the alignment declared in the manifest (default 64 bytes).
 
-- `doclen.u32`:
-  - `num_docs` elements (`u32`).
+- `vectors.*`
+  - `num_docs` rows, each `dim * sizeof(dtype)` bytes, padded to `files.vectors.row_alignment`. `dtype` is `f32` or `f16`.
+  - Row alignment enables efficient SIMD scans; readers widen `f16` rows to `f32` in‑register when scoring.
 
-- `terms.dict`:
-  - Repeated: `<u32 len>` + `len` bytes raw term string.
+- `doclen.u32`
+  - Dense `u32` array of length `num_docs` holding document token counts after tokenization. Used in BM25 normalization alongside `bm25.avgdl`/`k1`/`b` from the manifest.
 
-- `lexicon.bin`:
-  - Array of `{ u64 offset, u32 length, u32 df }` (no padding between entries), in the same order as terms in `terms.dict`.
+- `terms.dict`
+  - Term dictionary as repeated `[u32 len][bytes…]` entries in lexical order. The term’s position implies its term ID and aligns 1:1 with entries in `lexicon.bin`.
 
-- `postings.bin`:
-  - For each term: `length` pairs of `{ u32 delta_docid, u32 term_freq }`. `docid` reconstructed via prefix sum of deltas.
+- `lexicon.bin`
+  - Array of 16‑byte entries `{ u64 offset, u32 length, u32 df }` parallel to `terms.dict`.
+  - `offset` indexes into `postings.bin`; `length` is the number of postings for the term; `df` is document frequency.
 
-- `meta.blocks`:
-  - Magic (8 bytes): `NVSMETA\x01`.
-  - Header: `u32 block_count`.
-  - Block headers: `block_count` entries of 4x`u32` `{ comp_size, decomp_size, doc_count, codec }`, where:
-    - `codec`: 0 = none, 1 = zstd
-    - If `codec = 1`, `comp_size` is the actual compressed size before padding; if `codec = 0`, `comp_size == decomp_size`.
-    - `decomp_size` = valid unpadded bytes for the block (sum of packed records), `<= block_size`.
-  - Payload: `block_count` blocks, each of size exactly `files.meta.block_size` bytes; compressed payloads are zero-padded to this size.
-  - Document record: `[u32 id_len][id][u32 text_len][text][u32 meta_len][metadata_json]` (concatenated).
+- `postings.bin`
+  - Concatenated inverted lists. For each term, `length` pairs `{ u32 delta_docid, u32 term_freq }` are stored.
+  - Readers reconstruct absolute doc IDs via prefix sum over deltas and compute BM25 scores using `doclen.u32` and manifest BM25 params.
 
-- `meta.idx`:
-  - Magic (8 bytes): `NVSIDX\0\x01`.
-  - Payload: array of 4x`u32` entries `{ block_id, offset_in_block, doc_size, reserved0 }` for each `doc_id` in `[0..num_docs)`.
+- `meta.blocks`
+  - Header: magic (8 bytes) `NVSMETA\x01`, then `u32 block_count`, followed by `block_count` headers of 16 bytes `{ comp_size, decomp_size, doc_count, codec }`.
+  - Payload: `block_count` fixed‑size blocks of `files.meta.block_size` bytes. If `codec=1` (zstd), the first `comp_size` bytes are compressed data; the rest is padding. `decomp_size` is the valid unpadded data in the block (sum of records).
+  - Each record within a (decompressed) block is `[u32 id_len][id][u32 text_len][text][u32 meta_len][metadata_json]`.
 
-- `checksums.xxhash64`:
-  - One line per bundle file: `<16-hex-digits>␠␠<filename>` using xxhash64.
+- `meta.idx`
+  - Header: magic (8 bytes) `NVSIDX\x01`.
+  - Payload: `num_docs` entries, each 16 bytes `{ u32 block_id, u32 offset_in_block, u32 doc_size, u32 reserved0 }`, mapping logical doc IDs to their record location in `meta.blocks`.
+
+- `checksums.xxhash64`
+  - One line per file: `<16-hex-digits>␠␠<filename>` using xxhash64 for quick integrity verification.
 
 ## Reader Rules
 
