@@ -46,6 +46,18 @@ Workspace manifest: `src/Cargo.toml`.
 
 Enable backtraces when debugging: `RUST_BACKTRACE=1 cargo test`.
 
+### One-shot CLI (embedded model)
+
+Build a single binary of `nvs-cli` with the local GTE-small model embedded, requiring no external model files or network:
+
+`cargo build -p nvs-cli --manifest-path src/Cargo.toml --features embed-model --release`
+
+Notes:
+- Increases the binary size by ~70–75 MB.
+- On first run, the embedded files are written to a small cache directory and memory-mapped for performance (`$TMPDIR/nvs_embed_gte_small` by default; override with `NVS_EMBED_CACHE_DIR`).
+- To use on-disk model files instead (smaller binary), omit the feature and ensure `src/models/gte-small` exists or set `NVS_LOCAL_EMBED_MODEL_DIR`.
+- To allow auto-download from Hugging Face Hub when local files are missing, build with `--features hub-fetch` (no embedding).
+
 ## nvs-packer (CLI)
 
 Pack JSON docs (with embeddings) into a Native Vector Store bundle.

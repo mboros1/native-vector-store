@@ -16,3 +16,10 @@ nvs-core = { path = "../nvs-core" }
 nvs-embed = { path = "../nvs-embed" }
 nvs-packer = { path = "../nvs-packer" }
 num_cpus = "1"
+
+[features]
+default = []
+# Build a single CLI binary with the local GTE-small model embedded.
+embed-model = ["nvs-embed/embed-model"]
+# Allow auto-fetch of model files from HF Hub when not present locally.
+hub-fetch = ["nvs-embed/hub-fetch"]
