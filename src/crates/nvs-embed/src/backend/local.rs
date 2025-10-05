@@ -7,9 +7,39 @@ use std::sync::Arc;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert;
+#[cfg(feature = "hf-hub")]
 use hf_hub::api::sync::Api;
 use tokenizers::parallelism::set_parallelism;
 use tokenizers::{PaddingParams, Tokenizer, TruncationParams};
+
+#[cfg(feature = "embed-model")]
+const EMBED_TOKENIZER_BYTES: &[u8] = include_bytes!(
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/gte-small/tokenizer.json")
+);
+#[cfg(feature = "embed-model")]
+const EMBED_CONFIG_BYTES: &[u8] = include_bytes!(
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/gte-small/config.json")
+);
+#[cfg(feature = "embed-model")]
+const EMBED_WEIGHTS_BYTES: &[u8] = include_bytes!(
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/gte-small/model.safetensors")
+);
+
+#[cfg(feature = "embed-model")]
+fn write_embedded_model_to_cache() -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf)> {
+    use std::fs;
+    let root = std::env::var_os("NVS_EMBED_CACHE_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("nvs_embed_gte_small"));
+    fs::create_dir_all(&root)?;
+    let tok = root.join("tokenizer.json");
+    let cfg = root.join("config.json");
+    let wts = root.join("model.safetensors");
+    if !tok.exists() { fs::write(&tok, EMBED_TOKENIZER_BYTES)?; }
+    if !cfg.exists() { fs::write(&cfg, EMBED_CONFIG_BYTES)?; }
+    if !wts.exists() { fs::write(&wts, EMBED_WEIGHTS_BYTES)?; }
+    Ok((tok, wts, cfg))
+}
 
 #[derive(Debug, Clone)]
 pub struct LocalGTEBackendBuilder {
@@ -34,11 +64,41 @@ impl LocalGTEBackendBuilder {
     }
     pub fn build(self) -> Result<LocalGTEBackend> {
         let device = Device::Cpu;
-        let model_id = self.model_id.clone();
         // Enable parallel tokenization
         set_parallelism(true);
         // Allow offline override via env dir containing tokenizer.json, model.safetensors, config.json
         let (tokenizer_path, weights_path, config_path) = {
+            // 0) Embedded model (highest priority when enabled)
+            #[cfg(feature = "embed-model")]
+            {
+                if let Ok(paths) = write_embedded_model_to_cache() {
+                    eprintln!("  · using embedded GTE-small model bytes (cached to temp dir)");
+                    return Ok(LocalGTEBackend {
+                        inner: {
+                            let (tokenizer_path, weights_path, config_path) = paths.clone();
+                            // Load tokenizer directly from file path for compatibility
+                            let mut tokenizer = Tokenizer::from_file(tokenizer_path)
+                                .map_err(|e| anyhow!("failed to load tokenizer.json: {}", e))?;
+                            tokenizer.with_padding(Some(PaddingParams::default()));
+                            if let Err(e) = tokenizer.with_truncation(Some(TruncationParams {
+                                max_length: self.max_len,
+                                ..Default::default()
+                            })) {
+                                return Err(anyhow!("failed to enable truncation: {}", e));
+                            }
+                            let config_file = File::open(&config_path)?;
+                            let config: bert::Config = serde_json::from_reader(config_file)
+                                .context("bad BERT config.json")?;
+                            let vb = unsafe {
+                                VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)?
+                            };
+                            let model = bert::BertModel::load(vb, &config)?;
+                            Arc::new(Inner { tokenizer, model, device })
+                        },
+                        max_len: self.max_len,
+                    });
+                }
+            }
             // 1) Env override
             if let Ok(dir) = std::env::var("NVS_LOCAL_EMBED_MODEL_DIR") {
                 let p = std::path::PathBuf::from(dir);
@@ -67,27 +127,35 @@ impl LocalGTEBackendBuilder {
                     eprintln!("  · found local model files in: {}", dir.display());
                     paths
                 } else {
-                    // 3) Fetch/cached files from HF Hub
-                    eprintln!(
-                        "  · local model files not found; falling back to HF Hub fetch for {}",
-                        model_id
-                    );
-                    let api = Api::new()?;
-                    let repo = api.model(model_id.clone());
-                    let tok = repo
-                        .get("tokenizer.json")
-                        .with_context(|| format!("missing tokenizer.json in {}", model_id))?;
-                    let wts = repo
-                        .get("model.safetensors")
-                        .with_context(|| format!("missing model.safetensors in {}", model_id))?;
-                    let cfg = repo
-                        .get("config.json")
-                        .with_context(|| format!("missing config.json in {}", model_id))?;
-                    (tok, wts, cfg)
+                    // 3) Fetch/cached files from HF Hub if enabled
+                    #[cfg(feature = "hf-hub")]
+                    {
+                        eprintln!(
+                            "  · local model files not found; falling back to HF Hub fetch for {}",
+                            self.model_id
+                        );
+                        let api = Api::new()?;
+                        let repo = api.model(self.model_id.clone());
+                        let tok = repo
+                            .get("tokenizer.json")
+                            .with_context(|| format!("missing tokenizer.json in {}", self.model_id))?;
+                        let wts = repo
+                            .get("model.safetensors")
+                            .with_context(|| format!("missing model.safetensors in {}", self.model_id))?;
+                        let cfg = repo
+                            .get("config.json")
+                            .with_context(|| format!("missing config.json in {}", self.model_id))?;
+                        (tok, wts, cfg)
+                    }
+                    #[cfg(not(feature = "hf-hub"))]
+                    {
+                        anyhow::bail!(
+                            "local model files not found and HF Hub fetch is disabled. Set NVS_LOCAL_EMBED_MODEL_DIR or place tokenizer.json, config.json, model.safetensors under src/models/gte-small, or enable feature 'hub-fetch'."
+                        );
+                    }
                 }
             }
         };
-
         // Load tokenizer
         let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| anyhow!("failed to load tokenizer.json: {}", e))?;
@@ -101,18 +169,12 @@ impl LocalGTEBackendBuilder {
 
         // Load config & weights
         let config_file = File::open(&config_path)?;
-        let config: bert::Config =
-            serde_json::from_reader(config_file).context("bad BERT config.json")?;
-        let vb =
-            unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
+        let config: bert::Config = serde_json::from_reader(config_file).context("bad BERT config.json")?;
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[weights_path], DType::F32, &device)? };
         let model = bert::BertModel::load(vb, &config)?;
 
         Ok(LocalGTEBackend {
-            inner: Arc::new(Inner {
-                tokenizer,
-                model,
-                device,
-            }),
+            inner: Arc::new(Inner { tokenizer, model, device }),
             max_len: self.max_len,
         })
     }

@@ -13,6 +13,7 @@ members = [
     "crates/nvs",
     "crates/nvs-lambda-sample",
     "crates/tiny-search-engine",
+    "crates/devcheck",
 ]
 
 resolver = "2"
