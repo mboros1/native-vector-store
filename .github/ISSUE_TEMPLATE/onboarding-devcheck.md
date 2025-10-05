@@ -35,19 +35,12 @@ Checklist
 - [ ] `cargo build --workspace` succeeded
 - [ ] `cargo test --workspace` succeeded
 
-Paste outputs here
+Paste output here
 
 ```
-<paste devcheck human output>
-```
-
-Optional JSON
-
-```
-<paste devcheck JSON output>
+<devcheck human output>
 ```
 
 Notes (optional)
 
 - Anything unusual about your setup (VM, WSL, Rosetta, etc.)
-- Output from `rustc --version` if JSON shows unknown

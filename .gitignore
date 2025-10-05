@@ -62,3 +62,5 @@ nvs-bundle/
 
 vsx.json
 vsx.ndjson
+devcheck.human.out
+devcheck.json.out
