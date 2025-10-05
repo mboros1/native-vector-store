@@ -119,10 +119,11 @@ fn gather_cpu() -> CpuInfo {
     let (brand, features) = {
         let cpuid = raw_cpuid::CpuId::new();
         let brand = cpuid.get_processor_brand_string().map(|b| b.as_str().trim().to_string());
-        let f = cpuid.get_extended_feature_info();
         let sse42 = cpuid.get_feature_info().map(|fi| fi.has_sse42()).unwrap_or(false);
-        let avx2 = f.map(|ef| ef.has_avx2()).unwrap_or(false);
-        let avx512f = f.map(|ef| ef.has_avx512f()).unwrap_or(false);
+        let (avx2, avx512f) = cpuid
+            .get_extended_feature_info()
+            .map(|ef| (ef.has_avx2(), ef.has_avx512f()))
+            .unwrap_or((false, false));
         let ff = FeatureFlags { sse4_2: sse42, avx2, avx512f, ..Default::default() };
         (brand, ff)
     };
