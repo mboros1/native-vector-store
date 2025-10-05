@@ -33,9 +33,10 @@ Workspace manifest: `src/Cargo.toml`.
 
 - Rust: latest stable toolchain (Edition 2021). Install with `rustup`.
 - macOS/Linux are primary targets; Windows may work but isn’t validated yet.
-- For PDF features (optional):
+- For mature PDF toolchain (optional):
   - Bundled PDFium download requires `curl` and `tar` available on PATH.
   - System PDFium requires the library installed and discoverable (see below).
+  - Note: fully optional! Rust native PDF parser implementation in `nvs-pdf-core` is the default; much better performance than PDFium but has some font/rendering errors.
 
 ## Building Crates
 
